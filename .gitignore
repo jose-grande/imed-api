@@ -1,0 +1,31 @@
+# .NET build outputs
+bin/
+obj/
+out/
+publish/
+*.user
+*.suo
+
+# Rider / VS
+.idea/
+.vs/
+*.DotSettings.user
+
+# Coverage
+coverage/
+*.coverage
+*.coveragexml
+TestResults/
+
+# NuGet
+*.nupkg
+*.snupkg
+nuget.exe
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (prohibido comitear)
+appsettings.*.local.json
+secrets.json

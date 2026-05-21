@@ -1,0 +1,22 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.{cs,csx,vb,vbx}]
+indent_size = 4
+# Modern C#
+csharp_prefer_braces = true:warning
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+dotnet_sort_system_directives_first = true
+
+[*.{csproj,props,targets,json}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false

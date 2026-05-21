@@ -1,0 +1,10 @@
+# Migrations son archivos generados por `dotnet ef migrations add`.
+# No tiene sentido pelearse con el output del tooling para micro-optimizaciones.
+# Las reglas suprimidas acá NO son "ignorar bugs": son disable de analyzers que
+# proponen refactors estilísticos sobre código que el dev nunca toca a mano.
+
+[*.cs]
+# CA1861: Avoid constant arrays as arguments. EF genera `new[] { "col1", "col2" }`
+# en CreateIndex con columnas múltiples; convertirlos a static readonly fields
+# rompería el patrón generado.
+dotnet_diagnostic.CA1861.severity = none

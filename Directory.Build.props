@@ -1,0 +1,34 @@
+<Project>
+  <!--
+    Common settings aplicados a TODOS los proyectos de la solución.
+    Ver https://learn.microsoft.com/en-us/visualstudio/msbuild/customize-your-build
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Warnings estrictos en CI y local. Nada de silent ignores. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!--
+      Suprimir analizadores de performance del logging (CA1848/CA1873).
+      Requieren adoptar LoggerMessage source generators — buena idea a futuro
+      pero micro-optimización innecesaria en MVP. Reconsiderar cuando se
+      mida carga real y se adopte el patrón de forma consistente.
+    -->
+    <NoWarn>$(NoWarn);CA1848;CA1873</NoWarn>
+
+    <!-- Deterministic builds -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- Metadata -->
+    <Authors>IMed</Authors>
+    <Company>IMed</Company>
+    <Product>IMed EMD</Product>
+    <Copyright>© IMed</Copyright>
+  </PropertyGroup>
+</Project>

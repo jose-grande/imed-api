@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Tests no fuerzan TreatWarningsAsErrors: los tests usan patrones (any types
+         en mocks, expression branches no-op) que no aportan valor pelearse. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1861;CA1859;CA1812</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\IMed.Api.WebApi\IMed.Api.WebApi.csproj" />
+    <ProjectReference Include="..\..\src\IMed.Api.Infrastructure\IMed.Api.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\IMed.Api.Application\IMed.Api.Application.csproj" />
+    <ProjectReference Include="..\..\src\IMed.Api.Domain\IMed.Api.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="WireMock.Net" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Fixtures de catálogos (TSV/CSV) usados por seeders de tests. Copy-to-output
+         para que los tests resuelvan la ruta relativa al .dll de tests. -->
+    <Content Include="Fixtures\**\*.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Fixtures\**\*.csv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

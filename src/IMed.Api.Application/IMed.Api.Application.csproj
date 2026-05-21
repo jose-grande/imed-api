@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Application: casos de uso, DTOs, puertos (interfaces).
+    Dep: Domain. Sin deps a Infrastructure.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\IMed.Api.Domain\IMed.Api.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,4 @@
+"LOINC_NUM","COMPONENT","PROPERTY","TIME_ASPCT","SYSTEM","SCALE_TYP","METHOD_TYP","CLASS","SHORTNAME","LONG_COMMON_NAME","RELATEDNAMES2","LinguisticVariantDisplayName"
+"718-7","Hemoglobina","MCnc","Punto temporal","Sangre","Cuantitativo","","","Hb Sg","Hemoglobina [Masa/volumen] en Sangre (España)","",""
+"4544-3","Hematocrito","VFr","Punto temporal","Sangre","Cuantitativo","","","Hcto Sg","Hematocrito [Fracción de volumen] en Sangre (España)","",""
+"2345-7","Glucosa","MCnc","Punto temporal","Suero/Plasma","Cuantitativo","","","Glc SerPl","Glucosa [Masa/volumen] en Suero o Plasma (España)","",""

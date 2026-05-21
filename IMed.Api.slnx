@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/IMed.Api.Application/IMed.Api.Application.csproj" />
+    <Project Path="src/IMed.Api.Domain/IMed.Api.Domain.csproj" />
+    <Project Path="src/IMed.Api.Infrastructure/IMed.Api.Infrastructure.csproj" />
+    <Project Path="src/IMed.Api.WebApi/IMed.Api.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/IMed.Api.IntegrationTests/IMed.Api.IntegrationTests.csproj" />
+  </Folder>
+</Solution>
