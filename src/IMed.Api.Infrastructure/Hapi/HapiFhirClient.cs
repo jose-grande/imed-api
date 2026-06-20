@@ -2083,6 +2083,813 @@ public sealed class HapiFhirClient(
         return items;
     }
 
+    // ===================== LIS-3: Specimen / Provenance / externo =====================
+
+    private const string AccessionSystem = "http://imed.local/lab/accession";
+    private const string ExternalPractitionerSystem = "http://imed.local/practitioner/external";
+
+    public async Task<string> CreateSpecimenAsync(
+        UpsertSpecimenRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await EnsureBearerAsync(cancellationToken);
+
+        var payload = BuildSpecimenPayload(request);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "Specimen")
+        {
+            Content = JsonContent.Create(payload, options: FhirJson)
+        };
+        httpRequest.Headers.Add(TenantPartitionHeader, request.PartitionName);
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError("POST /fhir/Specimen falló. Status={Status}, Body={Body}", (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
+
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        var id = doc.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("HAPI devolvió un Specimen sin `id`.");
+        logger.LogInformation("Specimen creado id={Id}, accession={Acc}, partition={P}",
+            id, request.AccessionNumber, request.PartitionName);
+        return id;
+    }
+
+    public async Task<SpecimenSnapshot?> GetSpecimenAsync(
+        string specimenFhirId, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(specimenFhirId))
+        {
+            throw new ArgumentException("specimenFhirId es obligatorio.", nameof(specimenFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"Specimen/{specimenFhirId}");
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        resp.EnsureSuccessStatusCode();
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return ParseSpecimenSnapshot(doc);
+    }
+
+    public async Task<IReadOnlyList<SpecimenSnapshot>> SearchSpecimensByPatientAsync(
+        string patientFhirId, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(patientFhirId))
+        {
+            throw new ArgumentException("patientFhirId es obligatorio.", nameof(patientFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        var url = $"Specimen?subject=Patient/{Uri.EscapeDataString(patientFhirId)}&_count=100";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var bundle = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+
+        var results = new List<SpecimenSnapshot>();
+        if (bundle.TryGetProperty("entry", out var entries) && entries.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (entry.TryGetProperty("resource", out var res))
+                {
+                    var snap = ParseSpecimenSnapshot(res);
+                    if (snap is not null)
+                    {
+                        results.Add(snap);
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    public async Task<string> CreateProvenanceAsync(
+        CreateProvenanceRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await EnsureBearerAsync(cancellationToken);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["resourceType"] = "Provenance",
+            ["target"] = new object[] { new { reference = request.TargetReference } },
+            ["recorded"] = request.Recorded,
+            ["activity"] = new
+            {
+                coding = new object[]
+                {
+                    new
+                    {
+                        system = "http://terminology.hl7.org/CodeSystem/v3-DataOperation",
+                        code = request.ActivityCode,
+                        display = request.ActivityDisplay
+                    }
+                }
+            },
+            ["agent"] = new object[] { new { who = new { reference = request.AgentWhoReference } } },
+        };
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "Provenance")
+        {
+            Content = JsonContent.Create(payload, options: FhirJson)
+        };
+        httpRequest.Headers.Add(TenantPartitionHeader, request.PartitionName);
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError("POST /fhir/Provenance falló. Status={Status}, Body={Body}", (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return doc.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("HAPI devolvió un Provenance sin `id`.");
+    }
+
+    public async Task<string> CreateExternalPractitionerAsync(
+        ExternalPractitionerRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.FullName))
+        {
+            throw new ArgumentException("FullName es obligatorio.", nameof(request));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        var identifiers = new List<object>
+        {
+            new { system = ExternalPractitionerSystem, value = ExternalSlug(request.FullName) }
+        };
+        if (!string.IsNullOrWhiteSpace(request.Identifier))
+        {
+            identifiers.Add(new { system = ExternalPractitionerSystem + "/id", value = request.Identifier.Trim() });
+        }
+        var payload = new Dictionary<string, object?>
+        {
+            ["resourceType"] = "Practitioner",
+            ["active"] = true,
+            ["name"] = new object[] { new { text = request.FullName.Trim() } },
+            ["identifier"] = identifiers.ToArray(),
+        };
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "Practitioner")
+        {
+            Content = JsonContent.Create(payload, options: FhirJson)
+        };
+        httpRequest.Headers.Add(TenantPartitionHeader, request.PartitionName);
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError("POST /fhir/Practitioner (externo) falló. Status={Status}, Body={Body}", (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return doc.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("HAPI devolvió un Practitioner sin `id`.");
+    }
+
+    public async Task<string?> FindExternalPractitionerByNameAsync(
+        string fullName, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(fullName))
+        {
+            return null;
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        var token = $"{ExternalPractitionerSystem}|{ExternalSlug(fullName)}";
+        var url = $"Practitioner?identifier={Uri.EscapeDataString(token)}&_count=1";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var bundle = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        if (bundle.TryGetProperty("entry", out var entries)
+            && entries.ValueKind == JsonValueKind.Array
+            && entries.GetArrayLength() > 0
+            && entries[0].TryGetProperty("resource", out var res)
+            && res.TryGetProperty("id", out var idEl))
+        {
+            return idEl.GetString();
+        }
+        return null;
+    }
+
+    private static string ExternalSlug(string name) =>
+        string.Join(' ', name.Trim().ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+    private static Dictionary<string, object?> BuildSpecimenPayload(UpsertSpecimenRequest req)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["resourceType"] = "Specimen",
+            ["status"] = req.Status,
+            ["subject"] = new { reference = $"Patient/{req.PatientFhirId}" },
+            ["receivedTime"] = req.ReceivedTime,
+            ["accessionIdentifier"] = new { system = AccessionSystem, value = req.AccessionNumber },
+            ["request"] = new object[] { new { reference = $"ServiceRequest/{req.ServiceRequestFhirId}" } },
+        };
+        if (!string.IsNullOrWhiteSpace(req.TypeText))
+        {
+            payload["type"] = new { text = req.TypeText };
+        }
+        var collection = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(req.CollectedDateTime))
+        {
+            collection["collectedDateTime"] = req.CollectedDateTime;
+        }
+        if (req.FastingHours is int h)
+        {
+            collection["fastingStatusDuration"] = new
+            {
+                value = h,
+                unit = "h",
+                system = "http://unitsofmeasure.org",
+                code = "h"
+            };
+        }
+        if (collection.Count > 0)
+        {
+            payload["collection"] = collection;
+        }
+        if (!string.IsNullOrWhiteSpace(req.Note))
+        {
+            payload["note"] = new object[] { new { text = req.Note } };
+        }
+        return payload;
+    }
+
+    private static SpecimenSnapshot? ParseSpecimenSnapshot(JsonElement doc)
+    {
+        var id = doc.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+        if (string.IsNullOrEmpty(id))
+        {
+            return null;
+        }
+
+        var status = doc.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String
+            ? st.GetString() ?? "available" : "available";
+
+        string patientFhirId = string.Empty;
+        if (doc.TryGetProperty("subject", out var subj)
+            && subj.TryGetProperty("reference", out var subjRef)
+            && subjRef.ValueKind == JsonValueKind.String)
+        {
+            var r = subjRef.GetString() ?? string.Empty;
+            patientFhirId = r.StartsWith("Patient/", StringComparison.Ordinal) ? r[8..] : r;
+        }
+
+        string? typeText = null;
+        if (doc.TryGetProperty("type", out var ty) && ty.TryGetProperty("text", out var tyText))
+        {
+            typeText = tyText.GetString();
+        }
+
+        string? accession = null;
+        if (doc.TryGetProperty("accessionIdentifier", out var acc) && acc.TryGetProperty("value", out var accVal))
+        {
+            accession = accVal.GetString();
+        }
+
+        string? receivedTime = doc.TryGetProperty("receivedTime", out var rt) && rt.ValueKind == JsonValueKind.String
+            ? rt.GetString() : null;
+
+        string? collectedDateTime = null;
+        if (doc.TryGetProperty("collection", out var col) && col.TryGetProperty("collectedDateTime", out var cdt))
+        {
+            collectedDateTime = cdt.GetString();
+        }
+
+        string? serviceRequestFhirId = null;
+        if (doc.TryGetProperty("request", out var reqArr)
+            && reqArr.ValueKind == JsonValueKind.Array
+            && reqArr.GetArrayLength() > 0
+            && reqArr[0].TryGetProperty("reference", out var reqRef)
+            && reqRef.ValueKind == JsonValueKind.String)
+        {
+            var r = reqRef.GetString() ?? string.Empty;
+            serviceRequestFhirId = r.StartsWith("ServiceRequest/", StringComparison.Ordinal) ? r[15..] : r;
+        }
+
+        string? note = null;
+        if (doc.TryGetProperty("note", out var noteArr)
+            && noteArr.ValueKind == JsonValueKind.Array
+            && noteArr.GetArrayLength() > 0
+            && noteArr[0].TryGetProperty("text", out var noteText))
+        {
+            note = noteText.GetString();
+        }
+
+        return new SpecimenSnapshot(id, patientFhirId, status, typeText, accession, receivedTime, collectedDateTime, serviceRequestFhirId, note);
+    }
+
+    // ===================== LIS-4: resultados =====================
+
+    private const string ObservationCategorySystem = "http://terminology.hl7.org/CodeSystem/observation-category";
+    private const string InterpretationSystem = "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation";
+    private const string UcumSystem = "http://unitsofmeasure.org";
+
+    public async Task<string> CreateObservationAsync(
+        UpsertObservationRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await EnsureBearerAsync(cancellationToken);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["resourceType"] = "Observation",
+            ["status"] = request.Status,
+            ["category"] = new object[]
+            {
+                new { coding = new object[] { new { system = ObservationCategorySystem, code = "laboratory" } } }
+            },
+            ["code"] = BuildCodeableConcept(request.LoincCode, request.CodeText),
+            ["subject"] = new { reference = $"Patient/{request.PatientFhirId}" },
+            ["effectiveDateTime"] = request.EffectiveDateTime,
+            ["issued"] = request.EffectiveDateTime,
+        };
+        if (request.ValueNumeric is { } num)
+        {
+            payload["valueQuantity"] = new
+            {
+                value = num,
+                unit = request.ValueUnit,
+                system = UcumSystem,
+                code = request.ValueUnit
+            };
+        }
+        else if (!string.IsNullOrWhiteSpace(request.ValueString))
+        {
+            payload["valueString"] = request.ValueString;
+        }
+        if (!string.IsNullOrWhiteSpace(request.InterpretationCode))
+        {
+            payload["interpretation"] = new object[]
+            {
+                new { coding = new object[] { new { system = InterpretationSystem, code = request.InterpretationCode } } }
+            };
+        }
+        if (request.ReferenceLow is not null || request.ReferenceHigh is not null)
+        {
+            var range = new Dictionary<string, object?>();
+            if (request.ReferenceLow is { } lo)
+            {
+                range["low"] = new { value = lo, unit = request.ValueUnit, system = UcumSystem, code = request.ValueUnit };
+            }
+            if (request.ReferenceHigh is { } hi)
+            {
+                range["high"] = new { value = hi, unit = request.ValueUnit, system = UcumSystem, code = request.ValueUnit };
+            }
+            payload["referenceRange"] = new object[] { range };
+        }
+        if (!string.IsNullOrWhiteSpace(request.SpecimenFhirId))
+        {
+            payload["specimen"] = new { reference = $"Specimen/{request.SpecimenFhirId}" };
+        }
+        if (!string.IsNullOrWhiteSpace(request.PerformerReference))
+        {
+            payload["performer"] = new object[] { new { reference = request.PerformerReference } };
+        }
+
+        return await PostFhirResourceAsync("Observation", payload, request.PartitionName, cancellationToken);
+    }
+
+    public async Task<string> CreateDiagnosticReportAsync(
+        UpsertDiagnosticReportRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await EnsureBearerAsync(cancellationToken);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["resourceType"] = "DiagnosticReport",
+            ["status"] = request.Status,
+            ["category"] = new object[]
+            {
+                new { coding = new object[] { new { system = "http://terminology.hl7.org/CodeSystem/v2-0074", code = "LAB" } } }
+            },
+            ["code"] = BuildCodeableConcept(request.LoincCode, request.CodeText),
+            ["subject"] = new { reference = $"Patient/{request.PatientFhirId}" },
+            ["basedOn"] = new object[] { new { reference = $"ServiceRequest/{request.ServiceRequestFhirId}" } },
+            ["effectiveDateTime"] = request.EffectiveDateTime,
+            ["issued"] = request.EffectiveDateTime,
+            ["result"] = request.ResultObservationIds
+                .Select(id => (object)new { reference = $"Observation/{id}" }).ToArray(),
+        };
+        if (!string.IsNullOrWhiteSpace(request.SpecimenFhirId))
+        {
+            payload["specimen"] = new object[] { new { reference = $"Specimen/{request.SpecimenFhirId}" } };
+        }
+        if (!string.IsNullOrWhiteSpace(request.PerformerReference))
+        {
+            payload["performer"] = new object[] { new { reference = request.PerformerReference } };
+        }
+        else if (!string.IsNullOrWhiteSpace(request.PerformerDisplay))
+        {
+            payload["performer"] = new object[] { new { display = request.PerformerDisplay } };
+        }
+        if (!string.IsNullOrWhiteSpace(request.Conclusion))
+        {
+            payload["conclusion"] = request.Conclusion;
+        }
+
+        return await PostFhirResourceAsync("DiagnosticReport", payload, request.PartitionName, cancellationToken);
+    }
+
+    public async Task<DiagnosticReportSnapshot?> GetDiagnosticReportAsync(
+        string diagnosticReportFhirId, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(diagnosticReportFhirId))
+        {
+            throw new ArgumentException("diagnosticReportFhirId es obligatorio.", nameof(diagnosticReportFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"DiagnosticReport/{diagnosticReportFhirId}");
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        resp.EnsureSuccessStatusCode();
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return ParseDiagnosticReportSnapshot(doc);
+    }
+
+    public async Task<IReadOnlyList<DiagnosticReportSnapshot>> SearchDiagnosticReportsByPatientAsync(
+        string patientFhirId, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(patientFhirId))
+        {
+            throw new ArgumentException("patientFhirId es obligatorio.", nameof(patientFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+        var url = $"DiagnosticReport?subject=Patient/{Uri.EscapeDataString(patientFhirId)}&_sort=-issued&_count=100";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var bundle = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+
+        var results = new List<DiagnosticReportSnapshot>();
+        if (bundle.TryGetProperty("entry", out var entries) && entries.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (entry.TryGetProperty("resource", out var res))
+                {
+                    var snap = ParseDiagnosticReportSnapshot(res);
+                    if (snap is not null)
+                    {
+                        results.Add(snap);
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    public async Task<ObservationSnapshot?> GetObservationAsync(
+        string observationFhirId, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(observationFhirId))
+        {
+            throw new ArgumentException("observationFhirId es obligatorio.", nameof(observationFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"Observation/{observationFhirId}");
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        resp.EnsureSuccessStatusCode();
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return ParseObservationSnapshot(doc);
+    }
+
+    private static string StripRef(JsonElement el, string prefix)
+    {
+        var s = el.ValueKind == JsonValueKind.String ? el.GetString() ?? string.Empty : string.Empty;
+        return s.StartsWith(prefix, StringComparison.Ordinal) ? s[prefix.Length..] : s;
+    }
+
+    private static (string? Code, string? Text) ParseCodeableConcept(JsonElement codeEl)
+    {
+        string? code = null, text = null;
+        if (codeEl.TryGetProperty("coding", out var coding)
+            && coding.ValueKind == JsonValueKind.Array && coding.GetArrayLength() > 0
+            && coding[0].TryGetProperty("code", out var c))
+        {
+            code = c.GetString();
+        }
+        if (codeEl.TryGetProperty("text", out var t))
+        {
+            text = t.GetString();
+        }
+        return (code, text);
+    }
+
+    private static DiagnosticReportSnapshot? ParseDiagnosticReportSnapshot(JsonElement doc)
+    {
+        var id = doc.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+        if (string.IsNullOrEmpty(id))
+        {
+            return null;
+        }
+        var status = doc.TryGetProperty("status", out var st) ? st.GetString() ?? "unknown" : "unknown";
+        var patient = doc.TryGetProperty("subject", out var subj) && subj.TryGetProperty("reference", out var sr)
+            ? StripRef(sr, "Patient/") : string.Empty;
+        string? loinc = null, codeText = null;
+        if (doc.TryGetProperty("code", out var code))
+        {
+            (loinc, codeText) = ParseCodeableConcept(code);
+        }
+        var issued = doc.TryGetProperty("issued", out var iss) && iss.ValueKind == JsonValueKind.String ? iss.GetString() : null;
+        var conclusion = doc.TryGetProperty("conclusion", out var con) && con.ValueKind == JsonValueKind.String ? con.GetString() : null;
+
+        string? performerDisplay = null;
+        if (doc.TryGetProperty("performer", out var perf) && perf.ValueKind == JsonValueKind.Array && perf.GetArrayLength() > 0
+            && perf[0].TryGetProperty("display", out var pd))
+        {
+            performerDisplay = pd.GetString();
+        }
+        string? specimenId = null;
+        if (doc.TryGetProperty("specimen", out var spec) && spec.ValueKind == JsonValueKind.Array && spec.GetArrayLength() > 0
+            && spec[0].TryGetProperty("reference", out var spr))
+        {
+            specimenId = StripRef(spr, "Specimen/");
+        }
+        string? srId = null;
+        if (doc.TryGetProperty("basedOn", out var bo) && bo.ValueKind == JsonValueKind.Array && bo.GetArrayLength() > 0
+            && bo[0].TryGetProperty("reference", out var bor))
+        {
+            srId = StripRef(bor, "ServiceRequest/");
+        }
+        var resultIds = new List<string>();
+        if (doc.TryGetProperty("result", out var resArr) && resArr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var r in resArr.EnumerateArray())
+            {
+                if (r.TryGetProperty("reference", out var rr))
+                {
+                    resultIds.Add(StripRef(rr, "Observation/"));
+                }
+            }
+        }
+        return new DiagnosticReportSnapshot(id, patient, status, loinc, codeText, issued, conclusion, performerDisplay, specimenId, srId, resultIds);
+    }
+
+    private static ObservationSnapshot? ParseObservationSnapshot(JsonElement doc)
+    {
+        var id = doc.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+        if (string.IsNullOrEmpty(id))
+        {
+            return null;
+        }
+        var status = doc.TryGetProperty("status", out var st) ? st.GetString() ?? "unknown" : "unknown";
+        var patient = doc.TryGetProperty("subject", out var subj) && subj.TryGetProperty("reference", out var sr)
+            ? StripRef(sr, "Patient/") : string.Empty;
+        string? loinc = null, codeText = null;
+        if (doc.TryGetProperty("code", out var code))
+        {
+            (loinc, codeText) = ParseCodeableConcept(code);
+        }
+        decimal? valueNumeric = null;
+        string? valueUnit = null, valueString = null;
+        if (doc.TryGetProperty("valueQuantity", out var vq))
+        {
+            if (vq.TryGetProperty("value", out var v) && v.TryGetDecimal(out var dv))
+            {
+                valueNumeric = dv;
+            }
+            if (vq.TryGetProperty("unit", out var u))
+            {
+                valueUnit = u.GetString();
+            }
+        }
+        else if (doc.TryGetProperty("valueString", out var vs))
+        {
+            valueString = vs.GetString();
+        }
+        string? flag = null;
+        if (doc.TryGetProperty("interpretation", out var interp) && interp.ValueKind == JsonValueKind.Array && interp.GetArrayLength() > 0
+            && interp[0].TryGetProperty("coding", out var ic) && ic.ValueKind == JsonValueKind.Array && ic.GetArrayLength() > 0
+            && ic[0].TryGetProperty("code", out var icc))
+        {
+            flag = icc.GetString();
+        }
+        decimal? low = null, high = null;
+        if (doc.TryGetProperty("referenceRange", out var rr) && rr.ValueKind == JsonValueKind.Array && rr.GetArrayLength() > 0)
+        {
+            var range = rr[0];
+            if (range.TryGetProperty("low", out var lo) && lo.TryGetProperty("value", out var lov) && lov.TryGetDecimal(out var lod))
+            {
+                low = lod;
+            }
+            if (range.TryGetProperty("high", out var hi) && hi.TryGetProperty("value", out var hiv) && hiv.TryGetDecimal(out var hid))
+            {
+                high = hid;
+            }
+        }
+        var effective = doc.TryGetProperty("effectiveDateTime", out var ed) && ed.ValueKind == JsonValueKind.String ? ed.GetString() : null;
+        return new ObservationSnapshot(id, patient, status, loinc, codeText, valueNumeric, valueUnit, valueString, flag, low, high, effective);
+    }
+
+    public async Task<decimal?> GetLatestNumericObservationAsync(
+        string patientFhirId, string loincCode, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(patientFhirId) || string.IsNullOrWhiteSpace(loincCode))
+        {
+            return null;
+        }
+        await EnsureBearerAsync(cancellationToken);
+        var codeToken = $"{LoincSystem}|{loincCode}";
+        var url = $"Observation?subject=Patient/{Uri.EscapeDataString(patientFhirId)}"
+                  + $"&code={Uri.EscapeDataString(codeToken)}&_sort=-date&_count=1";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            return null;
+        }
+        var bundle = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        if (bundle.TryGetProperty("entry", out var entries) && entries.ValueKind == JsonValueKind.Array && entries.GetArrayLength() > 0
+            && entries[0].TryGetProperty("resource", out var res))
+        {
+            var snap = ParseObservationSnapshot(res);
+            return snap?.ValueNumeric;
+        }
+        return null;
+    }
+
+    public async Task PatchResourceStatusAsync(
+        string resourceType, string resourceFhirId, string status, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(resourceFhirId))
+        {
+            throw new ArgumentException("resourceFhirId es obligatorio.", nameof(resourceFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        var patch = $"[{{\"op\":\"replace\",\"path\":\"/status\",\"value\":\"{status}\"}}]";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Patch, $"{resourceType}/{resourceFhirId}")
+        {
+            Content = new StringContent(patch, System.Text.Encoding.UTF8, "application/json-patch+json")
+        };
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError("PATCH /fhir/{Resource}/{Id} (status) falló. Status={Status}, Body={Body}",
+                resourceType, resourceFhirId, (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
+    }
+
+    public async Task<IReadOnlyList<DiagnosticReportSnapshot>> SearchPreliminaryReportsAsync(
+        string partitionName, CancellationToken cancellationToken = default)
+    {
+        await EnsureBearerAsync(cancellationToken);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, "DiagnosticReport?status=preliminary&_sort=-issued&_count=100");
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var bundle = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+
+        var results = new List<DiagnosticReportSnapshot>();
+        if (bundle.TryGetProperty("entry", out var entries) && entries.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (entry.TryGetProperty("resource", out var res))
+                {
+                    var snap = ParseDiagnosticReportSnapshot(res);
+                    if (snap is not null)
+                    {
+                        results.Add(snap);
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    public async Task<IReadOnlyList<ObservationHistoryPoint>> GetObservationHistoryAsync(
+        string patientFhirId, string loincCode, string partitionName, int count, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(patientFhirId) || string.IsNullOrWhiteSpace(loincCode))
+        {
+            return [];
+        }
+        await EnsureBearerAsync(cancellationToken);
+        var codeToken = $"{LoincSystem}|{loincCode}";
+        var take = Math.Clamp(count, 1, 50);
+        var url = $"Observation?subject=Patient/{Uri.EscapeDataString(patientFhirId)}"
+                  + $"&code={Uri.EscapeDataString(codeToken)}&_sort=-date&_count={take}";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            return [];
+        }
+        var bundle = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        var points = new List<ObservationHistoryPoint>();
+        if (bundle.TryGetProperty("entry", out var entries) && entries.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (entry.TryGetProperty("resource", out var res))
+                {
+                    var snap = ParseObservationSnapshot(res);
+                    if (snap?.ValueNumeric is { } v)
+                    {
+                        points.Add(new ObservationHistoryPoint(v, snap.EffectiveDateTime, snap.FlagCode));
+                    }
+                }
+            }
+        }
+        return points;
+    }
+
+    private static object BuildCodeableConcept(string? loinc, string text)
+    {
+        if (!string.IsNullOrWhiteSpace(loinc))
+        {
+            return new
+            {
+                coding = new object[] { new { system = LoincSystem, code = loinc, display = text } },
+                text
+            };
+        }
+        return new { text };
+    }
+
+    private async Task<string> PostFhirResourceAsync(
+        string resourceType, Dictionary<string, object?> payload, string partitionName, CancellationToken cancellationToken)
+    {
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, resourceType)
+        {
+            Content = JsonContent.Create(payload, options: FhirJson)
+        };
+        httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError("POST /fhir/{Resource} falló. Status={Status}, Body={Body}", resourceType, (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return doc.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException($"HAPI devolvió un {resourceType} sin `id`.");
+    }
+
     private static Dictionary<string, object?> BuildLabOrderPayload(
         UpsertLabOrderRequest req, string? idForPut)
     {

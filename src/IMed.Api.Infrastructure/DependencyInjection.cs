@@ -9,7 +9,11 @@ using IMed.Api.Application.Identifiers;
 using IMed.Api.Application.Invitations;
 using IMed.Api.Application.JoinRequests;
 using IMed.Api.Application.LabCatalog;
+using IMed.Api.Application.LabDashboard;
 using IMed.Api.Application.LabOrders;
+using IMed.Api.Application.LabReception;
+using IMed.Api.Application.LabResults;
+using IMed.Api.Application.LabRules;
 using IMed.Api.Application.Labs;
 using IMed.Api.Application.Medications;
 using IMed.Api.Application.Notifications;
@@ -154,6 +158,7 @@ public static class DependencyInjection
         services.AddHostedService<Icd11Seeder>();
         services.AddHostedService<LoincSeeder>();
         services.AddHostedService<LabCatalogSeeder>();
+        services.AddHostedService<LabRuleSeeder>();
         return services;
     }
 
@@ -210,6 +215,8 @@ public static class DependencyInjection
         services.AddScoped<IJoinRequestsRepository, JoinRequestsRepository>();
         services.AddScoped<IChangeMemberRolePersistence, ChangeMemberRolePersistence>();
         services.AddScoped<ILabCatalogRepository, LabCatalogRepository>();
+        services.AddScoped<ILabOperationsRepository, LabOperationsRepository>();
+        services.AddScoped<ILabRuleRepository, LabRuleRepository>();
 
         return services;
     }
@@ -336,6 +343,28 @@ public static class DependencyInjection
         services.AddScoped<SetOfferingHandler>();
         services.AddScoped<ListDerivedCalculationsHandler>();
         services.AddScoped<ListTatTargetsHandler>();
+
+        // Lab reception (Épica LIS-3)
+        services.AddScoped<ResolveReceptionOrderHandler>();
+        services.AddScoped<CreateExternalOrderHandler>();
+        services.AddScoped<ReceiveSpecimenHandler>();
+        services.AddScoped<GetWorklistHandler>();
+
+        // Lab results (Épica LIS-4)
+        services.AddScoped<EnterResultsHandler>();
+        services.AddScoped<GetResultsByPatientHandler>();
+        services.AddScoped<GetResultDetailHandler>();
+        services.AddScoped<GetPendingValidationHandler>();
+        services.AddScoped<GetReportHistoryHandler>();
+        services.AddScoped<ReleaseReportHandler>();
+
+        // Lab rules engine (Épica LIS-5)
+        services.AddScoped<IResultEvaluationService, ResultEvaluationService>();
+        services.AddScoped<ListLabRulesHandler>();
+        services.AddScoped<CreateLabRuleHandler>();
+
+        // Lab dashboard (Épica LIS-8)
+        services.AddScoped<GetLabDashboardHandler>();
 
         return services;
     }

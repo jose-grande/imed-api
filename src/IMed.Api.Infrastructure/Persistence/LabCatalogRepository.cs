@@ -47,6 +47,21 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
     public Task<LabTestDefinition?> GetTestByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         db.LabTests.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
+    public async Task<LabTestDefinition?> GetTestByLoincAsync(
+        Guid? organizationId, string loincCode, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(loincCode))
+        {
+            return null;
+        }
+        var code = loincCode.Trim();
+        var rows = await db.LabTests.AsNoTracking()
+            .Where(x => x.LoincCode == code && (x.OrganizationId == null || x.OrganizationId == organizationId))
+            .ToListAsync(cancellationToken);
+        // Override de org sobre global.
+        return rows.OrderByDescending(x => x.OrganizationId == organizationId && organizationId != null).FirstOrDefault();
+    }
+
     public Task<bool> TestCodeExistsAsync(Guid? organizationId, string code, CancellationToken cancellationToken = default)
     {
         var c = code.Trim();

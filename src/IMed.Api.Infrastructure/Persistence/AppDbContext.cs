@@ -3,6 +3,7 @@ using IMed.Api.Domain.Auditing;
 using IMed.Api.Domain.Catalogs;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Forms;
+using IMed.Api.Domain.Lab;
 using IMed.Api.Domain.Invitations;
 using IMed.Api.Domain.JoinRequests;
 using IMed.Api.Domain.Outbox;
@@ -40,6 +41,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<DerivedCalculation> DerivedCalculations => Set<DerivedCalculation>();
     public DbSet<TatTarget> TatTargets => Set<TatTarget>();
 
+    // Operación del laboratorio (Épica LIS-3)
+    public DbSet<OrderIntake> OrderIntakes => Set<OrderIntake>();
+    public DbSet<SpecimenEvent> SpecimenEvents => Set<SpecimenEvent>();
+    public DbSet<LabAccessionCounter> LabAccessionCounters => Set<LabAccessionCounter>();
+    public DbSet<LabRule> LabRules => Set<LabRule>();
+    public DbSet<LabRuleVersion> LabRuleVersions => Set<LabRuleVersion>();
+    public DbSet<RuleExecution> RuleExecutions => Set<RuleExecution>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -66,6 +75,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureReferenceRange(modelBuilder);
         ConfigureDerivedCalculation(modelBuilder);
         ConfigureTatTarget(modelBuilder);
+
+        ConfigureOrderIntake(modelBuilder);
+        ConfigureSpecimenEvent(modelBuilder);
+        ConfigureLabAccessionCounter(modelBuilder);
+        ConfigureLabRule(modelBuilder);
+        ConfigureLabRuleVersion(modelBuilder);
+        ConfigureRuleExecution(modelBuilder);
 
         ApplySnakeCaseConvention(modelBuilder);
     }
@@ -618,6 +634,131 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
             e.HasIndex(x => new { x.Scope, x.TargetCode, x.Priority })
                 .HasDatabaseName("ix_tat_target_scope_code_priority");
+        });
+    }
+
+    private static void ConfigureOrderIntake(ModelBuilder b)
+    {
+        b.Entity<OrderIntake>(e =>
+        {
+            e.ToTable("order_intake");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.ServiceRequestFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.SpecimenFhirId).HasMaxLength(64);
+            e.Property(x => x.PatientFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Routing).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Priority).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.ScheduledFor);
+            e.Property(x => x.IsWalkIn).IsRequired();
+            e.Property(x => x.FastingRequired).IsRequired();
+            e.Property(x => x.FastingSatisfied);
+            e.Property(x => x.AccessionNumber).HasMaxLength(40);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.BlockReason).HasMaxLength(500);
+            e.Property(x => x.ReceivedBy);
+            e.Property(x => x.ReceivedAt);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // Worklist: por org + estado + prioridad.
+            e.HasIndex(x => new { x.OrganizationId, x.Status })
+                .HasDatabaseName("ix_order_intake_org_status");
+            e.HasIndex(x => x.ServiceRequestFhirId)
+                .HasDatabaseName("ix_order_intake_service_request");
+            e.HasIndex(x => x.PatientFhirId)
+                .HasDatabaseName("ix_order_intake_patient");
+            e.HasIndex(x => x.AccessionNumber)
+                .HasDatabaseName("ix_order_intake_accession");
+        });
+    }
+
+    private static void ConfigureSpecimenEvent(ModelBuilder b)
+    {
+        b.Entity<SpecimenEvent>(e =>
+        {
+            e.ToTable("specimen_event");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrderIntakeId).IsRequired();
+            e.Property(x => x.EventType).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.OccurredAt).IsRequired();
+            e.Property(x => x.PerformedBy);
+            e.Property(x => x.Incident).HasConversion<string>().HasMaxLength(30);
+            e.Property(x => x.Notes).HasMaxLength(1000);
+
+            e.HasIndex(x => x.OrderIntakeId)
+                .HasDatabaseName("ix_specimen_event_intake");
+        });
+    }
+
+    private static void ConfigureLabAccessionCounter(ModelBuilder b)
+    {
+        b.Entity<LabAccessionCounter>(e =>
+        {
+            e.ToTable("lab_accession_counter");
+            e.HasKey(x => new { x.OrganizationId, x.Day });
+            e.Property(x => x.Seq).IsRequired();
+        });
+    }
+
+    private static void ConfigureLabRule(ModelBuilder b)
+    {
+        b.Entity<LabRule>(e =>
+        {
+            e.ToTable("lab_rule");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Code).HasMaxLength(60).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Scope).HasConversion<string>().HasMaxLength(10).IsRequired();
+            e.Property(x => x.TargetLoinc).HasMaxLength(20);
+            e.Property(x => x.Action).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Severity).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Message).HasMaxLength(500);
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique().HasDatabaseName("ux_lab_rule_org_code");
+            e.HasIndex(x => new { x.OrganizationId, x.Scope, x.TargetLoinc, x.Active })
+                .HasDatabaseName("ix_lab_rule_lookup");
+        });
+    }
+
+    private static void ConfigureLabRuleVersion(ModelBuilder b)
+    {
+        b.Entity<LabRuleVersion>(e =>
+        {
+            e.ToTable("lab_rule_version");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.LabRuleId).IsRequired();
+            e.Property(x => x.Version).IsRequired();
+            e.Property(x => x.LogicJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.EffectiveDate).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.LabRuleId, x.Version })
+                .IsUnique().HasDatabaseName("ux_lab_rule_version_rule_version");
+        });
+    }
+
+    private static void ConfigureRuleExecution(ModelBuilder b)
+    {
+        b.Entity<RuleExecution>(e =>
+        {
+            e.ToTable("rule_execution");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.ObservationFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.LabRuleId).IsRequired();
+            e.Property(x => x.RuleVersion).IsRequired();
+            e.Property(x => x.Fired).IsRequired();
+            e.Property(x => x.Verdict).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.EvaluatedAt).IsRequired();
+
+            e.HasIndex(x => x.ObservationFhirId).HasDatabaseName("ix_rule_execution_observation");
         });
     }
 

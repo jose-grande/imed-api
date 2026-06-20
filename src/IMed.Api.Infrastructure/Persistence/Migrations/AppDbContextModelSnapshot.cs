@@ -350,6 +350,124 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("lab_panel_version_item", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("action");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("message");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("scope");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("severity");
+
+                    b.Property<string>("TargetLoinc")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("target_loinc");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_lab_rule_org_code");
+
+                    b.HasIndex("OrganizationId", "Scope", "TargetLoinc", "Active")
+                        .HasDatabaseName("ix_lab_rule_lookup");
+
+                    b.ToTable("lab_rule", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabRuleVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly>("EffectiveDate")
+                        .HasColumnType("date")
+                        .HasColumnName("effective_date");
+
+                    b.Property<Guid>("LabRuleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_rule_id");
+
+                    b.Property<string>("LogicJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("logic_json");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabRuleId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("ux_lab_rule_version_rule_version");
+
+                    b.ToTable("lab_rule_version", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabTestDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -959,6 +1077,220 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_join_requests_org_status_created");
 
                     b.ToTable("join_requests", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.LabAccessionCounter", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date")
+                        .HasColumnName("day");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("integer")
+                        .HasColumnName("seq");
+
+                    b.HasKey("OrganizationId", "Day");
+
+                    b.ToTable("lab_accession_counter", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.OrderIntake", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AccessionNumber")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("accession_number");
+
+                    b.Property<string>("BlockReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("block_reason");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("FastingRequired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("fasting_required");
+
+                    b.Property<bool?>("FastingSatisfied")
+                        .HasColumnType("boolean")
+                        .HasColumnName("fasting_satisfied");
+
+                    b.Property<bool>("IsWalkIn")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_walk_in");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PatientFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("patient_fhir_id");
+
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("priority");
+
+                    b.Property<DateTimeOffset?>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received_at");
+
+                    b.Property<Guid?>("ReceivedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("received_by");
+
+                    b.Property<string>("Routing")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("routing");
+
+                    b.Property<DateTimeOffset?>("ScheduledFor")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_for");
+
+                    b.Property<string>("ServiceRequestFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("service_request_fhir_id");
+
+                    b.Property<string>("SpecimenFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("specimen_fhir_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccessionNumber")
+                        .HasDatabaseName("ix_order_intake_accession");
+
+                    b.HasIndex("PatientFhirId")
+                        .HasDatabaseName("ix_order_intake_patient");
+
+                    b.HasIndex("ServiceRequestFhirId")
+                        .HasDatabaseName("ix_order_intake_service_request");
+
+                    b.HasIndex("OrganizationId", "Status")
+                        .HasDatabaseName("ix_order_intake_org_status");
+
+                    b.ToTable("order_intake", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.RuleExecution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("EvaluatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("evaluated_at");
+
+                    b.Property<bool>("Fired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("fired");
+
+                    b.Property<Guid>("LabRuleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_rule_id");
+
+                    b.Property<string>("ObservationFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("observation_fhir_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<int>("RuleVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("rule_version");
+
+                    b.Property<string>("Verdict")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("verdict");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ObservationFhirId")
+                        .HasDatabaseName("ix_rule_execution_observation");
+
+                    b.ToTable("rule_execution", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.SpecimenEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("event_type");
+
+                    b.Property<string>("Incident")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("incident");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid>("OrderIntakeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_intake_id");
+
+                    b.Property<Guid?>("PerformedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("performed_by");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrderIntakeId")
+                        .HasDatabaseName("ix_specimen_event_intake");
+
+                    b.ToTable("specimen_event", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Outbox.OutboxEvent", b =>

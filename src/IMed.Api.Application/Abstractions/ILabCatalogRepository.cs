@@ -14,6 +14,8 @@ public interface ILabCatalogRepository
         Guid? organizationId, string? term, string? department, bool activeOnly, int limit,
         CancellationToken cancellationToken = default);
     Task<LabTestDefinition?> GetTestByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Resuelve una prueba por código LOINC (override de org sobre global). Usada por el enrutamiento (LIS-3).</summary>
+    Task<LabTestDefinition?> GetTestByLoincAsync(Guid? organizationId, string loincCode, CancellationToken cancellationToken = default);
     Task<bool> TestCodeExistsAsync(Guid? organizationId, string code, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LabTestDefinition>> GetTestsByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default);
     Task AddTestAsync(LabTestDefinition test, CancellationToken cancellationToken = default);

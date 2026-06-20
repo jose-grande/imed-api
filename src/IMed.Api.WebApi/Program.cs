@@ -152,6 +152,11 @@ app.MapMedicationsEndpoints();
 app.MapPrescriptionsEndpoints();
 app.MapLabOrdersEndpoints();
 app.MapLabCatalogEndpoints();
+app.MapLabReceptionEndpoints();
+app.MapLabWorklistEndpoints();
+app.MapLabResultsEndpoints();
+app.MapLabRulesEndpoints();
+app.MapLabDashboardEndpoints();
 
 app.Run();
 
