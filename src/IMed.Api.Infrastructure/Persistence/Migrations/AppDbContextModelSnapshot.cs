@@ -186,6 +186,406 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("icd11_catalog", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.DerivedCalculation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FormulaJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("formula_json");
+
+                    b.Property<string>("InputsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("inputs_json");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("OutputTestCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("output_test_code");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OutputTestCode")
+                        .HasDatabaseName("ix_derived_calculation_output");
+
+                    b.ToTable("derived_calculation", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabPanel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("ix_lab_panel_name_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Name"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Name"), new[] { "gin_trgm_ops" });
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_lab_panel_org_code");
+
+                    b.ToTable("lab_panel", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabPanelVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly>("EffectiveDate")
+                        .HasColumnType("date")
+                        .HasColumnName("effective_date");
+
+                    b.Property<Guid>("LabPanelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_panel_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabPanelId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("ux_lab_panel_version_panel_version");
+
+                    b.ToTable("lab_panel_version", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabPanelVersionItem", b =>
+                {
+                    b.Property<Guid>("LabPanelVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_panel_version_id");
+
+                    b.Property<Guid>("LabTestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_test_id");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("display_order");
+
+                    b.HasKey("LabPanelVersionId", "LabTestId");
+
+                    b.HasIndex("LabPanelVersionId")
+                        .HasDatabaseName("ix_lab_panel_version_item_version");
+
+                    b.ToTable("lab_panel_version_item", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabTestDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("CollectionType")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("collection_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Datatype")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("datatype");
+
+                    b.Property<string>("Department")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("department");
+
+                    b.Property<int?>("FastingHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("fasting_hours");
+
+                    b.Property<string>("LoincCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("loinc_code");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PatientInstruction")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("patient_instruction");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("unit");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("ix_lab_test_name_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Name"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Name"), new[] { "gin_trgm_ops" });
+
+                    b.HasIndex("OrganizationId", "Active")
+                        .HasDatabaseName("ix_lab_test_org_active");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_lab_test_org_code");
+
+                    b.ToTable("lab_test", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabTestOffering", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("LabTestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_test_id");
+
+                    b.Property<bool>("Offered")
+                        .HasColumnType("boolean")
+                        .HasColumnName("offered");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("OrganizationId", "LabTestId");
+
+                    b.ToTable("lab_test_offering", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.ReferenceRange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int?>("AgeMaxYears")
+                        .HasColumnType("integer")
+                        .HasColumnName("age_max_years");
+
+                    b.Property<int?>("AgeMinYears")
+                        .HasColumnType("integer")
+                        .HasColumnName("age_min_years");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal?>("CriticalHigh")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("numeric(12,4)")
+                        .HasColumnName("critical_high");
+
+                    b.Property<decimal?>("CriticalLow")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("numeric(12,4)")
+                        .HasColumnName("critical_low");
+
+                    b.Property<decimal?>("High")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("numeric(12,4)")
+                        .HasColumnName("high");
+
+                    b.Property<Guid>("LabTestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_test_id");
+
+                    b.Property<decimal?>("Low")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("numeric(12,4)")
+                        .HasColumnName("low");
+
+                    b.Property<string>("Method")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("method");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<bool?>("Pregnancy")
+                        .HasColumnType("boolean")
+                        .HasColumnName("pregnancy");
+
+                    b.Property<string>("Sex")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("sex");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("unit");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabTestId")
+                        .HasDatabaseName("ix_reference_range_test");
+
+                    b.ToTable("reference_range", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.TatTarget", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("Minutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("minutes");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("priority");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("scope");
+
+                    b.Property<string>("TargetCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("target_code");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Scope", "TargetCode", "Priority")
+                        .HasDatabaseName("ix_tat_target_scope_code_priority");
+
+                    b.ToTable("tat_target", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Catalogs.LoincCode", b =>
                 {
                     b.Property<string>("Code")

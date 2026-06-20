@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using System.Text.Json;
 using IMed.Api.Infrastructure;
 using IMed.Api.Infrastructure.Persistence;
 using IMed.Api.WebApi.Endpoints;
@@ -52,9 +54,59 @@ builder.Services
             NameClaimType = "preferred_username",
             RoleClaimType = "roles"
         };
+
+        // Keycloak emite los realm roles en `realm_access.roles` (JSON anidado);
+        // .NET no los aplana a RoleClaimType, así que las políticas RequireRole
+        // no los verían (bug #15). Los aplanamos a claims "roles" tras validar.
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (context.Principal?.Identity is ClaimsIdentity identity)
+                {
+                    var realmAccess = identity.FindFirst("realm_access")?.Value;
+                    if (!string.IsNullOrEmpty(realmAccess))
+                    {
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(realmAccess);
+                            if (doc.RootElement.TryGetProperty("roles", out var roles)
+                                && roles.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var role in roles.EnumerateArray())
+                                {
+                                    var value = role.GetString();
+                                    if (!string.IsNullOrEmpty(value) && !identity.HasClaim("roles", value))
+                                    {
+                                        identity.AddClaim(new Claim("roles", value));
+                                    }
+                                }
+                            }
+                        }
+                        catch (JsonException)
+                        {
+                            // realm_access mal formado → el usuario queda sin roles de realm.
+                        }
+                    }
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
-builder.Services.AddAuthorization();
+// Políticas de autorización del módulo LIS (Épica LIS-2). Las épicas siguientes
+// aplican estas políticas a sus endpoints en vez de re-listar roles.
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("LabRead", p => p.RequireRole(
+        "lab_tech", "bioanalyst", "lab_supervisor", "pathologist", "practitioner", "org_admin"));
+    options.AddPolicy("LabTechnician", p => p.RequireRole(
+        "lab_tech", "lab_supervisor", "org_admin"));
+    options.AddPolicy("LabValidator", p => p.RequireRole(
+        "bioanalyst", "pathologist", "lab_supervisor", "org_admin"));
+    options.AddPolicy("LabSupervisor", p => p.RequireRole(
+        "lab_supervisor", "org_admin"));
+});
 
 // Health checks
 builder.Services.AddHealthChecks()
@@ -99,6 +151,7 @@ app.MapAllergiesEndpoints();
 app.MapMedicationsEndpoints();
 app.MapPrescriptionsEndpoints();
 app.MapLabOrdersEndpoints();
+app.MapLabCatalogEndpoints();
 
 app.Run();
 

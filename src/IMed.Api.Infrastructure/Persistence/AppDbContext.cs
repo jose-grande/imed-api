@@ -1,6 +1,7 @@
 using System.Text.Json;
 using IMed.Api.Domain.Auditing;
 using IMed.Api.Domain.Catalogs;
+using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Forms;
 using IMed.Api.Domain.Invitations;
 using IMed.Api.Domain.JoinRequests;
@@ -29,6 +30,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Invitation> Invitations => Set<Invitation>();
     public DbSet<JoinRequest> JoinRequests => Set<JoinRequest>();
 
+    // Catálogo de laboratorio (Épica LIS-1)
+    public DbSet<LabTestDefinition> LabTests => Set<LabTestDefinition>();
+    public DbSet<LabTestOffering> LabTestOfferings => Set<LabTestOffering>();
+    public DbSet<LabPanel> LabPanels => Set<LabPanel>();
+    public DbSet<LabPanelVersion> LabPanelVersions => Set<LabPanelVersion>();
+    public DbSet<LabPanelVersionItem> LabPanelVersionItems => Set<LabPanelVersionItem>();
+    public DbSet<ReferenceRange> ReferenceRanges => Set<ReferenceRange>();
+    public DbSet<DerivedCalculation> DerivedCalculations => Set<DerivedCalculation>();
+    public DbSet<TatTarget> TatTargets => Set<TatTarget>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -46,6 +57,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureUserPractitionerAssignment(modelBuilder);
         ConfigureInvitation(modelBuilder);
         ConfigureJoinRequest(modelBuilder);
+
+        ConfigureLabTestDefinition(modelBuilder);
+        ConfigureLabTestOffering(modelBuilder);
+        ConfigureLabPanel(modelBuilder);
+        ConfigureLabPanelVersion(modelBuilder);
+        ConfigureLabPanelVersionItem(modelBuilder);
+        ConfigureReferenceRange(modelBuilder);
+        ConfigureDerivedCalculation(modelBuilder);
+        ConfigureTatTarget(modelBuilder);
 
         ApplySnakeCaseConvention(modelBuilder);
     }
@@ -434,6 +454,170 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .IsUnique()
                 .HasFilter("status = 'Pending'")
                 .HasDatabaseName("ux_join_requests_email_org_pending");
+        });
+    }
+
+    private static void ConfigureLabTestDefinition(ModelBuilder b)
+    {
+        b.Entity<LabTestDefinition>(e =>
+        {
+            e.ToTable("lab_test");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Code).HasMaxLength(60).IsRequired();
+            e.Property(x => x.LoincCode).HasMaxLength(20);
+            e.Property(x => x.Name).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Datatype).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Unit).HasMaxLength(40);
+            e.Property(x => x.Department).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.FastingHours);
+            e.Property(x => x.CollectionType).HasMaxLength(40);
+            e.Property(x => x.PatientInstruction).HasMaxLength(1000);
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // (org, code) único — null-org = plantilla global. Postgres trata NULLs
+            // como distintos, así que el unique no colisiona entre orgs ni con el global.
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_lab_test_org_code");
+            // Typeahead/filtro por nombre — pg_trgm (volumen chico, como medication).
+            e.HasIndex(x => x.Name)
+                .HasDatabaseName("ix_lab_test_name_trgm")
+                .HasMethod("gin")
+                .HasOperators("gin_trgm_ops");
+            e.HasIndex(x => new { x.OrganizationId, x.Active })
+                .HasDatabaseName("ix_lab_test_org_active");
+        });
+    }
+
+    private static void ConfigureLabTestOffering(ModelBuilder b)
+    {
+        b.Entity<LabTestOffering>(e =>
+        {
+            e.ToTable("lab_test_offering");
+            e.HasKey(x => new { x.OrganizationId, x.LabTestId });
+            e.Property(x => x.Offered).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+        });
+    }
+
+    private static void ConfigureLabPanel(ModelBuilder b)
+    {
+        b.Entity<LabPanel>(e =>
+        {
+            e.ToTable("lab_panel");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Code).HasMaxLength(60).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(1000);
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_lab_panel_org_code");
+            e.HasIndex(x => x.Name)
+                .HasDatabaseName("ix_lab_panel_name_trgm")
+                .HasMethod("gin")
+                .HasOperators("gin_trgm_ops");
+        });
+    }
+
+    private static void ConfigureLabPanelVersion(ModelBuilder b)
+    {
+        b.Entity<LabPanelVersion>(e =>
+        {
+            e.ToTable("lab_panel_version");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.LabPanelId).IsRequired();
+            e.Property(x => x.Version).IsRequired();
+            e.Property(x => x.EffectiveDate).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.LabPanelId, x.Version })
+                .IsUnique()
+                .HasDatabaseName("ux_lab_panel_version_panel_version");
+        });
+    }
+
+    private static void ConfigureLabPanelVersionItem(ModelBuilder b)
+    {
+        b.Entity<LabPanelVersionItem>(e =>
+        {
+            e.ToTable("lab_panel_version_item");
+            e.HasKey(x => new { x.LabPanelVersionId, x.LabTestId });
+            e.Property(x => x.DisplayOrder).IsRequired();
+
+            e.HasIndex(x => x.LabPanelVersionId)
+                .HasDatabaseName("ix_lab_panel_version_item_version");
+        });
+    }
+
+    private static void ConfigureReferenceRange(ModelBuilder b)
+    {
+        b.Entity<ReferenceRange>(e =>
+        {
+            e.ToTable("reference_range");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.LabTestId).IsRequired();
+            e.Property(x => x.Sex).HasConversion<string>().HasMaxLength(10).IsRequired();
+            e.Property(x => x.AgeMinYears);
+            e.Property(x => x.AgeMaxYears);
+            e.Property(x => x.Pregnancy);
+            e.Property(x => x.Method).HasMaxLength(120);
+            e.Property(x => x.Low).HasPrecision(12, 4);
+            e.Property(x => x.High).HasPrecision(12, 4);
+            e.Property(x => x.CriticalLow).HasPrecision(12, 4);
+            e.Property(x => x.CriticalHigh).HasPrecision(12, 4);
+            e.Property(x => x.Unit).HasMaxLength(40);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => x.LabTestId)
+                .HasDatabaseName("ix_reference_range_test");
+        });
+    }
+
+    private static void ConfigureDerivedCalculation(ModelBuilder b)
+    {
+        b.Entity<DerivedCalculation>(e =>
+        {
+            e.ToTable("derived_calculation");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.OutputTestCode).HasMaxLength(60).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.FormulaJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.InputsJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            e.HasIndex(x => x.OutputTestCode)
+                .HasDatabaseName("ix_derived_calculation_output");
+        });
+    }
+
+    private static void ConfigureTatTarget(ModelBuilder b)
+    {
+        b.Entity<TatTarget>(e =>
+        {
+            e.ToTable("tat_target");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Scope).HasConversion<string>().HasMaxLength(10).IsRequired();
+            e.Property(x => x.TargetCode).HasMaxLength(60).IsRequired();
+            e.Property(x => x.Priority).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Minutes).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.Scope, x.TargetCode, x.Priority })
+                .HasDatabaseName("ix_tat_target_scope_code_priority");
         });
     }
 

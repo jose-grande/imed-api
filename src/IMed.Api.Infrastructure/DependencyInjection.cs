@@ -8,6 +8,7 @@ using IMed.Api.Application.Forms;
 using IMed.Api.Application.Identifiers;
 using IMed.Api.Application.Invitations;
 using IMed.Api.Application.JoinRequests;
+using IMed.Api.Application.LabCatalog;
 using IMed.Api.Application.LabOrders;
 using IMed.Api.Application.Labs;
 using IMed.Api.Application.Medications;
@@ -152,6 +153,7 @@ public static class DependencyInjection
         services.AddHostedService<FormDefinitionsSeeder>();
         services.AddHostedService<Icd11Seeder>();
         services.AddHostedService<LoincSeeder>();
+        services.AddHostedService<LabCatalogSeeder>();
         return services;
     }
 
@@ -207,6 +209,7 @@ public static class DependencyInjection
         services.AddScoped<IInvitationLazyProvisionPersistence, InvitationLazyProvisionPersistence>();
         services.AddScoped<IJoinRequestsRepository, JoinRequestsRepository>();
         services.AddScoped<IChangeMemberRolePersistence, ChangeMemberRolePersistence>();
+        services.AddScoped<ILabCatalogRepository, LabCatalogRepository>();
 
         return services;
     }
@@ -316,6 +319,23 @@ public static class DependencyInjection
 
         // Lab orders PDF (Épica L5)
         services.AddScoped<GetLabOrderPdfHandler>();
+
+        // Lab catalog (Épica LIS-1)
+        services.AddScoped<SearchLabTestsHandler>();
+        services.AddScoped<GetLabTestByIdHandler>();
+        services.AddScoped<CreateLabTestHandler>();
+        services.AddScoped<UpdateLabTestHandler>();
+        services.AddScoped<SetLabTestActiveHandler>();
+        services.AddScoped<ListLabPanelsHandler>();
+        services.AddScoped<GetLabPanelDetailHandler>();
+        services.AddScoped<CreateLabPanelHandler>();
+        services.AddScoped<CreatePanelVersionHandler>();
+        services.AddScoped<ListReferenceRangesHandler>();
+        services.AddScoped<CreateReferenceRangeHandler>();
+        services.AddScoped<UpdateReferenceRangeHandler>();
+        services.AddScoped<SetOfferingHandler>();
+        services.AddScoped<ListDerivedCalculationsHandler>();
+        services.AddScoped<ListTatTargetsHandler>();
 
         return services;
     }
