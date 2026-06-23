@@ -30,10 +30,11 @@ public sealed record LabPanelDto(
     string Code,
     string Name,
     string? Description,
+    string? LoincCode,
     bool Active)
 {
     public static LabPanelDto FromDomain(LabPanel p) => new(
-        p.Id, p.OrganizationId, p.Code, p.Name, p.Description, p.Active);
+        p.Id, p.OrganizationId, p.Code, p.Name, p.Description, p.LoincCode, p.Active);
 }
 
 /// <summary>Item de una versión de panel (prueba + orden).</summary>
@@ -103,4 +104,40 @@ public sealed record TatTargetDto(
 {
     public static TatTargetDto FromDomain(TatTarget t) => new(
         t.Id, t.OrganizationId, t.Scope.ToString(), t.TargetCode, t.Priority.ToString(), t.Minutes);
+}
+
+/// <summary>Tipo de muestra del catálogo (LIS-RD-26).</summary>
+public sealed record SpecimenTypeDto(
+    Guid Id,
+    Guid? OrganizationId,
+    string Code,
+    string Name,
+    string? SnomedCode,
+    string CollectionMode,
+    string? DefaultMethod,
+    string? DefaultBodySite,
+    string ContainerKind,
+    int? StabilityMinutes,
+    string Discipline,
+    bool Active)
+{
+    public static SpecimenTypeDto FromDomain(SpecimenType s) => new(
+        s.Id, s.OrganizationId, s.Code, s.Name, s.SnomedCode,
+        s.CollectionMode.ToString(), s.DefaultMethod, s.DefaultBodySite,
+        s.ContainerKind.ToString(), s.StabilityMinutes, s.Discipline.ToString(), s.Active);
+}
+
+/// <summary>Tipo de tubo de sangre (LIS-RD-16).</summary>
+public sealed record TubeTypeDto(
+    Guid Id,
+    Guid? OrganizationId,
+    string Code,
+    string Name,
+    string? Color,
+    string? Additive,
+    decimal? VolumeMinMl,
+    bool Active)
+{
+    public static TubeTypeDto FromDomain(TubeType t) => new(
+        t.Id, t.OrganizationId, t.Code, t.Name, t.Color, t.Additive, t.VolumeMinMl, t.Active);
 }

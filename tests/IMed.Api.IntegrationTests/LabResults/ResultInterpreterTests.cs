@@ -42,6 +42,26 @@ public sealed class ResultInterpreterTests
     }
 
     [Fact]
+    public void Interpret_exponePoblacionDelRango_paraAppliesToYAge()
+    {
+        // R2: el rango elegido alimenta Observation.referenceRange.appliesTo (sexo) + age (años).
+        var ranges = new[] { Range(ReferenceSex.Male, 13.5m, 17.5m, 6m, 20m, ageMin: 18, ageMax: 65) };
+        var result = ResultInterpreter.Interpret(ranges, ReferenceSex.Male, 40, 15m);
+        result.AppliesToSex.Should().Be(ReferenceSex.Male);
+        result.AppliesToAgeMin.Should().Be(18);
+        result.AppliesToAgeMax.Should().Be(65);
+    }
+
+    [Fact]
+    public void Interpret_rangoAny_noExponeAppliesToSex()
+    {
+        // Rango sexo-indistinto: no se emite appliesTo de sexo (sería ruido).
+        var ranges = new[] { Range(ReferenceSex.Any, 3.5m, 5.2m, null, null) };
+        var result = ResultInterpreter.Interpret(ranges, ReferenceSex.Female, 30, 4m);
+        result.AppliesToSex.Should().BeNull();
+    }
+
+    [Fact]
     public void Interpret_sinRangoAplicable_devuelveNull()
     {
         var ranges = new[] { Range(ReferenceSex.Male, 1m, 2m, null, null) };

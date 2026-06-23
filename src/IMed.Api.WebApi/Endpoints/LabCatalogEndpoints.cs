@@ -40,6 +40,7 @@ public static class LabCatalogEndpoints
         group.MapGet("/reference-ranges", ListRangesAsync).WithName("ListReferenceRanges");
         group.MapPost("/reference-ranges", CreateRangeAsync).WithName("CreateReferenceRange").RequireAuthorization("LabSupervisor");
         group.MapPut("/reference-ranges/{id:guid}", UpdateRangeAsync).WithName("UpdateReferenceRange").RequireAuthorization("LabSupervisor");
+        group.MapDelete("/reference-ranges/{id:guid}", DeleteRangeAsync).WithName("DeleteReferenceRange").RequireAuthorization("LabSupervisor");
 
         // -------- Ofertas por sede --------
         group.MapPut("/offerings", SetOfferingAsync).WithName("SetLabTestOffering").RequireAuthorization("LabSupervisor");
@@ -47,6 +48,10 @@ public static class LabCatalogEndpoints
         // -------- Fórmulas calculadas / TAT (read-only en LIS-1) --------
         group.MapGet("/derived-calculations", ListDerivedAsync).WithName("ListDerivedCalculations");
         group.MapGet("/tat-targets", ListTatAsync).WithName("ListTatTargets");
+
+        // -------- Tipos de muestra / tubos (LIS-RD-26/16) --------
+        group.MapGet("/specimen-types", ListSpecimenTypesAsync).WithName("ListSpecimenTypes");
+        group.MapGet("/tube-types", ListTubeTypesAsync).WithName("ListTubeTypes");
 
         return app;
     }
@@ -159,6 +164,20 @@ public static class LabCatalogEndpoints
         return Results.Ok(result);
     }
 
+    private static async Task<IResult> ListSpecimenTypesAsync(
+        ClaimsPrincipal principal, ListSpecimenTypesHandler handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new ListSpecimenTypesQuery(ParseOrganizationId(principal)), cancellationToken);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> ListTubeTypesAsync(
+        ClaimsPrincipal principal, ListTubeTypesHandler handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new ListTubeTypesQuery(ParseOrganizationId(principal)), cancellationToken);
+        return Results.Ok(result);
+    }
+
     private static async Task<IResult> CreateRangeAsync(
         CreateReferenceRangeRequest request, ClaimsPrincipal principal, CreateReferenceRangeHandler handler, CancellationToken cancellationToken)
     {
@@ -180,8 +199,21 @@ public static class LabCatalogEndpoints
         try
         {
             var result = await handler.HandleAsync(new UpdateReferenceRangeCommand(
-                id, request.Low, request.High, request.CriticalLow, request.CriticalHigh), cancellationToken);
+                id, request.Sex, request.AgeMinYears, request.AgeMaxYears, request.Pregnancy, request.Method,
+                request.Low, request.High, request.CriticalLow, request.CriticalHigh, request.Unit), cancellationToken);
             return Results.Ok(result);
+        }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+        catch (ArgumentException ex) { return BadRequest(ex); }
+    }
+
+    private static async Task<IResult> DeleteRangeAsync(
+        Guid id, DeleteReferenceRangeHandler handler, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await handler.HandleAsync(new DeleteReferenceRangeCommand(id), cancellationToken);
+            return Results.NoContent();
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
     }
@@ -252,6 +284,8 @@ public sealed record CreateReferenceRangeRequest(
     Guid TestId, string Sex, int? AgeMinYears, int? AgeMaxYears, bool? Pregnancy, string? Method,
     decimal? Low, decimal? High, decimal? CriticalLow, decimal? CriticalHigh, string? Unit);
 
-public sealed record UpdateReferenceRangeRequest(decimal? Low, decimal? High, decimal? CriticalLow, decimal? CriticalHigh);
+public sealed record UpdateReferenceRangeRequest(
+    string Sex, int? AgeMinYears, int? AgeMaxYears, bool? Pregnancy, string? Method,
+    decimal? Low, decimal? High, decimal? CriticalLow, decimal? CriticalHigh, string? Unit);
 
 public sealed record SetOfferingRequest(Guid TestId, bool Offered);

@@ -43,6 +43,15 @@ public sealed class LabTestDefinition
     /// <summary>Instrucción al paciente (suspensión de medicamentos, etc.).</summary>
     public string? PatientInstruction { get; private set; }
 
+    /// <summary>Tipo de muestra del catálogo (LIS-RD-26). Null mientras no se mapee.</summary>
+    public Guid? SpecimenTypeId { get; private set; }
+
+    /// <summary>Tubo de sangre (subtipo, LIS-RD-16). Null si no aplica (orina, hisopado…).</summary>
+    public Guid? TubeTypeId { get; private set; }
+
+    /// <summary>Override del modo de colección; null = hereda del tipo de muestra (LIS-RD-23).</summary>
+    public CollectionMode? CollectionMode { get; private set; }
+
     /// <summary>Permite deprecar sin borrar para preservar referencias históricas.</summary>
     public bool Active { get; private set; } = true;
 
@@ -123,6 +132,22 @@ public sealed class LabTestDefinition
     public void SetActive(bool active, TimeProvider? timeProvider = null)
     {
         Active = active;
+        Touch(timeProvider);
+    }
+
+    /// <summary>
+    /// Asocia la prueba a su tipo de muestra y tubo (LIS-RD-16/26). El
+    /// <paramref name="collectionMode"/> es un override; null = hereda del tipo.
+    /// </summary>
+    public void SetSpecimenMapping(
+        Guid? specimenTypeId,
+        Guid? tubeTypeId,
+        CollectionMode? collectionMode,
+        TimeProvider? timeProvider = null)
+    {
+        SpecimenTypeId = specimenTypeId;
+        TubeTypeId = tubeTypeId;
+        CollectionMode = collectionMode;
         Touch(timeProvider);
     }
 

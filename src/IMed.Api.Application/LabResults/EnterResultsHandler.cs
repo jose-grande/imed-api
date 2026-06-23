@@ -69,6 +69,8 @@ public sealed class EnterResultsHandler(
         {
             string? flagCode = null;
             decimal? low = null, high = null;
+            string? appliesToSex = null;
+            int? appliesAgeMin = null, appliesAgeMax = null;
 
             if (line.ValueNumeric is { } value && !string.IsNullOrWhiteSpace(line.Loinc))
             {
@@ -80,6 +82,9 @@ public sealed class EnterResultsHandler(
                     flagCode = interp.Code;
                     low = interp.Low;
                     high = interp.High;
+                    appliesToSex = interp.AppliesToSex?.ToString();
+                    appliesAgeMin = interp.AppliesToAgeMin;
+                    appliesAgeMax = interp.AppliesToAgeMax;
                 }
             }
 
@@ -122,7 +127,11 @@ public sealed class EnterResultsHandler(
                 ReferenceHigh: high,
                 SpecimenFhirId: specimenFhirId,
                 EffectiveDateTime: now,
-                PerformerReference: performerRef), ct);
+                PerformerReference: performerRef,
+                ServiceRequestFhirId: cmd.ServiceRequestId,
+                AppliesToSex: appliesToSex,
+                AppliesToAgeMin: appliesAgeMin,
+                AppliesToAgeMax: appliesAgeMax), ct);
 
             observationIds.Add(obsId);
             observations.Add(new EnteredObservation(obsId, line.CodeText, flagCode, verdict.AutoValidated));
@@ -135,6 +144,32 @@ public sealed class EnterResultsHandler(
 
         var reportStatus = allAutoValidated ? "final" : "preliminary";
 
+        // Panel: con varias observaciones, crear una Observation "grouper" value-less
+        // (código LOINC del panel) con hasMember → componentes (LIS-RD-05, IG europeo).
+        // result[] del informe = grouper + atómicas.
+        var resultIdsForReport = new List<string>(observationIds);
+        if (observationIds.Count > 1)
+        {
+            var grouperId = await hapi.CreateObservationAsync(new UpsertObservationRequest(
+                PartitionName: partition,
+                PatientFhirId: order.PatientFhirId,
+                Status: reportStatus,
+                LoincCode: order.LoincCode,
+                CodeText: order.CodeText ?? cmd.Results[0].CodeText,
+                ValueNumeric: null,
+                ValueUnit: null,
+                ValueString: null,
+                InterpretationCode: null,
+                ReferenceLow: null,
+                ReferenceHigh: null,
+                SpecimenFhirId: specimenFhirId,
+                EffectiveDateTime: now,
+                PerformerReference: performerRef,
+                ServiceRequestFhirId: cmd.ServiceRequestId,
+                HasMemberObservationIds: observationIds), ct);
+            resultIdsForReport.Insert(0, grouperId);
+        }
+
         var reportId = await hapi.CreateDiagnosticReportAsync(new UpsertDiagnosticReportRequest(
             PartitionName: partition,
             PatientFhirId: order.PatientFhirId,
@@ -142,7 +177,7 @@ public sealed class EnterResultsHandler(
             Status: reportStatus,
             LoincCode: order.LoincCode,
             CodeText: order.CodeText ?? cmd.Results[0].CodeText,
-            ResultObservationIds: observationIds,
+            ResultObservationIds: resultIdsForReport,
             SpecimenFhirId: specimenFhirId,
             PerformerReference: performerRef,
             PerformerDisplay: inHouse ? null : (cmd.ExternalLabName ?? "Laboratorio externo"),

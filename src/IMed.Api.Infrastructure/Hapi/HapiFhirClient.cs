@@ -2042,6 +2042,17 @@ public sealed class HapiFhirClient(
         return await SearchLabOrdersAsync(url, partitionName, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<LabOrderSnapshot>> SearchActiveLabOrdersAsync(
+        string partitionName, CancellationToken cancellationToken = default)
+    {
+        await EnsureBearerAsync(cancellationToken);
+        var url = $"ServiceRequest?category={Uri.EscapeDataString(SnomedSystem + "|" + LabCategoryCode)}"
+                  + "&status=active"
+                  + "&_sort=-authored"
+                  + "&_count=200";
+        return await SearchLabOrdersAsync(url, partitionName, cancellationToken);
+    }
+
     private async Task<IReadOnlyList<LabOrderSnapshot>> SearchLabOrdersAsync(
         string url, string partitionName, CancellationToken cancellationToken)
     {
@@ -2306,8 +2317,20 @@ public sealed class HapiFhirClient(
             ["subject"] = new { reference = $"Patient/{req.PatientFhirId}" },
             ["receivedTime"] = req.ReceivedTime,
             ["accessionIdentifier"] = new { system = AccessionSystem, value = req.AccessionNumber },
-            ["request"] = new object[] { new { reference = $"ServiceRequest/{req.ServiceRequestFhirId}" } },
         };
+        // Specimen.request[] — la(s) orden(es) que cubre esta muestra (N:M, LIS-RD-03).
+        var requestRefs = new List<object> { new { reference = $"ServiceRequest/{req.ServiceRequestFhirId}" } };
+        if (req.AdditionalServiceRequestFhirIds is { Count: > 0 })
+        {
+            foreach (var extra in req.AdditionalServiceRequestFhirIds)
+            {
+                if (!string.IsNullOrWhiteSpace(extra) && !string.Equals(extra, req.ServiceRequestFhirId, StringComparison.Ordinal))
+                {
+                    requestRefs.Add(new { reference = $"ServiceRequest/{extra}" });
+                }
+            }
+        }
+        payload["request"] = requestRefs.ToArray();
         if (!string.IsNullOrWhiteSpace(req.TypeText))
         {
             payload["type"] = new { text = req.TypeText };
@@ -2327,9 +2350,26 @@ public sealed class HapiFhirClient(
                 code = "h"
             };
         }
+        if (!string.IsNullOrWhiteSpace(req.CollectorPractitionerId))
+        {
+            collection["collector"] = new { reference = $"Practitioner/{req.CollectorPractitionerId}" };
+        }
+        if (!string.IsNullOrWhiteSpace(req.CollectionMethod))
+        {
+            collection["method"] = new { text = req.CollectionMethod };
+        }
+        if (!string.IsNullOrWhiteSpace(req.CollectionBodySite))
+        {
+            // R5: Specimen.collection.bodySite es CodeableReference → texto en .concept.
+            collection["bodySite"] = new { concept = new { text = req.CollectionBodySite } };
+        }
         if (collection.Count > 0)
         {
             payload["collection"] = collection;
+        }
+        if (!string.IsNullOrWhiteSpace(req.ParentSpecimenFhirId))
+        {
+            payload["parent"] = new object[] { new { reference = $"Specimen/{req.ParentSpecimenFhirId}" } };
         }
         if (!string.IsNullOrWhiteSpace(req.Note))
         {
@@ -2427,6 +2467,10 @@ public sealed class HapiFhirClient(
             ["effectiveDateTime"] = request.EffectiveDateTime,
             ["issued"] = request.EffectiveDateTime,
         };
+        if (!string.IsNullOrWhiteSpace(request.ServiceRequestFhirId))
+        {
+            payload["basedOn"] = new object[] { new { reference = $"ServiceRequest/{request.ServiceRequestFhirId}" } };
+        }
         if (request.ValueNumeric is { } num)
         {
             payload["valueQuantity"] = new
@@ -2448,7 +2492,10 @@ public sealed class HapiFhirClient(
                 new { coding = new object[] { new { system = InterpretationSystem, code = request.InterpretationCode } } }
             };
         }
-        if (request.ReferenceLow is not null || request.ReferenceHigh is not null)
+        var hasRange = request.ReferenceLow is not null || request.ReferenceHigh is not null
+                       || !string.IsNullOrWhiteSpace(request.AppliesToSex)
+                       || request.AppliesToAgeMin is not null || request.AppliesToAgeMax is not null;
+        if (hasRange)
         {
             var range = new Dictionary<string, object?>();
             if (request.ReferenceLow is { } lo)
@@ -2459,6 +2506,24 @@ public sealed class HapiFhirClient(
             {
                 range["high"] = new { value = hi, unit = request.ValueUnit, system = UcumSystem, code = request.ValueUnit };
             }
+            // R2: población del rango — appliesTo (sexo) + age (Range en años).
+            if (!string.IsNullOrWhiteSpace(request.AppliesToSex))
+            {
+                range["appliesTo"] = new object[] { new { text = request.AppliesToSex } };
+            }
+            if (request.AppliesToAgeMin is not null || request.AppliesToAgeMax is not null)
+            {
+                var age = new Dictionary<string, object?>();
+                if (request.AppliesToAgeMin is { } amin)
+                {
+                    age["low"] = new { value = amin, unit = "a", system = UcumSystem, code = "a" };
+                }
+                if (request.AppliesToAgeMax is { } amax)
+                {
+                    age["high"] = new { value = amax, unit = "a", system = UcumSystem, code = "a" };
+                }
+                range["age"] = age;
+            }
             payload["referenceRange"] = new object[] { range };
         }
         if (!string.IsNullOrWhiteSpace(request.SpecimenFhirId))
@@ -2468,6 +2533,25 @@ public sealed class HapiFhirClient(
         if (!string.IsNullOrWhiteSpace(request.PerformerReference))
         {
             payload["performer"] = new object[] { new { reference = request.PerformerReference } };
+        }
+        // R2: agrupación de panel — Observation grouper (value-less) → componentes.
+        if (request.HasMemberObservationIds is { Count: > 0 })
+        {
+            payload["hasMember"] = request.HasMemberObservationIds
+                .Select(id => new { reference = $"Observation/{id}" })
+                .ToArray();
+        }
+        // R2: reflejo (R5 Observation.triggeredBy).
+        if (!string.IsNullOrWhiteSpace(request.TriggeredByObservationId))
+        {
+            payload["triggeredBy"] = new object[]
+            {
+                new
+                {
+                    observation = new { reference = $"Observation/{request.TriggeredByObservationId}" },
+                    type = request.TriggeredByType ?? "reflex"
+                }
+            };
         }
 
         return await PostFhirResourceAsync("Observation", payload, request.PartitionName, cancellationToken);

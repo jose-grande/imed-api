@@ -91,6 +91,15 @@ public sealed class LabCatalogSeeder(
             ["UA_COLOR", "UA_PH", "UA_SG", "UA_GLU", "UA_PROT"]),
     ];
 
+    // LOINC de panel cuando existe (dual coding, LIS-RD-22). Los demás quedan solo con código local.
+    private static readonly Dictionary<string, string> PanelLoinc = new(StringComparer.Ordinal)
+    {
+        ["CBC"] = "58410-2",
+        ["BMP"] = "51990-0",
+        ["CMP"] = "24323-8",
+        ["LIPID"] = "57698-3",
+    };
+
     // (testCode, sex, ageMin, ageMax, low, high, critLow, critHigh, unit)
     private static readonly (string Test, ReferenceSex Sex, int? AgeMin, int? AgeMax, decimal? Low, decimal? High, decimal? CritLow, decimal? CritHigh, string? Unit)[] Ranges =
     [
@@ -142,6 +151,42 @@ public sealed class LabCatalogSeeder(
         (TatScope.Test, "K", LabRequestPriority.Stat, 30),
     ];
 
+    // (code, name, collectionMode, method?, bodySite?, container, stabilityMin?, discipline) — LIS-RD-26
+    private static readonly (string Code, string Name, CollectionMode Mode, string? Method, string? BodySite, ContainerKind Container, int? Stability, LabDepartment Discipline)[] SpecimenTypes =
+    [
+        ("BLOOD", "Sangre", CollectionMode.OnSite, "Venopunción", null, ContainerKind.Tube, null, LabDepartment.Other),
+        ("URINE", "Orina", CollectionMode.PatientCollected, null, null, ContainerKind.Cup, 120, LabDepartment.Urinalysis),
+        ("SWAB", "Hisopado", CollectionMode.OnSite, "Hisopado", null, ContainerKind.Swab, null, LabDepartment.Microbiology),
+        ("SEMEN", "Semen (espermograma)", CollectionMode.OnSite, "Masturbación", null, ContainerKind.Cup, 60, LabDepartment.Other),
+        ("SALIVA", "Saliva", CollectionMode.PatientCollected, null, null, ContainerKind.Cup, null, LabDepartment.Other),
+        ("STOOL", "Heces", CollectionMode.PatientCollected, null, null, ContainerKind.SterileContainer, null, LabDepartment.Microbiology),
+        ("CSF", "Líquido cefalorraquídeo (LCR)", CollectionMode.OnSite, "Punción lumbar", null, ContainerKind.SterileContainer, 60, LabDepartment.Other),
+        ("TISSUE", "Tejido (biopsia)", CollectionMode.OnSite, "Biopsia", null, ContainerKind.SterileContainer, null, LabDepartment.Other),
+    ];
+
+    // (code, name, color, additive, volumeMinMl) — LIS-RD-16
+    private static readonly (string Code, string Name, string Color, string Additive, decimal? Vol)[] TubeTypes =
+    [
+        ("EDTA", "Tubo EDTA (tapa lila)", "lila", "EDTA K2/K3", 3m),
+        ("SST", "Tubo con gel separador (tapa dorada)", "dorado", "Activador de coágulo + gel (SST)", 5m),
+        ("CIT", "Tubo citrato (tapa celeste)", "celeste", "Citrato de sodio 3.2%", 2.7m),
+        ("HEP", "Tubo heparina (tapa verde)", "verde", "Heparina de litio", 4m),
+    ];
+
+    /// <summary>Mapea una prueba a su tipo de muestra + tubo por departamento (LIS-RD-16/26).</summary>
+    private static (string SpecimenCode, string? TubeCode) MapSpecimen(LabTestDefinition test)
+    {
+        var isUrine = test.CollectionType?.StartsWith("urine", StringComparison.OrdinalIgnoreCase) == true;
+        return test.Department switch
+        {
+            LabDepartment.Hematology => ("BLOOD", "EDTA"),
+            LabDepartment.Chemistry => ("BLOOD", "SST"),
+            LabDepartment.Immunology => ("BLOOD", "SST"),
+            LabDepartment.Urinalysis => ("URINE", null),
+            _ => isUrine ? ("URINE", null) : ("BLOOD", "SST"),
+        };
+    }
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         try
@@ -163,7 +208,8 @@ public sealed class LabCatalogSeeder(
 
             if (hasGlobals)
             {
-                logger.LogDebug("Catálogo de laboratorio global ya sembrado; skip seed.");
+                logger.LogDebug("Catálogo de laboratorio global ya sembrado; verificando catálogo de muestras.");
+                await SeedSpecimenCatalogAsync(db, cancellationToken);
                 return;
             }
 
@@ -183,7 +229,8 @@ public sealed class LabCatalogSeeder(
             // 2) Paneles + versión v1 activa + items.
             foreach (var p in Panels)
             {
-                var panel = LabPanel.Create(p.Code, p.Name, p.Description, timeProvider: timeProvider);
+                var panel = LabPanel.Create(
+                    p.Code, p.Name, p.Description, loincCode: PanelLoinc.GetValueOrDefault(p.Code), timeProvider: timeProvider);
                 db.LabPanels.Add(panel);
 
                 var version = LabPanelVersion.Create(panel.Id, 1, effectiveDate, PanelVersionStatus.Active, timeProvider);
@@ -229,14 +276,62 @@ public sealed class LabCatalogSeeder(
 
             await db.SaveChangesAsync(cancellationToken);
 
+            // 6) Tipos de muestra + tubos + mapeo (idempotente; ver SeedSpecimenCatalogAsync).
+            await SeedSpecimenCatalogAsync(db, cancellationToken);
+
             logger.LogInformation(
-                "Lab catalog seed cargado: {Tests} pruebas, {Panels} paneles, {Ranges} rangos, {Derived} fórmulas, {Tat} TAT targets.",
-                testsByCode.Count, Panels.Length, Ranges.Length, Derived.Length, TatTargets.Length);
+                "Lab catalog seed cargado: {Tests} pruebas, {Panels} paneles, {Ranges} rangos, {Derived} fórmulas, {Tat} TAT targets, {Specimens} tipos de muestra, {Tubes} tubos.",
+                testsByCode.Count, Panels.Length, Ranges.Length, Derived.Length, TatTargets.Length, SpecimenTypes.Length, TubeTypes.Length);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "LabCatalogSeeder falló; el catálogo de laboratorio puede estar incompleto.");
         }
+    }
+
+    /// <summary>
+    /// Siembra los tipos de muestra + tubos globales (LIS-RD-26/16) y mapea las
+    /// pruebas globales que aún no tienen tipo de muestra. Idempotente: sirve
+    /// tanto para DB fresca como para backfill de catálogos ya sembrados.
+    /// </summary>
+    private async Task SeedSpecimenCatalogAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        if (!await db.SpecimenTypes.AnyAsync(s => s.OrganizationId == null, cancellationToken))
+        {
+            foreach (var s in SpecimenTypes)
+            {
+                db.SpecimenTypes.Add(SpecimenType.Create(
+                    s.Code, s.Name, s.Mode, snomedCode: null, defaultMethod: s.Method,
+                    defaultBodySite: s.BodySite, containerKind: s.Container, stabilityMinutes: s.Stability,
+                    discipline: s.Discipline, timeProvider: timeProvider));
+            }
+            foreach (var t in TubeTypes)
+            {
+                db.TubeTypes.Add(TubeType.Create(t.Code, t.Name, t.Color, t.Additive, t.Vol, timeProvider: timeProvider));
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Backfill: mapear pruebas globales sin tipo de muestra.
+        var specimenByCode = (await db.SpecimenTypes.Where(s => s.OrganizationId == null).ToListAsync(cancellationToken))
+            .ToDictionary(s => s.Code, StringComparer.Ordinal);
+        var tubeByCode = (await db.TubeTypes.Where(t => t.OrganizationId == null).ToListAsync(cancellationToken))
+            .ToDictionary(t => t.Code, StringComparer.Ordinal);
+        var unmapped = await db.LabTests
+            .Where(t => t.OrganizationId == null && t.SpecimenTypeId == null)
+            .ToListAsync(cancellationToken);
+        if (unmapped.Count == 0)
+        {
+            return;
+        }
+        foreach (var test in unmapped)
+        {
+            var (specimenCode, tubeCode) = MapSpecimen(test);
+            Guid? specimenId = specimenByCode.TryGetValue(specimenCode, out var sp) ? sp.Id : null;
+            Guid? tubeId = tubeCode is not null && tubeByCode.TryGetValue(tubeCode, out var tb) ? tb.Id : null;
+            test.SetSpecimenMapping(specimenId, tubeId, collectionMode: null, timeProvider: timeProvider);
+        }
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

@@ -24,6 +24,8 @@ public interface ILabCatalogRepository
     // ---- Paneles ----
     Task<IReadOnlyList<LabPanel>> ListPanelsAsync(Guid? organizationId, CancellationToken cancellationToken = default);
     Task<LabPanel?> GetPanelByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Panel activo cuyo Code o LoincCode coincide (recepción: expansión de orden-panel, R3).</summary>
+    Task<LabPanel?> GetPanelByCodeOrLoincAsync(Guid? organizationId, string codeOrLoinc, CancellationToken cancellationToken = default);
     Task<bool> PanelCodeExistsAsync(Guid? organizationId, string code, CancellationToken cancellationToken = default);
     Task AddPanelAsync(LabPanel panel, CancellationToken cancellationToken = default);
     Task<LabPanelVersion?> GetActiveVersionAsync(Guid panelId, CancellationToken cancellationToken = default);
@@ -37,6 +39,11 @@ public interface ILabCatalogRepository
     Task<ReferenceRange?> GetRangeByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task AddRangeAsync(ReferenceRange range, CancellationToken cancellationToken = default);
     Task UpdateRangeAsync(ReferenceRange range, CancellationToken cancellationToken = default);
+    Task DeleteRangeAsync(ReferenceRange range, CancellationToken cancellationToken = default);
+
+    // ---- Tipos de muestra / tubos (LIS-RD-26/16) ----
+    Task<IReadOnlyList<SpecimenType>> ListSpecimenTypesAsync(Guid? organizationId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TubeType>> ListTubeTypesAsync(Guid? organizationId, CancellationToken cancellationToken = default);
 
     // ---- Ofertas por sede ----
     Task<LabTestOffering?> GetOfferingAsync(Guid organizationId, Guid testId, CancellationToken cancellationToken = default);

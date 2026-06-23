@@ -2,8 +2,14 @@ using IMed.Api.Domain.Catalogs.Lab;
 
 namespace IMed.Api.Application.LabResults;
 
-/// <summary>Flag de interpretación + rango aplicado (Épica LIS-4, L4-D2).</summary>
-public sealed record InterpretationResult(string? Code, decimal? Low, decimal? High);
+/// <summary>Flag de interpretación + rango aplicado (Épica LIS-4, L4-D2). <see cref="AppliesToSex"/>/<see cref="AppliesToAgeMin"/>/<see cref="AppliesToAgeMax"/> = población del rango elegido (R2: Observation.referenceRange.appliesTo/age).</summary>
+public sealed record InterpretationResult(
+    string? Code,
+    decimal? Low,
+    decimal? High,
+    ReferenceSex? AppliesToSex = null,
+    int? AppliesToAgeMin = null,
+    int? AppliesToAgeMax = null);
 
 /// <summary>
 /// Calcula el flag de un resultado numérico contra los rangos de referencia
@@ -44,7 +50,11 @@ public static class ResultInterpreter
         {
             code = "H";
         }
-        return new InterpretationResult(code, match.Low, match.High);
+        return new InterpretationResult(
+            code, match.Low, match.High,
+            AppliesToSex: match.Sex == ReferenceSex.Any ? null : match.Sex,
+            AppliesToAgeMin: match.AgeMinYears,
+            AppliesToAgeMax: match.AgeMaxYears);
     }
 
     public static ReferenceSex ParseSex(string? gender) => gender?.Trim().ToLowerInvariant() switch

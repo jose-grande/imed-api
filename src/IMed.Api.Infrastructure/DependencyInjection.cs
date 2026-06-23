@@ -13,6 +13,7 @@ using IMed.Api.Application.LabDashboard;
 using IMed.Api.Application.LabOrders;
 using IMed.Api.Application.LabReception;
 using IMed.Api.Application.LabResults;
+using IMed.Api.Application.LabSpecimens;
 using IMed.Api.Application.LabRules;
 using IMed.Api.Application.Labs;
 using IMed.Api.Application.Medications;
@@ -340,15 +341,28 @@ public static class DependencyInjection
         services.AddScoped<ListReferenceRangesHandler>();
         services.AddScoped<CreateReferenceRangeHandler>();
         services.AddScoped<UpdateReferenceRangeHandler>();
+        services.AddScoped<DeleteReferenceRangeHandler>();
         services.AddScoped<SetOfferingHandler>();
         services.AddScoped<ListDerivedCalculationsHandler>();
         services.AddScoped<ListTatTargetsHandler>();
+        services.AddScoped<ListSpecimenTypesHandler>();
+        services.AddScoped<ListTubeTypesHandler>();
 
         // Lab reception (Épica LIS-3)
         services.AddScoped<ResolveReceptionOrderHandler>();
         services.AddScoped<CreateExternalOrderHandler>();
         services.AddScoped<ReceiveSpecimenHandler>();
+        services.AddScoped<ResolveRequisitionHandler>();
+        services.AddScoped<ReceiveRequisitionHandler>();
+        services.AddScoped<GetPendingOrdersHandler>();
+        services.AddScoped<GetSpecimenLabelHandler>();
+        services.AddScoped<GetCollectionQueueHandler>();
         services.AddScoped<GetWorklistHandler>();
+
+        // Lab specimen ops (R5: alícuotas / almacenamiento / estabilidad)
+        services.AddScoped<CreateAliquotHandler>();
+        services.AddScoped<RecordStorageHandler>();
+        services.AddScoped<CheckStabilityHandler>();
 
         // Lab results (Épica LIS-4)
         services.AddScoped<EnterResultsHandler>();

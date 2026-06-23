@@ -33,6 +33,48 @@ internal static class LabRouting
         Enum.TryParse<LabRequestPriority>(priority, ignoreCase: true, out var p) ? p : LabRequestPriority.Routine;
 
     public static string PartitionOf(Guid orgId) => $"org-{orgId}";
+
+    /// <summary>
+    /// Expande una orden a sus pruebas efectivas (R3, LIS-RD-01): si el código es
+    /// un **panel** (por code local o LOINC), devuelve sus pruebas de la versión
+    /// activa; si es una prueba suelta, la devuelve sola. Cada prueba con su
+    /// enrutamiento in-house/send-out.
+    /// </summary>
+    public static async Task<IReadOnlyList<(LabTestDefinition Test, OrderRouting Routing)>> ExpandOrderAsync(
+        ILabCatalogRepository catalog, Guid orgId, string? loincOrPanelCode, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(loincOrPanelCode))
+        {
+            return Array.Empty<(LabTestDefinition, OrderRouting)>();
+        }
+
+        var panel = await catalog.GetPanelByCodeOrLoincAsync(orgId, loincOrPanelCode, ct);
+        if (panel is not null)
+        {
+            var version = await catalog.GetActiveVersionAsync(panel.Id, ct);
+            if (version is not null)
+            {
+                var items = await catalog.GetVersionItemsAsync(version.Id, ct);
+                var tests = (await catalog.GetTestsByIdsAsync(items.Select(i => i.LabTestId).ToList(), ct))
+                    .ToDictionary(t => t.Id);
+                var result = new List<(LabTestDefinition, OrderRouting)>();
+                foreach (var item in items.OrderBy(i => i.DisplayOrder))
+                {
+                    if (!tests.TryGetValue(item.LabTestId, out var t))
+                    {
+                        continue;
+                    }
+                    var offering = await catalog.GetOfferingAsync(orgId, t.Id, ct);
+                    var offered = offering?.Offered ?? true;
+                    result.Add((t, offered && t.Active ? OrderRouting.InHouse : OrderRouting.SendOut));
+                }
+                return result;
+            }
+        }
+
+        var (routing, test) = await ResolveAsync(catalog, orgId, loincOrPanelCode, ct);
+        return test is not null ? [(test, routing)] : Array.Empty<(LabTestDefinition, OrderRouting)>();
+    }
 }
 
 // ---------------------------------------------------------------------------

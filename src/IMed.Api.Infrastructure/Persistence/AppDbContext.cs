@@ -40,6 +40,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<ReferenceRange> ReferenceRanges => Set<ReferenceRange>();
     public DbSet<DerivedCalculation> DerivedCalculations => Set<DerivedCalculation>();
     public DbSet<TatTarget> TatTargets => Set<TatTarget>();
+    public DbSet<SpecimenType> SpecimenTypes => Set<SpecimenType>();
+    public DbSet<TubeType> TubeTypes => Set<TubeType>();
 
     // Operación del laboratorio (Épica LIS-3)
     public DbSet<OrderIntake> OrderIntakes => Set<OrderIntake>();
@@ -75,6 +77,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureReferenceRange(modelBuilder);
         ConfigureDerivedCalculation(modelBuilder);
         ConfigureTatTarget(modelBuilder);
+        ConfigureSpecimenType(modelBuilder);
+        ConfigureTubeType(modelBuilder);
 
         ConfigureOrderIntake(modelBuilder);
         ConfigureSpecimenEvent(modelBuilder);
@@ -489,6 +493,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.FastingHours);
             e.Property(x => x.CollectionType).HasMaxLength(40);
             e.Property(x => x.PatientInstruction).HasMaxLength(1000);
+            e.Property(x => x.SpecimenTypeId);
+            e.Property(x => x.TubeTypeId);
+            e.Property(x => x.CollectionMode).HasConversion<string>().HasMaxLength(20);
             e.Property(x => x.Active).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
@@ -529,6 +536,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Code).HasMaxLength(60).IsRequired();
             e.Property(x => x.Name).HasMaxLength(300).IsRequired();
             e.Property(x => x.Description).HasMaxLength(1000);
+            e.Property(x => x.LoincCode).HasMaxLength(20);
             e.Property(x => x.Active).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
@@ -637,6 +645,54 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         });
     }
 
+    private static void ConfigureSpecimenType(ModelBuilder b)
+    {
+        b.Entity<SpecimenType>(e =>
+        {
+            e.ToTable("specimen_type");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.SnomedCode).HasMaxLength(40);
+            e.Property(x => x.CollectionMode).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.DefaultMethod).HasMaxLength(120);
+            e.Property(x => x.DefaultBodySite).HasMaxLength(120);
+            e.Property(x => x.ContainerKind).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.StabilityMinutes);
+            e.Property(x => x.Discipline).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_specimen_type_org_code");
+        });
+    }
+
+    private static void ConfigureTubeType(ModelBuilder b)
+    {
+        b.Entity<TubeType>(e =>
+        {
+            e.ToTable("tube_type");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Color).HasMaxLength(40);
+            e.Property(x => x.Additive).HasMaxLength(120);
+            e.Property(x => x.VolumeMinMl).HasPrecision(6, 2);
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_tube_type_org_code");
+        });
+    }
+
     private static void ConfigureOrderIntake(ModelBuilder b)
     {
         b.Entity<OrderIntake>(e =>
@@ -647,6 +703,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.ServiceRequestFhirId).HasMaxLength(64).IsRequired();
             e.Property(x => x.SpecimenFhirId).HasMaxLength(64);
             e.Property(x => x.PatientFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Requisition).HasMaxLength(64);
+            e.Property(x => x.SpecimenTypeCode).HasMaxLength(40);
+            e.Property(x => x.TubeCode).HasMaxLength(40);
             e.Property(x => x.Routing).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.Priority).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.ScheduledFor);

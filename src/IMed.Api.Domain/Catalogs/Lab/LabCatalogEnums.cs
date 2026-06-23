@@ -56,3 +56,31 @@ public enum LabRequestPriority
     Asap = 2,
     Stat = 3,
 }
+
+/// <summary>
+/// Modo de colección de una muestra (LIS-RD-23). Distingue lo que el paciente
+/// trae ya tomado de lo que se toma en el laboratorio.
+/// </summary>
+public enum CollectionMode
+{
+    /// <summary>El paciente la trae ya tomada (orina espontánea, heces).</summary>
+    PatientCollected = 0,
+
+    /// <summary>Se toma en el laboratorio (sangre, hisopado, OGTT). Va a la cola de toma.</summary>
+    OnSite = 1,
+}
+
+/// <summary>
+/// Tipo de recipiente de la muestra (LIS-RD-16/26). El tubo de sangre es el caso
+/// particular (<see cref="TubeType"/>); aquí se generaliza a frasco, hisopo, etc.
+/// </summary>
+public enum ContainerKind
+{
+    Tube = 0,
+    Cup = 1,
+    SterileContainer = 2,
+    Swab = 3,
+    Slide = 4,
+    Device = 5,
+    Other = 6,
+}

@@ -31,6 +31,27 @@ public static class LabReceptionEndpoints
             .WithSummary("Recibe la muestra: crea Specimen/accession/intake o bloquea por precondición.")
             .RequireAuthorization("LabTechnician");
 
+        group.MapGet("/requisition/{encounterId}", ResolveRequisitionAsync)
+            .WithName("ResolveRequisition")
+            .WithSummary("Resuelve una visita como requisición: órdenes agrupadas por tipo de muestra a recolectar.");
+
+        group.MapPost("/receive-requisition", ReceiveRequisitionAsync)
+            .WithName("ReceiveRequisition")
+            .WithSummary("Recibe una requisición: una muestra por grupo (N:M), con rechazo/bloqueo por grupo.")
+            .RequireAuthorization("LabTechnician");
+
+        group.MapGet("/pending", GetPendingAsync)
+            .WithName("GetPendingOrders")
+            .WithSummary("Cola de órdenes de laboratorio activas aún no recibidas.");
+
+        group.MapGet("/label/{specimenFhirId}", GetLabelAsync)
+            .WithName("GetSpecimenLabel")
+            .WithSummary("Datos de la etiqueta/código de barras de una muestra (accession + paciente + tipo).");
+
+        group.MapGet("/collection-queue", GetCollectionQueueAsync)
+            .WithName("GetCollectionQueue")
+            .WithSummary("Cola de toma on-site: órdenes activas cuyo tipo de muestra se toma en el laboratorio.");
+
         return app;
     }
 
@@ -96,6 +117,73 @@ public static class LabReceptionEndpoints
         }
     }
 
+    private static async Task<IResult> ResolveRequisitionAsync(
+        string encounterId, ClaimsPrincipal principal, ResolveRequisitionHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        var result = await handler.HandleAsync(orgId.Value, encounterId, ct);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }
+
+    private static async Task<IResult> ReceiveRequisitionAsync(
+        ReceiveRequisitionRequest request, ClaimsPrincipal principal, ReceiveRequisitionHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        var userId = ParseSub(principal);
+        if (orgId is null || userId is null)
+        {
+            return Forbidden();
+        }
+        try
+        {
+            var result = await handler.HandleAsync(new ReceiveRequisitionCommand(
+                orgId.Value, userId.Value, request.Requisition, request.Groups), ct);
+            return Results.Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static async Task<IResult> GetPendingAsync(
+        ClaimsPrincipal principal, GetPendingOrdersHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        return Results.Ok(await handler.HandleAsync(orgId.Value, ct));
+    }
+
+    private static async Task<IResult> GetLabelAsync(
+        string specimenFhirId, ClaimsPrincipal principal, GetSpecimenLabelHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        var result = await handler.HandleAsync(orgId.Value, specimenFhirId, ct);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }
+
+    private static async Task<IResult> GetCollectionQueueAsync(
+        ClaimsPrincipal principal, GetCollectionQueueHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        return Results.Ok(await handler.HandleAsync(orgId.Value, ct));
+    }
+
     private static IResult Forbidden() =>
         Results.Problem(title: "Sin organización", statusCode: StatusCodes.Status403Forbidden);
 
@@ -128,3 +216,7 @@ public sealed record ReceiveRequest(
     string? TypeText,
     string? CollectedDateTime,
     string? Note);
+
+public sealed record ReceiveRequisitionRequest(
+    string Requisition,
+    IReadOnlyList<ReceiveGroup> Groups);

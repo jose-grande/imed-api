@@ -205,6 +205,58 @@ public sealed class LabCatalogTests(ImedApiFixture fixture) : IAsyncLifetime
         ranges!.Should().ContainSingle(r => r.High == 9.0m && r.CriticalHigh == 15.0m);
     }
 
+    [Fact]
+    public async Task UpdateRange_editaSexoEdadUnidad_yLuegoSeBorra()
+    {
+        var client = await AuthedClient();
+        var test = await (await client.PostAsJsonAsync("/api/lab-catalog/tests",
+            new { code = "RNG2", name = "Rango editable", datatype = "Numeric", unit = "g/dL", department = "Hematology" }))
+            .Content.ReadFromJsonAsync<LabTestDto>();
+
+        var created = await (await client.PostAsJsonAsync("/api/lab-catalog/reference-ranges", new
+        {
+            testId = test!.Id, sex = "Any", ageMinYears = (int?)null, ageMaxYears = (int?)null, pregnancy = (bool?)null,
+            method = (string?)null, low = 12.0m, high = 16.0m, criticalLow = (decimal?)null, criticalHigh = (decimal?)null, unit = "g/dL",
+        })).Content.ReadFromJsonAsync<ReferenceRangeDto>();
+
+        // Editar sexo + edad + unidad (antes estaban bloqueados en la UI / no aceptados por el comando)
+        var update = await client.PutAsJsonAsync($"/api/lab-catalog/reference-ranges/{created!.Id}", new
+        {
+            sex = "Female", ageMinYears = 18, ageMaxYears = 50, pregnancy = (bool?)null, method = (string?)null,
+            low = 12.0m, high = 15.5m, criticalLow = 6.0m, criticalHigh = 20.0m, unit = "g/dL",
+        });
+        update.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var afterUpdate = await (await client.GetAsync($"/api/lab-catalog/reference-ranges?testId={test.Id}")).Content.ReadFromJsonAsync<ReferenceRangeDto[]>();
+        afterUpdate!.Should().ContainSingle(r => r.Sex == "Female" && r.AgeMinYears == 18 && r.AgeMaxYears == 50 && r.High == 15.5m);
+
+        // Borrar
+        var del = await client.DeleteAsync($"/api/lab-catalog/reference-ranges/{created.Id}");
+        del.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var afterDelete = await (await client.GetAsync($"/api/lab-catalog/reference-ranges?testId={test.Id}")).Content.ReadFromJsonAsync<ReferenceRangeDto[]>();
+        afterDelete!.Should().BeEmpty();
+    }
+
+    // ----------------------- Tipos de muestra / tubos ----------------------
+
+    [Fact]
+    public async Task SpecimenYTubeCatalog_sembrado_seListaPorEndpoint()
+    {
+        var client = await AuthedClient();
+
+        var specimens = await (await client.GetAsync("/api/lab-catalog/specimen-types"))
+            .Content.ReadFromJsonAsync<SpecimenTypeDto[]>();
+        specimens!.Should().Contain(s => s.Code == "BLOOD" && s.CollectionMode == "OnSite");
+        specimens!.Should().Contain(s => s.Code == "URINE" && s.CollectionMode == "PatientCollected");
+        specimens!.Should().Contain(s => s.Code == "SEMEN", "el catálogo incluye tipos más allá de sangre/orina");
+
+        var tubes = await (await client.GetAsync("/api/lab-catalog/tube-types"))
+            .Content.ReadFromJsonAsync<TubeTypeDto[]>();
+        tubes!.Should().Contain(t => t.Code == "EDTA" && t.Color == "lila");
+        tubes!.Should().Contain(t => t.Code == "SST");
+    }
+
     // ----------------------- Fórmulas calculadas / TAT ---------------------
 
     [Fact]

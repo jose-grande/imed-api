@@ -55,6 +55,7 @@ public sealed class HapiMockServer : IDisposable
         SetupExternalPractitionerSearch();
         SetupServiceRequestCreate();
         SetupServiceRequestGet();
+        SetupServiceRequestSearch();
         SetupSpecimenCreate();
         SetupProvenanceCreate();
         SetupPatientGet();
@@ -432,9 +433,12 @@ public sealed class HapiMockServer : IDisposable
                 var priority = root.TryGetProperty("priority", out var pr) ? pr.GetString() : null;
                 var status = root.TryGetProperty("status", out var st) ? st.GetString() ?? "active" : "active";
                 var intent = root.TryGetProperty("intent", out var it) ? it.GetString() ?? "order" : "order";
+                var encounter = ParseReference(root, "encounter", "Encounter/");
+                string? requisition = root.TryGetProperty("requisition", out var rq) && rq.TryGetProperty("value", out var rqv)
+                    ? rqv.GetString() : null;
 
                 var id = $"sr-{Guid.NewGuid():N}";
-                _serviceRequests[id] = new FakeServiceRequest(id, patientId, loinc, codeText, priority, status, intent);
+                _serviceRequests[id] = new FakeServiceRequest(id, patientId, loinc, codeText, priority, status, intent, encounter, requisition);
                 return JsonMessage(HttpStatusCode.Created, new { resourceType = "ServiceRequest", id, meta = new { versionId = "1" } });
             }));
     }
@@ -459,6 +463,8 @@ public sealed class HapiMockServer : IDisposable
                     status = sr.Status,
                     intent = sr.Intent,
                     subject = new { reference = $"Patient/{sr.PatientFhirId}" },
+                    encounter = sr.Encounter is null ? null : new { reference = $"Encounter/{sr.Encounter}" },
+                    requisition = sr.Requisition is null ? null : new { system = "http://imed.local/requisition", value = sr.Requisition },
                     priority = sr.Priority,
                     code = new
                     {
@@ -473,6 +479,59 @@ public sealed class HapiMockServer : IDisposable
                     }
                 });
             }));
+    }
+
+    /// <summary>Búsqueda de ServiceRequest por encounter/status (recepción por requisición + colas, R1/R3/R5).</summary>
+    private void SetupServiceRequestSearch()
+    {
+        _server
+            .Given(Request.Create().WithPath("/fhir/ServiceRequest").UsingGet())
+            .RespondWith(Response.Create().WithCallback(req =>
+            {
+                string? encParam = req.Query != null && req.Query.TryGetValue("encounter", out var ev) ? ev.FirstOrDefault() : null;
+                string? statusParam = req.Query != null && req.Query.TryGetValue("status", out var sv) ? sv.FirstOrDefault() : null;
+                var encId = encParam?.Replace("Encounter/", string.Empty, StringComparison.Ordinal);
+
+                var matches = _serviceRequests.Values.Where(sr =>
+                    (encId is null || sr.Encounter == encId)
+                    && (statusParam is null || statusParam.Split(',').Contains(sr.Status))).ToList();
+
+                var entries = matches.Select(sr => new
+                {
+                    resource = new
+                    {
+                        resourceType = "ServiceRequest",
+                        id = sr.Id,
+                        status = sr.Status,
+                        intent = sr.Intent,
+                        subject = new { reference = $"Patient/{sr.PatientFhirId}" },
+                        encounter = sr.Encounter is null ? null : new { reference = $"Encounter/{sr.Encounter}" },
+                        priority = sr.Priority,
+                        code = new
+                        {
+                            concept = new
+                            {
+                                coding = sr.Loinc is null ? null : new[]
+                                {
+                                    new { system = "http://loinc.org", code = sr.Loinc, display = sr.CodeText }
+                                },
+                                text = sr.CodeText
+                            }
+                        }
+                    }
+                }).ToArray();
+
+                return JsonMessage(HttpStatusCode.OK, new { resourceType = "Bundle", type = "searchset", total = entries.Length, entry = entries });
+            }));
+    }
+
+    /// <summary>Siembra una orden directamente (helper de tests para flujos de recepción por requisición).</summary>
+    public string SeedServiceRequest(
+        string patientFhirId, string? loinc, string? codeText, string encounter, string requisition, string status = "active")
+    {
+        var id = $"sr-{Guid.NewGuid():N}";
+        _serviceRequests[id] = new FakeServiceRequest(id, patientFhirId, loinc, codeText, "routine", status, "order", encounter, requisition);
+        return id;
     }
 
     private void SetupSpecimenCreate()
@@ -821,7 +880,8 @@ public sealed class HapiMockServer : IDisposable
     private sealed record FakePractitioner(string Id, string Family, string Given, bool Active);
 
     private sealed record FakeServiceRequest(
-        string Id, string PatientFhirId, string? Loinc, string? CodeText, string? Priority, string Status, string Intent);
+        string Id, string PatientFhirId, string? Loinc, string? CodeText, string? Priority, string Status, string Intent,
+        string? Encounter = null, string? Requisition = null);
 
     private sealed record FakeObservation(
         string Id, string PatientFhirId, string? Loinc, string? CodeText, double? ValueNumeric, string? Unit,

@@ -107,6 +107,15 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
     public Task<LabPanel?> GetPanelByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         db.LabPanels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
+    public Task<LabPanel?> GetPanelByCodeOrLoincAsync(
+        Guid? organizationId, string codeOrLoinc, CancellationToken cancellationToken = default) =>
+        db.LabPanels.AsNoTracking()
+            .Where(x => x.Active
+                        && (x.OrganizationId == null || x.OrganizationId == organizationId)
+                        && (x.Code == codeOrLoinc || x.LoincCode == codeOrLoinc))
+            .OrderByDescending(x => x.OrganizationId != null) // preferir override por org sobre el global
+            .FirstOrDefaultAsync(cancellationToken);
+
     public Task<bool> PanelCodeExistsAsync(Guid? organizationId, string code, CancellationToken cancellationToken = default)
     {
         var c = code.Trim();
@@ -184,6 +193,28 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
         db.ReferenceRanges.Update(range);
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task DeleteRangeAsync(ReferenceRange range, CancellationToken cancellationToken = default)
+    {
+        db.ReferenceRanges.Remove(range);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // --------------------- Tipos de muestra / tubos --------------------
+
+    public async Task<IReadOnlyList<SpecimenType>> ListSpecimenTypesAsync(
+        Guid? organizationId, CancellationToken cancellationToken = default) =>
+        await db.SpecimenTypes.AsNoTracking()
+            .Where(x => x.OrganizationId == null || x.OrganizationId == organizationId)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<TubeType>> ListTubeTypesAsync(
+        Guid? organizationId, CancellationToken cancellationToken = default) =>
+        await db.TubeTypes.AsNoTracking()
+            .Where(x => x.OrganizationId == null || x.OrganizationId == organizationId)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
 
     // ------------------------- Ofertas por sede ------------------------
 

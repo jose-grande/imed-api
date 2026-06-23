@@ -163,7 +163,8 @@ public sealed class CreateReferenceRangeHandler(ILabCatalogRepository repo, Time
 }
 
 public sealed record UpdateReferenceRangeCommand(
-    Guid Id, decimal? Low, decimal? High, decimal? CriticalLow, decimal? CriticalHigh);
+    Guid Id, string Sex, int? AgeMinYears, int? AgeMaxYears, bool? Pregnancy, string? Method,
+    decimal? Low, decimal? High, decimal? CriticalLow, decimal? CriticalHigh, string? Unit);
 
 public sealed class UpdateReferenceRangeHandler(ILabCatalogRepository repo, TimeProvider timeProvider)
 {
@@ -171,9 +172,23 @@ public sealed class UpdateReferenceRangeHandler(ILabCatalogRepository repo, Time
     {
         var range = await repo.GetRangeByIdAsync(cmd.Id, cancellationToken)
             ?? throw new KeyNotFoundException($"Rango '{cmd.Id}' no existe.");
-        range.Edit(cmd.Low, cmd.High, cmd.CriticalLow, cmd.CriticalHigh, timeProvider);
+        range.Edit(
+            LabCatalogParsing.Sex(cmd.Sex), cmd.AgeMinYears, cmd.AgeMaxYears, cmd.Pregnancy, cmd.Method,
+            cmd.Low, cmd.High, cmd.CriticalLow, cmd.CriticalHigh, cmd.Unit, timeProvider);
         await repo.UpdateRangeAsync(range, cancellationToken);
         return ReferenceRangeDto.FromDomain(range);
+    }
+}
+
+public sealed record DeleteReferenceRangeCommand(Guid Id);
+
+public sealed class DeleteReferenceRangeHandler(ILabCatalogRepository repo)
+{
+    public async Task HandleAsync(DeleteReferenceRangeCommand cmd, CancellationToken cancellationToken = default)
+    {
+        var range = await repo.GetRangeByIdAsync(cmd.Id, cancellationToken)
+            ?? throw new KeyNotFoundException($"Rango '{cmd.Id}' no existe.");
+        await repo.DeleteRangeAsync(range, cancellationToken);
     }
 }
 

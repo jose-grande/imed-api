@@ -16,6 +16,10 @@ public enum OrderIntakeStatus
     Received = 1,
     Blocked = 2,
     Completed = 3,
+    /// <summary>Muestra rechazada en recepción (hemólisis, insuficiente, etc.) — LIS-RD-17.</summary>
+    Rejected = 4,
+    /// <summary>En cola de toma de muestra on-site (sangre/hisopado/OGTT) — LIS-RD-24.</summary>
+    PendingCollection = 5,
 }
 
 /// <summary>Tipo de evento del ciclo de vida de la muestra.</summary>

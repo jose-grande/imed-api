@@ -21,6 +21,15 @@ public sealed class OrderIntake
 
     public string PatientFhirId { get; private set; } = string.Empty;
 
+    /// <summary>Identificador de agrupación de la visita (requisition FHIR o encounter) — LIS-RD-02.</summary>
+    public string? Requisition { get; private set; }
+
+    /// <summary>Código del tipo de muestra derivado (LIS-RD-26). Null mientras no se clasifica.</summary>
+    public string? SpecimenTypeCode { get; private set; }
+
+    /// <summary>Código del tubo (LIS-RD-16). Null si no aplica.</summary>
+    public string? TubeCode { get; private set; }
+
     public OrderRouting Routing { get; private set; }
     public LabRequestPriority Priority { get; private set; } = LabRequestPriority.Routine;
 
@@ -123,6 +132,29 @@ public sealed class OrderIntake
     public void MarkCompleted(TimeProvider? timeProvider = null)
     {
         Status = OrderIntakeStatus.Completed;
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
+    /// <summary>Rechazo de la muestra en recepción (incidencia preanalítica) — LIS-RD-17.</summary>
+    public void MarkRejected(string reason, Guid by, TimeProvider? timeProvider = null)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("El motivo de rechazo es obligatorio.", nameof(reason));
+        }
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
+        Status = OrderIntakeStatus.Rejected;
+        BlockReason = reason.Trim();
+        ReceivedBy = by;
+        UpdatedAt = now;
+    }
+
+    /// <summary>Clasifica la orden: agrupación (requisition/encounter), tipo de muestra y tubo (LIS-RD-02/16/26).</summary>
+    public void Classify(string? requisition, string? specimenTypeCode, string? tubeCode, TimeProvider? timeProvider = null)
+    {
+        Requisition = string.IsNullOrWhiteSpace(requisition) ? null : requisition.Trim();
+        SpecimenTypeCode = string.IsNullOrWhiteSpace(specimenTypeCode) ? null : specimenTypeCode.Trim();
+        TubeCode = string.IsNullOrWhiteSpace(tubeCode) ? null : tubeCode.Trim();
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 }

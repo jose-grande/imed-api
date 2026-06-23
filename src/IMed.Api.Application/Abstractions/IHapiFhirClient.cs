@@ -220,6 +220,11 @@ public interface IHapiFhirClient
         UpsertSpecimenRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Órdenes de laboratorio activas de la partición (cola de recepción pendiente, R1-F5).</summary>
+    Task<IReadOnlyList<LabOrderSnapshot>> SearchActiveLabOrdersAsync(
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Lee un Specimen por id. Null si no existe.</summary>
     Task<SpecimenSnapshot?> GetSpecimenAsync(
         string specimenFhirId,
@@ -397,7 +402,15 @@ public sealed record UpsertSpecimenRequest(
     string ReceivedTime,
     string? CollectedDateTime,
     int? FastingHours,
-    string? Note);
+    string? Note,
+    // Órdenes adicionales que cubre la misma muestra (N:M, LIS-RD-03). Emite Specimen.request[].
+    IReadOnlyList<string>? AdditionalServiceRequestFhirIds = null,
+    // Detalles de colección on-site (R1-F7, LIS-RD-27): Specimen.collection.collector/method/bodySite.
+    string? CollectorPractitionerId = null,
+    string? CollectionMethod = null,
+    string? CollectionBodySite = null,
+    // Muestra padre (R5: alícuota, LIS-RD-20). Emite Specimen.parent.
+    string? ParentSpecimenFhirId = null);
 
 public sealed record SpecimenSnapshot(
     string Id,
@@ -448,7 +461,15 @@ public sealed record UpsertObservationRequest(
     decimal? ReferenceHigh,
     string? SpecimenFhirId,
     string EffectiveDateTime,
-    string? PerformerReference);
+    string? PerformerReference,
+    // R2 (conformidad R5): trazabilidad y agrupación de panel.
+    string? ServiceRequestFhirId = null,        // Observation.basedOn
+    string? AppliesToSex = null,                 // referenceRange.appliesTo (población)
+    int? AppliesToAgeMin = null,                 // referenceRange.age.low (años)
+    int? AppliesToAgeMax = null,                 // referenceRange.age.high (años)
+    IReadOnlyList<string>? HasMemberObservationIds = null, // Observation panel → componentes
+    string? TriggeredByObservationId = null,     // reflejo (R5 triggeredBy)
+    string? TriggeredByType = null);
 
 public sealed record DiagnosticReportSnapshot(
     string Id,

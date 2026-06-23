@@ -112,3 +112,27 @@ public sealed class ListTatTargetsHandler(ILabCatalogRepository repo)
         return rows.Select(TatTargetDto.FromDomain).ToList();
     }
 }
+
+// ----------------------- Tipos de muestra / tubos ----------------------
+
+public sealed record ListSpecimenTypesQuery(Guid? OrganizationId);
+
+public sealed class ListSpecimenTypesHandler(ILabCatalogRepository repo)
+{
+    public async Task<IReadOnlyList<SpecimenTypeDto>> HandleAsync(ListSpecimenTypesQuery query, CancellationToken cancellationToken = default)
+    {
+        var rows = await repo.ListSpecimenTypesAsync(query.OrganizationId, cancellationToken);
+        return rows.Select(SpecimenTypeDto.FromDomain).ToList();
+    }
+}
+
+public sealed record ListTubeTypesQuery(Guid? OrganizationId);
+
+public sealed class ListTubeTypesHandler(ILabCatalogRepository repo)
+{
+    public async Task<IReadOnlyList<TubeTypeDto>> HandleAsync(ListTubeTypesQuery query, CancellationToken cancellationToken = default)
+    {
+        var rows = await repo.ListTubeTypesAsync(query.OrganizationId, cancellationToken);
+        return rows.Select(TubeTypeDto.FromDomain).ToList();
+    }
+}

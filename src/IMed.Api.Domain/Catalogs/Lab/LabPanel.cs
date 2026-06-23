@@ -19,6 +19,10 @@ public sealed class LabPanel
 
     public string Name { get; private set; } = string.Empty;
     public string? Description { get; private set; }
+
+    /// <summary>Código LOINC del panel cuando existe (CBC 58410-2, CMP 24323-8…). Dual coding (LIS-RD-22).</summary>
+    public string? LoincCode { get; private set; }
+
     public bool Active { get; private set; } = true;
 
     public DateTimeOffset CreatedAt { get; private set; }
@@ -32,6 +36,7 @@ public sealed class LabPanel
         string? description = null,
         Guid? organizationId = null,
         bool active = true,
+        string? loincCode = null,
         TimeProvider? timeProvider = null)
     {
         if (string.IsNullOrWhiteSpace(code))
@@ -50,6 +55,7 @@ public sealed class LabPanel
             Code = code.Trim(),
             Name = name.Trim(),
             Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+            LoincCode = string.IsNullOrWhiteSpace(loincCode) ? null : loincCode.Trim(),
             Active = active,
             CreatedAt = now,
             UpdatedAt = now,

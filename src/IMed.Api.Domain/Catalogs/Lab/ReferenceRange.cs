@@ -86,16 +86,28 @@ public sealed class ReferenceRange
     }
 
     public void Edit(
+        ReferenceSex sex,
+        int? ageMinYears,
+        int? ageMaxYears,
+        bool? pregnancy,
+        string? method,
         decimal? low,
         decimal? high,
         decimal? criticalLow,
         decimal? criticalHigh,
+        string? unit,
         TimeProvider? timeProvider = null)
     {
+        Sex = sex;
+        AgeMinYears = ageMinYears;
+        AgeMaxYears = ageMaxYears;
+        Pregnancy = pregnancy;
+        Method = string.IsNullOrWhiteSpace(method) ? null : method.Trim();
         Low = low;
         High = high;
         CriticalLow = criticalLow;
         CriticalHigh = criticalHigh;
+        Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim();
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 }
