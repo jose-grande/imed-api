@@ -1,6 +1,7 @@
 using System.Text.Json;
 using IMed.Api.Domain.Auditing;
 using IMed.Api.Domain.Catalogs;
+using IMed.Api.Domain.Diagrams;
 using IMed.Api.Domain.Forms;
 using IMed.Api.Domain.Invitations;
 using IMed.Api.Domain.JoinRequests;
@@ -20,6 +21,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
     public DbSet<AppAuditLogEntry> AppAuditLog => Set<AppAuditLogEntry>();
     public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
+    public DbSet<DiagramDefinition> DiagramDefinitions => Set<DiagramDefinition>();
     public DbSet<Icd11Code> Icd11Catalog => Set<Icd11Code>();
     public DbSet<LoincCode> LoincCatalog => Set<LoincCode>();
     public DbSet<SpecialtyCode> SpecialtyCatalog => Set<SpecialtyCode>();
@@ -38,6 +40,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureOutboxEvent(modelBuilder);
         ConfigureAppAuditLog(modelBuilder);
         ConfigureFormDefinition(modelBuilder);
+        ConfigureDiagramDefinition(modelBuilder);
         ConfigureIcd11Code(modelBuilder);
         ConfigureLoincCode(modelBuilder);
         ConfigureSpecialtyCode(modelBuilder);
@@ -166,6 +169,39 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => new { x.OrganizationId, x.Code, x.Version })
                 .IsUnique()
                 .HasDatabaseName("ux_form_definitions_org_code_version");
+        });
+    }
+
+    private static void ConfigureDiagramDefinition(ModelBuilder b)
+    {
+        b.Entity<DiagramDefinition>(e =>
+        {
+            e.ToTable("diagram_definitions");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Code).HasMaxLength(60).IsRequired();
+            e.Property(x => x.SpecialtyCode).HasMaxLength(60);
+            e.Property(x => x.Version).HasMaxLength(20).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Description);
+            e.Property(x => x.SvgContent).HasColumnType("text").IsRequired();
+            e.Property(x => x.ZonesJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.AnnotationStyleJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.LinkedFormCodesJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.ZoneBodySiteMapJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.CreatedBy).IsRequired();
+            e.Property(x => x.PublishedAt);
+            e.Property(x => x.PublishedBy);
+
+            // Búsqueda principal: por org + specialty + status (misma forma que Forms).
+            e.HasIndex(x => new { x.OrganizationId, x.SpecialtyCode, x.Status })
+                .HasDatabaseName("ix_diagram_definitions_org_specialty_status");
+            // Unicidad de (code, version, organization_id) para evitar duplicados.
+            e.HasIndex(x => new { x.OrganizationId, x.Code, x.Version })
+                .IsUnique()
+                .HasDatabaseName("ux_diagram_definitions_org_code_version");
         });
     }
 

@@ -4,6 +4,7 @@ using IMed.Api.Application.Abstractions.Terminology;
 using IMed.Api.Application.Allergies;
 using IMed.Api.Application.Catalogs;
 using IMed.Api.Application.Diagnoses;
+using IMed.Api.Application.Diagrams;
 using IMed.Api.Application.Forms;
 using IMed.Api.Application.Identifiers;
 using IMed.Api.Application.Invitations;
@@ -150,6 +151,7 @@ public static class DependencyInjection
         services.AddHostedService<AllergySeeder>();
         services.AddHostedService<MedicationSeeder>();
         services.AddHostedService<FormDefinitionsSeeder>();
+        services.AddHostedService<DiagramDefinitionsSeeder>();
         services.AddHostedService<Icd11Seeder>();
         services.AddHostedService<LoincSeeder>();
         return services;
@@ -197,6 +199,7 @@ public static class DependencyInjection
         services.AddScoped<IOrganizationProfileRepository, OrganizationProfileRepository>();
         services.AddScoped<IAppAuditLog, AppAuditLog>();
         services.AddScoped<IFormDefinitionRepository, FormDefinitionRepository>();
+        services.AddScoped<IDiagramDefinitionRepository, DiagramDefinitionRepository>();
         services.AddScoped<ISpecialtyRepository, SpecialtyRepository>();
         services.AddScoped<IAllergyCatalogRepository, AllergyCatalogRepository>();
         services.AddScoped<IMedicationCatalogRepository, MedicationCatalogRepository>();
@@ -273,6 +276,17 @@ public static class DependencyInjection
         services.AddScoped<PublishFormHandler>();
         services.AddScoped<RetireFormHandler>();
         services.AddScoped<DeleteFormHandler>();
+
+        // Diagrams
+        services.AddScoped<GetDiagramByIdHandler>();
+        services.AddScoped<ListDiagramsHandler>();
+        services.AddScoped<GetDiagramsBySpecialtyHandler>();
+        services.AddScoped<GetDiagramByCodeHandler>();
+        services.AddScoped<CreateDiagramHandler>();
+        services.AddScoped<UpdateDiagramHandler>();
+        services.AddScoped<PublishDiagramHandler>();
+        services.AddScoped<RetireDiagramHandler>();
+        services.AddScoped<DeleteDiagramHandler>();
 
         // Catalogs
         services.AddScoped<SearchSpecialtyHandler>();

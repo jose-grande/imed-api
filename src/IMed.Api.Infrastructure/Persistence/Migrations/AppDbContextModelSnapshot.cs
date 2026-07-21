@@ -325,6 +325,103 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("specialty_catalog", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Diagrams.DiagramDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AnnotationStyleJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("annotation_style_json");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<string>("LinkedFormCodesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("linked_form_codes_json");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<Guid?>("PublishedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("published_by");
+
+                    b.Property<string>("SpecialtyCode")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("specialty_code");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("SvgContent")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("svg_content");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("version");
+
+                    b.Property<string>("ZoneBodySiteMapJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("zone_body_site_map_json");
+
+                    b.Property<string>("ZonesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("zones_json");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("ux_diagram_definitions_org_code_version");
+
+                    b.HasIndex("OrganizationId", "SpecialtyCode", "Status")
+                        .HasDatabaseName("ix_diagram_definitions_org_specialty_status");
+
+                    b.ToTable("diagram_definitions", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Forms.FormDefinition", b =>
                 {
                     b.Property<Guid>("Id")
