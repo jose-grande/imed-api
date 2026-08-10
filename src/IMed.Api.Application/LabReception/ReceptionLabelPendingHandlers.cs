@@ -46,10 +46,16 @@ public sealed class GetPendingOrdersHandler(IHapiFhirClient hapi, ILabOperations
     {
         var partition = LabRouting.PartitionOf(orgId);
         var orders = await hapi.SearchActiveLabOrdersAsync(partition, ct);
+        // F2: la cola muestra solo órdenes ingresadas (el paciente solicitó hacérselas en la clínica).
+        var checkedIn = await ops.GetCheckedInRequisitionsAsync(orgId, ct);
 
         var pending = new List<PendingOrder>();
         foreach (var o in orders)
         {
+            if (o.Requisition is null || !checkedIn.Contains(o.Requisition))
+            {
+                continue;
+            }
             // Ya tiene intake (recibida/rechazada/bloqueada/referida) → no está pendiente.
             var intake = await ops.GetIntakeByServiceRequestAsync(orgId, o.Id, ct);
             if (intake is not null)
@@ -57,7 +63,7 @@ public sealed class GetPendingOrdersHandler(IHapiFhirClient hapi, ILabOperations
                 continue;
             }
             pending.Add(new PendingOrder(
-                o.Id, o.PatientFhirId, o.EncounterFhirId, o.LoincCode, o.CodeText, o.Priority, o.AuthoredOn));
+                o.Id, o.PatientFhirId, o.EncounterFhirId, o.LoincCode, o.CodeText, o.Priority, o.AuthoredOn, o.Requisition));
         }
         return pending;
     }
@@ -76,10 +82,16 @@ public sealed class GetCollectionQueueHandler(
         var partition = LabRouting.PartitionOf(orgId);
         var orders = await hapi.SearchActiveLabOrdersAsync(partition, ct);
         var specimenTypes = (await catalog.ListSpecimenTypesAsync(orgId, ct)).ToDictionary(s => s.Id);
+        // F2: solo órdenes ingresadas.
+        var checkedIn = await ops.GetCheckedInRequisitionsAsync(orgId, ct);
 
         var items = new List<CollectionQueueItem>();
         foreach (var o in orders)
         {
+            if (o.Requisition is null || !checkedIn.Contains(o.Requisition))
+            {
+                continue;
+            }
             var intake = await ops.GetIntakeByServiceRequestAsync(orgId, o.Id, ct);
             if (intake is not null)
             {

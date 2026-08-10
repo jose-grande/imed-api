@@ -136,3 +136,16 @@ public sealed class ListTubeTypesHandler(ILabCatalogRepository repo)
         return rows.Select(TubeTypeDto.FromDomain).ToList();
     }
 }
+
+// --------------------- Motivos de rechazo (R6-F1a) ---------------------
+
+public sealed record ListSpecimenRejectionReasonsQuery(Guid? OrganizationId);
+
+public sealed class ListSpecimenRejectionReasonsHandler(ILabCatalogRepository repo)
+{
+    public async Task<IReadOnlyList<SpecimenRejectionReasonDto>> HandleAsync(ListSpecimenRejectionReasonsQuery query, CancellationToken cancellationToken = default)
+    {
+        var rows = await repo.ListSpecimenRejectionReasonsAsync(query.OrganizationId, cancellationToken);
+        return rows.Select(SpecimenRejectionReasonDto.FromDomain).ToList();
+    }
+}

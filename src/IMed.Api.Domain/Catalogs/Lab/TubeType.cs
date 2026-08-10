@@ -26,6 +26,15 @@ public sealed class TubeType
     /// <summary>Volumen mínimo de llenado en mL. Opcional.</summary>
     public decimal? VolumeMinMl { get; private set; }
 
+    /// <summary>Capacidad nominal del tubo en mL (volumen máximo de llenado). La usa el
+    /// motor de plan de colección (R6-F2) para decidir cuántos tubos del mismo aditivo
+    /// se necesitan cuando la suma de consumos supera la capacidad.</summary>
+    public decimal? CapacityMl { get; private set; }
+
+    /// <summary>Volumen muerto/no recuperable en mL (residual que no se puede aspirar).
+    /// El volumen útil del tubo = CapacityMl − DeadVolumeMl.</summary>
+    public decimal? DeadVolumeMl { get; private set; }
+
     public bool Active { get; private set; } = true;
 
     public DateTimeOffset CreatedAt { get; private set; }
@@ -39,6 +48,8 @@ public sealed class TubeType
         string? color = null,
         string? additive = null,
         decimal? volumeMinMl = null,
+        decimal? capacityMl = null,
+        decimal? deadVolumeMl = null,
         Guid? organizationId = null,
         bool active = true,
         TimeProvider? timeProvider = null)
@@ -62,6 +73,8 @@ public sealed class TubeType
             Color = string.IsNullOrWhiteSpace(color) ? null : color.Trim(),
             Additive = string.IsNullOrWhiteSpace(additive) ? null : additive.Trim(),
             VolumeMinMl = volumeMinMl,
+            CapacityMl = capacityMl,
+            DeadVolumeMl = deadVolumeMl,
             Active = active,
             CreatedAt = now,
             UpdatedAt = now,
@@ -73,6 +86,8 @@ public sealed class TubeType
         string? color,
         string? additive,
         decimal? volumeMinMl,
+        decimal? capacityMl = null,
+        decimal? deadVolumeMl = null,
         TimeProvider? timeProvider = null)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -83,6 +98,8 @@ public sealed class TubeType
         Color = string.IsNullOrWhiteSpace(color) ? null : color.Trim();
         Additive = string.IsNullOrWhiteSpace(additive) ? null : additive.Trim();
         VolumeMinMl = volumeMinMl;
+        CapacityMl = capacityMl;
+        DeadVolumeMl = deadVolumeMl;
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 

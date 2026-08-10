@@ -15,12 +15,21 @@ public sealed record LabTestDto(
     int? FastingHours,
     string? CollectionType,
     string? PatientInstruction,
+    Guid? SpecimenTypeId,
+    Guid? TubeTypeId,
+    string? CollectionMode,
+    decimal? MinVolumeMl,
+    decimal? PreferredVolumeMl,
+    decimal? AnalyzerMinVolumeMl,
+    int? StabilityMinutes,
     bool Active)
 {
     public static LabTestDto FromDomain(LabTestDefinition t) => new(
         t.Id, t.OrganizationId, t.Code, t.LoincCode, t.Name,
         t.Datatype.ToString(), t.Unit, t.Department.ToString(),
-        t.FastingHours, t.CollectionType, t.PatientInstruction, t.Active);
+        t.FastingHours, t.CollectionType, t.PatientInstruction,
+        t.SpecimenTypeId, t.TubeTypeId, t.CollectionMode?.ToString(),
+        t.MinVolumeMl, t.PreferredVolumeMl, t.AnalyzerMinVolumeMl, t.StabilityMinutes, t.Active);
 }
 
 /// <summary>Resumen de un panel para listados.</summary>
@@ -136,8 +145,26 @@ public sealed record TubeTypeDto(
     string? Color,
     string? Additive,
     decimal? VolumeMinMl,
+    decimal? CapacityMl,
+    decimal? DeadVolumeMl,
     bool Active)
 {
     public static TubeTypeDto FromDomain(TubeType t) => new(
-        t.Id, t.OrganizationId, t.Code, t.Name, t.Color, t.Additive, t.VolumeMinMl, t.Active);
+        t.Id, t.OrganizationId, t.Code, t.Name, t.Color, t.Additive,
+        t.VolumeMinMl, t.CapacityMl, t.DeadVolumeMl, t.Active);
+}
+
+/// <summary>Motivo de rechazo de muestra preanalítico (R6-F1a, decisión UX §8.7).</summary>
+public sealed record SpecimenRejectionReasonDto(
+    Guid Id,
+    Guid? OrganizationId,
+    string Code,
+    string Name,
+    string? Description,
+    bool RequiresNewSample,
+    int SortOrder,
+    bool Active)
+{
+    public static SpecimenRejectionReasonDto FromDomain(SpecimenRejectionReason r) => new(
+        r.Id, r.OrganizationId, r.Code, r.Name, r.Description, r.RequiresNewSample, r.SortOrder, r.Active);
 }

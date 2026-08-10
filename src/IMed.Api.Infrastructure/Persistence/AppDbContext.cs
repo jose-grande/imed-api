@@ -42,14 +42,26 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TatTarget> TatTargets => Set<TatTarget>();
     public DbSet<SpecimenType> SpecimenTypes => Set<SpecimenType>();
     public DbSet<TubeType> TubeTypes => Set<TubeType>();
+    public DbSet<SpecimenRejectionReason> SpecimenRejectionReasons => Set<SpecimenRejectionReason>();
+    public DbSet<LabLabelFormat> LabLabelFormats => Set<LabLabelFormat>();
+    public DbSet<LabLabelFormatAssignment> LabLabelFormatAssignments => Set<LabLabelFormatAssignment>();
 
     // Operación del laboratorio (Épica LIS-3)
     public DbSet<OrderIntake> OrderIntakes => Set<OrderIntake>();
     public DbSet<SpecimenEvent> SpecimenEvents => Set<SpecimenEvent>();
     public DbSet<LabAccessionCounter> LabAccessionCounters => Set<LabAccessionCounter>();
+    public DbSet<LabOrderCounter> LabOrderCounters => Set<LabOrderCounter>();
+    public DbSet<LabOrderCheckIn> LabOrderCheckIns => Set<LabOrderCheckIn>();
     public DbSet<LabRule> LabRules => Set<LabRule>();
     public DbSet<LabRuleVersion> LabRuleVersions => Set<LabRuleVersion>();
     public DbSet<RuleExecution> RuleExecutions => Set<RuleExecution>();
+
+    // Plan de colección (Épica R6-F2)
+    public DbSet<CollectionPlan> CollectionPlans => Set<CollectionPlan>();
+    public DbSet<CollectionPlanContainer> CollectionPlanContainers => Set<CollectionPlanContainer>();
+    public DbSet<CollectionPlanItem> CollectionPlanItems => Set<CollectionPlanItem>();
+    public DbSet<CollectionPlanUnavailableItem> CollectionPlanUnavailableItems => Set<CollectionPlanUnavailableItem>();
+    public DbSet<CollectionEvent> CollectionEvents => Set<CollectionEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -79,13 +91,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureTatTarget(modelBuilder);
         ConfigureSpecimenType(modelBuilder);
         ConfigureTubeType(modelBuilder);
+        ConfigureSpecimenRejectionReason(modelBuilder);
+        ConfigureLabLabelFormat(modelBuilder);
+        ConfigureLabLabelFormatAssignment(modelBuilder);
 
         ConfigureOrderIntake(modelBuilder);
         ConfigureSpecimenEvent(modelBuilder);
         ConfigureLabAccessionCounter(modelBuilder);
+        ConfigureLabOrderCounter(modelBuilder);
+        ConfigureLabOrderCheckIn(modelBuilder);
         ConfigureLabRule(modelBuilder);
         ConfigureLabRuleVersion(modelBuilder);
         ConfigureRuleExecution(modelBuilder);
+
+        ConfigureCollectionPlan(modelBuilder);
+        ConfigureCollectionPlanContainer(modelBuilder);
+        ConfigureCollectionPlanItem(modelBuilder);
+        ConfigureCollectionPlanUnavailableItem(modelBuilder);
+        ConfigureCollectionEvent(modelBuilder);
 
         ApplySnakeCaseConvention(modelBuilder);
     }
@@ -496,6 +519,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.SpecimenTypeId);
             e.Property(x => x.TubeTypeId);
             e.Property(x => x.CollectionMode).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.MinVolumeMl).HasPrecision(6, 2);
+            e.Property(x => x.PreferredVolumeMl).HasPrecision(6, 2);
+            e.Property(x => x.AnalyzerMinVolumeMl).HasPrecision(6, 2);
+            e.Property(x => x.StabilityMinutes);
             e.Property(x => x.Active).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
@@ -683,6 +710,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Color).HasMaxLength(40);
             e.Property(x => x.Additive).HasMaxLength(120);
             e.Property(x => x.VolumeMinMl).HasPrecision(6, 2);
+            e.Property(x => x.CapacityMl).HasPrecision(6, 2);
+            e.Property(x => x.DeadVolumeMl).HasPrecision(6, 2);
             e.Property(x => x.Active).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
@@ -690,6 +719,207 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => new { x.OrganizationId, x.Code })
                 .IsUnique()
                 .HasDatabaseName("ux_tube_type_org_code");
+        });
+    }
+
+    private static void ConfigureSpecimenRejectionReason(ModelBuilder b)
+    {
+        b.Entity<SpecimenRejectionReason>(e =>
+        {
+            e.ToTable("specimen_rejection_reason");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.RequiresNewSample).IsRequired();
+            e.Property(x => x.SortOrder).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_specimen_rejection_reason_org_code");
+        });
+    }
+
+    private static void ConfigureLabLabelFormat(ModelBuilder b)
+    {
+        b.Entity<LabLabelFormat>(e =>
+        {
+            e.ToTable("lab_label_format");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.WidthMm).HasPrecision(6, 2).IsRequired();
+            e.Property(x => x.HeightMm).HasPrecision(6, 2).IsRequired();
+            e.Property(x => x.MarginMm).HasPrecision(6, 2).IsRequired();
+            e.Property(x => x.OffsetXMm).HasPrecision(6, 2).IsRequired();
+            e.Property(x => x.OffsetYMm).HasPrecision(6, 2).IsRequired();
+            e.Property(x => x.IsDefault).IsRequired();
+            e.Property(x => x.SortOrder).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_lab_label_format_org_code");
+        });
+    }
+
+    private static void ConfigureLabLabelFormatAssignment(ModelBuilder b)
+    {
+        b.Entity<LabLabelFormatAssignment>(e =>
+        {
+            e.ToTable("lab_label_format_assignment");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.TubeTypeCode).HasMaxLength(40);
+            e.Property(x => x.SpecimenTypeCode).HasMaxLength(40);
+            e.Property(x => x.LabLabelFormatId).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasOne<LabLabelFormat>()
+                .WithMany()
+                .HasForeignKey(x => x.LabLabelFormatId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Una sola asignación por (org, tubo) y por (org, tipo de muestra). Los índices
+            // son filtrados porque solo una de las dos columnas está poblada por fila.
+            e.HasIndex(x => new { x.OrganizationId, x.TubeTypeCode })
+                .IsUnique()
+                .HasFilter("tube_type_code IS NOT NULL")
+                .HasDatabaseName("ux_lab_label_assignment_org_tube");
+
+            e.HasIndex(x => new { x.OrganizationId, x.SpecimenTypeCode })
+                .IsUnique()
+                .HasFilter("specimen_type_code IS NOT NULL")
+                .HasDatabaseName("ux_lab_label_assignment_org_specimen");
+        });
+    }
+
+    private static void ConfigureCollectionPlan(ModelBuilder b)
+    {
+        b.Entity<CollectionPlan>(e =>
+        {
+            e.ToTable("collection_plan");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.Requisition).HasMaxLength(64).IsRequired();
+            e.Property(x => x.EncounterFhirId).HasMaxLength(64);
+            e.Property(x => x.PatientFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(30).IsRequired();
+            e.Property(x => x.ComputedBy);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasMany(x => x.Containers)
+                .WithOne()
+                .HasForeignKey(c => c.CollectionPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasMany(x => x.UnavailableItems)
+                .WithOne()
+                .HasForeignKey(i => i.CollectionPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Un plan por (org, requisición) — recalcular reemplaza el anterior.
+            e.HasIndex(x => new { x.OrganizationId, x.Requisition })
+                .IsUnique()
+                .HasDatabaseName("ux_collection_plan_org_requisition");
+        });
+    }
+
+    private static void ConfigureCollectionPlanUnavailableItem(ModelBuilder b)
+    {
+        b.Entity<CollectionPlanUnavailableItem>(e =>
+        {
+            e.ToTable("collection_plan_unavailable_item");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CollectionPlanId).IsRequired();
+            e.Property(x => x.ServiceRequestFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.LoincCode).HasMaxLength(20);
+            e.Property(x => x.Display).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Reason).HasMaxLength(40).IsRequired();
+
+            e.HasIndex(x => x.CollectionPlanId)
+                .HasDatabaseName("ix_collection_plan_unavailable_plan");
+        });
+    }
+
+    private static void ConfigureCollectionPlanContainer(ModelBuilder b)
+    {
+        b.Entity<CollectionPlanContainer>(e =>
+        {
+            e.ToTable("collection_plan_container");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CollectionPlanId).IsRequired();
+            e.Property(x => x.Sequence).IsRequired();
+            e.Property(x => x.SpecimenTypeCode).HasMaxLength(40).IsRequired();
+            e.Property(x => x.SpecimenTypeName).HasMaxLength(200);
+            e.Property(x => x.TubeTypeCode).HasMaxLength(40);
+            e.Property(x => x.TubeTypeName).HasMaxLength(200);
+            e.Property(x => x.Additive).HasMaxLength(120);
+            e.Property(x => x.RequiredVolumeMl).HasPrecision(7, 2);
+            e.Property(x => x.AccessionNumber).HasMaxLength(40);
+            e.Property(x => x.Barcode).HasMaxLength(64);
+            e.Property(x => x.SpecimenFhirId).HasMaxLength(64);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(30).IsRequired();
+            e.Property(x => x.CollectedAt);
+            e.Property(x => x.ReceivedAt);
+            e.Property(x => x.StorageLocation).HasMaxLength(120);
+            e.Property(x => x.RejectionReasonCode).HasMaxLength(40);
+
+            e.HasMany(x => x.Items)
+                .WithOne()
+                .HasForeignKey(i => i.CollectionPlanContainerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => x.CollectionPlanId)
+                .HasDatabaseName("ix_collection_plan_container_plan");
+        });
+    }
+
+    private static void ConfigureCollectionEvent(ModelBuilder b)
+    {
+        b.Entity<CollectionEvent>(e =>
+        {
+            e.ToTable("collection_event");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CollectionPlanContainerId).IsRequired();
+            e.Property(x => x.Type).HasConversion<string>().HasMaxLength(30).IsRequired();
+            e.Property(x => x.At).IsRequired();
+            e.Property(x => x.By);
+            e.Property(x => x.Detail).HasMaxLength(500);
+
+            // Cascade desde el contenedor: recalcular el plan limpia su timeline.
+            e.HasOne<CollectionPlanContainer>()
+                .WithMany()
+                .HasForeignKey(x => x.CollectionPlanContainerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => x.CollectionPlanContainerId)
+                .HasDatabaseName("ix_collection_event_container");
+        });
+    }
+
+    private static void ConfigureCollectionPlanItem(ModelBuilder b)
+    {
+        b.Entity<CollectionPlanItem>(e =>
+        {
+            e.ToTable("collection_plan_item");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CollectionPlanContainerId).IsRequired();
+            e.Property(x => x.ServiceRequestFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.LabTestCode).HasMaxLength(60).IsRequired();
+            e.Property(x => x.LabTestName).HasMaxLength(300);
+
+            e.HasIndex(x => x.CollectionPlanContainerId)
+                .HasDatabaseName("ix_collection_plan_item_container");
         });
     }
 
@@ -706,6 +936,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Requisition).HasMaxLength(64);
             e.Property(x => x.SpecimenTypeCode).HasMaxLength(40);
             e.Property(x => x.TubeCode).HasMaxLength(40);
+            e.Property(x => x.ExamLoincCode).HasMaxLength(40);
+            e.Property(x => x.ExamText).HasMaxLength(300);
             e.Property(x => x.Routing).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.Priority).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.ScheduledFor);
@@ -757,6 +989,28 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("lab_accession_counter");
             e.HasKey(x => new { x.OrganizationId, x.Day });
             e.Property(x => x.Seq).IsRequired();
+        });
+    }
+
+    private static void ConfigureLabOrderCounter(ModelBuilder b)
+    {
+        b.Entity<LabOrderCounter>(e =>
+        {
+            e.ToTable("lab_order_counter");
+            e.HasKey(x => new { x.OrganizationId, x.Day });
+            e.Property(x => x.Seq).IsRequired();
+        });
+    }
+
+    private static void ConfigureLabOrderCheckIn(ModelBuilder b)
+    {
+        b.Entity<LabOrderCheckIn>(e =>
+        {
+            e.ToTable("lab_order_checkin");
+            e.HasKey(x => new { x.OrganizationId, x.Requisition });
+            e.Property(x => x.Requisition).HasMaxLength(64).IsRequired();
+            e.Property(x => x.CheckedInAt).IsRequired();
+            e.Property(x => x.CheckedInBy).IsRequired();
         });
     }
 

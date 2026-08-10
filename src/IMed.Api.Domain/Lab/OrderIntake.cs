@@ -30,6 +30,18 @@ public sealed class OrderIntake
     /// <summary>Código del tubo (LIS-RD-16). Null si no aplica.</summary>
     public string? TubeCode { get; private set; }
 
+    /// <summary>LOINC (o código local de panel) del examen ordenado.</summary>
+    public string? ExamLoincCode { get; private set; }
+
+    /// <summary>
+    /// Nombre del examen/panel, copiado del `ServiceRequest` al registrar la recepción.
+    ///
+    /// <para>Se guarda como <b>snapshot</b> y no se resuelve al leer: la worklist necesita decir
+    /// <i>qué</i> hay que resultar, y consultarlo por fila sería un N+1 contra HAPI —el mismo
+    /// motivo por el que el objetivo fino de TAT por prueba quedó pendiente.</para>
+    /// </summary>
+    public string? ExamText { get; private set; }
+
     public OrderRouting Routing { get; private set; }
     public LabRequestPriority Priority { get; private set; } = LabRequestPriority.Routine;
 
@@ -135,6 +147,16 @@ public sealed class OrderIntake
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 
+    /// <summary>Referida a laboratorio externo (trazabilidad; sin muestra en la sede) — F3.</summary>
+    public void MarkReferred(Guid by, TimeProvider? timeProvider = null)
+    {
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
+        Status = OrderIntakeStatus.Referred;
+        Routing = OrderRouting.SendOut;
+        ReceivedBy = by;
+        UpdatedAt = now;
+    }
+
     /// <summary>Rechazo de la muestra en recepción (incidencia preanalítica) — LIS-RD-17.</summary>
     public void MarkRejected(string reason, Guid by, TimeProvider? timeProvider = null)
     {
@@ -147,6 +169,23 @@ public sealed class OrderIntake
         BlockReason = reason.Trim();
         ReceivedBy = by;
         UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// Copia el examen/panel ordenado para que la worklist pueda mostrarlo sin volver a HAPI.
+    /// Idempotente y no destructivo: no pisa un valor ya presente con uno vacío.
+    /// </summary>
+    public void DescribeExam(string? loincCode, string? examText, TimeProvider? timeProvider = null)
+    {
+        if (!string.IsNullOrWhiteSpace(loincCode))
+        {
+            ExamLoincCode = loincCode.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(examText))
+        {
+            ExamText = examText.Trim();
+        }
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 
     /// <summary>Clasifica la orden: agrupación (requisition/encounter), tipo de muestra y tubo (LIS-RD-02/16/26).</summary>

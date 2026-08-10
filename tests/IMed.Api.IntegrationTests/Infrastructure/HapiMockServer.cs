@@ -506,6 +506,10 @@ public sealed class HapiMockServer : IDisposable
                         intent = sr.Intent,
                         subject = new { reference = $"Patient/{sr.PatientFhirId}" },
                         encounter = sr.Encounter is null ? null : new { reference = $"Encounter/{sr.Encounter}" },
+                        // La búsqueda omitía `requisition` (el GET individual sí lo devuelve), así
+                        // que toda orden hallada por búsqueda llegaba sin agrupación y los flujos
+                        // que filtran por requisición —cola de pendientes, resolve— la descartaban.
+                        requisition = sr.Requisition is null ? null : new { system = "http://imed.local/requisition", value = sr.Requisition },
                         priority = sr.Priority,
                         code = new
                         {

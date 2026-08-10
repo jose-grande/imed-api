@@ -12,7 +12,7 @@ public sealed class LabRuleRepository(AppDbContext db) : ILabRuleRepository
         Guid? organizationId, string? loinc, CancellationToken cancellationToken = default)
     {
         var rules = await db.LabRules.AsNoTracking()
-            .Where(r => (r.OrganizationId == null || r.OrganizationId == organizationId)
+            .Where(r => r.OrganizationId == organizationId
                 && r.Active
                 && (r.Scope == RuleScope.Global || (loinc != null && r.TargetLoinc == loinc)))
             .ToListAsync(cancellationToken);
@@ -44,7 +44,7 @@ public sealed class LabRuleRepository(AppDbContext db) : ILabRuleRepository
 
     public async Task<IReadOnlyList<LabRule>> ListRulesAsync(Guid? organizationId, CancellationToken cancellationToken = default) =>
         await db.LabRules.AsNoTracking()
-            .Where(r => r.OrganizationId == null || r.OrganizationId == organizationId)
+            .Where(r => r.OrganizationId == organizationId)
             .OrderBy(r => r.Name)
             .ToListAsync(cancellationToken);
 

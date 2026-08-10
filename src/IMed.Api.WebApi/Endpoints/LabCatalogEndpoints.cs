@@ -53,6 +53,16 @@ public static class LabCatalogEndpoints
         group.MapGet("/specimen-types", ListSpecimenTypesAsync).WithName("ListSpecimenTypes");
         group.MapGet("/tube-types", ListTubeTypesAsync).WithName("ListTubeTypes");
 
+        // -------- Motivos de rechazo de muestra (R6-F1a) --------
+        group.MapGet("/rejection-reasons", ListRejectionReasonsAsync).WithName("ListSpecimenRejectionReasons");
+
+        // -------- Formatos de etiqueta (R6-F4b) --------
+        group.MapGet("/label-formats", ListLabelFormatsAsync).WithName("ListLabLabelFormats");
+        group.MapPost("/label-formats", CreateLabelFormatAsync).WithName("CreateLabLabelFormat").RequireAuthorization("LabSupervisor");
+        group.MapPut("/label-formats/{id:guid}", UpdateLabelFormatAsync).WithName("UpdateLabLabelFormat").RequireAuthorization("LabSupervisor");
+        group.MapGet("/label-format-assignments", ListLabelFormatAssignmentsAsync).WithName("ListLabLabelFormatAssignments");
+        group.MapPut("/label-format-assignments", SetLabelFormatAssignmentAsync).WithName("SetLabLabelFormatAssignment").RequireAuthorization("LabSupervisor");
+
         return app;
     }
 
@@ -82,7 +92,9 @@ public static class LabCatalogEndpoints
         {
             var result = await handler.HandleAsync(new CreateLabTestCommand(
                 ParseOrganizationId(principal), request.Code, request.Name, request.Datatype, request.LoincCode,
-                request.Unit, request.Department, request.FastingHours, request.CollectionType, request.PatientInstruction),
+                request.Unit, request.Department, request.FastingHours, request.CollectionType, request.PatientInstruction,
+                request.SpecimenTypeId, request.TubeTypeId, request.CollectionMode,
+                request.MinVolumeMl, request.PreferredVolumeMl, request.AnalyzerMinVolumeMl, request.StabilityMinutes),
                 cancellationToken);
             return Results.Created($"/api/lab-catalog/tests/{result.Id}", result);
         }
@@ -97,7 +109,10 @@ public static class LabCatalogEndpoints
         {
             var result = await handler.HandleAsync(new UpdateLabTestCommand(
                 id, request.Name, request.Datatype, request.LoincCode, request.Unit, request.Department,
-                request.FastingHours, request.CollectionType, request.PatientInstruction), cancellationToken);
+                request.FastingHours, request.CollectionType, request.PatientInstruction,
+                request.SpecimenTypeId, request.TubeTypeId, request.CollectionMode,
+                request.MinVolumeMl, request.PreferredVolumeMl, request.AnalyzerMinVolumeMl, request.StabilityMinutes),
+                cancellationToken);
             return Results.Ok(result);
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
@@ -176,6 +191,91 @@ public static class LabCatalogEndpoints
     {
         var result = await handler.HandleAsync(new ListTubeTypesQuery(ParseOrganizationId(principal)), cancellationToken);
         return Results.Ok(result);
+    }
+
+    private static async Task<IResult> ListRejectionReasonsAsync(
+        ClaimsPrincipal principal, ListSpecimenRejectionReasonsHandler handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new ListSpecimenRejectionReasonsQuery(ParseOrganizationId(principal)), cancellationToken);
+        return Results.Ok(result);
+    }
+
+    // ---------------------- Formatos de etiqueta (R6-F4b) ----------------
+
+    private static async Task<IResult> ListLabelFormatsAsync(
+        ClaimsPrincipal principal, ListLabelFormatsHandler handler,
+        [FromQuery] bool? includeInactive, CancellationToken cancellationToken)
+    {
+        var orgId = ParseOrganizationId(principal);
+        var result = await handler.HandleAsync(
+            new ListLabelFormatsQuery(orgId, includeInactive ?? false), cancellationToken);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> CreateLabelFormatAsync(
+        CreateLabelFormatRequest request, ClaimsPrincipal principal,
+        CreateLabelFormatHandler handler, CancellationToken cancellationToken)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return ForbiddenOrg();
+        }
+        try
+        {
+            var result = await handler.HandleAsync(new CreateLabelFormatCommand(
+                orgId.Value, request.Code, request.Name, request.WidthMm, request.HeightMm,
+                request.MarginMm, request.OffsetXMm, request.OffsetYMm,
+                request.IsDefault, request.SortOrder), cancellationToken);
+            return Results.Ok(result);
+        }
+        catch (ArgumentException ex) { return BadRequest(ex); }
+    }
+
+    private static async Task<IResult> UpdateLabelFormatAsync(
+        Guid id, UpdateLabelFormatRequest request, ClaimsPrincipal principal,
+        UpdateLabelFormatHandler handler, CancellationToken cancellationToken)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return ForbiddenOrg();
+        }
+        try
+        {
+            var result = await handler.HandleAsync(new UpdateLabelFormatCommand(
+                orgId.Value, id, request.Name, request.WidthMm, request.HeightMm,
+                request.MarginMm, request.OffsetXMm, request.OffsetYMm,
+                request.IsDefault, request.SortOrder, request.Active), cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }
+        catch (ArgumentException ex) { return BadRequest(ex); }
+    }
+
+    private static async Task<IResult> ListLabelFormatAssignmentsAsync(
+        ClaimsPrincipal principal, ListLabelFormatAssignmentsHandler handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(
+            new ListLabelFormatAssignmentsQuery(ParseOrganizationId(principal)), cancellationToken);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> SetLabelFormatAssignmentAsync(
+        SetLabelFormatAssignmentRequest request, ClaimsPrincipal principal,
+        SetLabelFormatAssignmentHandler handler, CancellationToken cancellationToken)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return ForbiddenOrg();
+        }
+        try
+        {
+            var ok = await handler.HandleAsync(new SetLabelFormatAssignmentCommand(
+                orgId.Value, request.TubeTypeCode, request.SpecimenTypeCode, request.LabelFormatId), cancellationToken);
+            return ok ? Results.NoContent() : Results.NotFound();
+        }
+        catch (ArgumentException ex) { return BadRequest(ex); }
     }
 
     private static async Task<IResult> CreateRangeAsync(
@@ -262,17 +362,27 @@ public static class LabCatalogEndpoints
 
     private static Guid? ParseOrganizationId(ClaimsPrincipal principal) =>
         Guid.TryParse(principal.FindFirstValue("organization_id"), out var id) ? id : null;
+
+    private static IResult ForbiddenOrg() =>
+        Results.Problem(
+            title: "Sin organización",
+            detail: "El JWT no trae organization_id.",
+            statusCode: StatusCodes.Status403Forbidden);
 }
 
 // ------------------------------- contracts -------------------------------
 
 public sealed record CreateLabTestRequest(
     string Code, string Name, string Datatype, string? LoincCode, string? Unit,
-    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction);
+    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction,
+    Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
+    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 
 public sealed record UpdateLabTestRequest(
     string Name, string Datatype, string? LoincCode, string? Unit,
-    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction);
+    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction,
+    Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
+    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 
 public sealed record SetActiveRequest(bool Active);
 
@@ -289,3 +399,18 @@ public sealed record UpdateReferenceRangeRequest(
     decimal? Low, decimal? High, decimal? CriticalLow, decimal? CriticalHigh, string? Unit);
 
 public sealed record SetOfferingRequest(Guid TestId, bool Offered);
+
+// -------- Formatos de etiqueta (R6-F4b) --------
+
+public sealed record CreateLabelFormatRequest(
+    string Code, string Name, decimal WidthMm, decimal HeightMm,
+    decimal MarginMm, decimal OffsetXMm, decimal OffsetYMm, bool IsDefault, int SortOrder);
+
+public sealed record UpdateLabelFormatRequest(
+    string Name, decimal WidthMm, decimal HeightMm,
+    decimal MarginMm, decimal OffsetXMm, decimal OffsetYMm, bool IsDefault, int SortOrder, bool Active);
+
+/// <summary>Asigna un formato a un tubo o tipo de muestra. <c>LabelFormatId = null</c> desasigna
+/// (ese recipiente vuelve al formato default de la organización).</summary>
+public sealed record SetLabelFormatAssignmentRequest(
+    string? TubeTypeCode, string? SpecimenTypeCode, Guid? LabelFormatId);

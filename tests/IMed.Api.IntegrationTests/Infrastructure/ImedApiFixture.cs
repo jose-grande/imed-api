@@ -1,3 +1,4 @@
+using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Abstractions.Email;
 using IMed.Api.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
@@ -90,6 +91,19 @@ public sealed class ImedApiFixture : IAsyncLifetime
                            organization_subscriptions
             RESTART IDENTITY CASCADE;
             """);
+    }
+
+    /// <summary>
+    /// Aprovisiona el catálogo de laboratorio de una org (copy-on-create, rev 53):
+    /// clona las plantillas globales del seed a filas propias de la org. En prod lo
+    /// hace el bootstrap; los tests que usan tokens con org ad-hoc lo llaman para que
+    /// las lecturas estrictas por org vean el catálogo. Idempotente.
+    /// </summary>
+    public async Task ProvisionLabCatalogAsync(Guid organizationId)
+    {
+        using var scope = Factory.Services.CreateScope();
+        var provisioning = scope.ServiceProvider.GetRequiredService<ILabCatalogProvisioning>();
+        await provisioning.ProvisionOrganizationAsync(organizationId);
     }
 }
 

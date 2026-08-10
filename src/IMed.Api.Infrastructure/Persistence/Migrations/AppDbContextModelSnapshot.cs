@@ -235,6 +235,133 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("derived_calculation", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabLabelFormat", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal>("HeightMm")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("height_mm");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_default");
+
+                    b.Property<decimal>("MarginMm")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("margin_mm");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<decimal>("OffsetXMm")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("offset_xmm");
+
+                    b.Property<decimal>("OffsetYMm")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("offset_ymm");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<decimal>("WidthMm")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("width_mm");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_lab_label_format_org_code");
+
+                    b.ToTable("lab_label_format", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabLabelFormatAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("LabLabelFormatId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_label_format_id");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("SpecimenTypeCode")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("specimen_type_code");
+
+                    b.Property<string>("TubeTypeCode")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("tube_type_code");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabLabelFormatId");
+
+                    b.HasIndex("OrganizationId", "SpecimenTypeCode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_lab_label_assignment_org_specimen")
+                        .HasFilter("specimen_type_code IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "TubeTypeCode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_lab_label_assignment_org_tube")
+                        .HasFilter("tube_type_code IS NOT NULL");
+
+                    b.ToTable("lab_label_format_assignment", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabPanel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -484,6 +611,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("active");
 
+                    b.Property<decimal?>("AnalyzerMinVolumeMl")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("analyzer_min_volume_ml");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(60)
@@ -525,6 +657,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("loinc_code");
 
+                    b.Property<decimal?>("MinVolumeMl")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("min_volume_ml");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -540,9 +677,18 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("patient_instruction");
 
+                    b.Property<decimal?>("PreferredVolumeMl")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("preferred_volume_ml");
+
                     b.Property<Guid?>("SpecimenTypeId")
                         .HasColumnType("uuid")
                         .HasColumnName("specimen_type_id");
+
+                    b.Property<int?>("StabilityMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("stability_minutes");
 
                     b.Property<Guid?>("TubeTypeId")
                         .HasColumnType("uuid")
@@ -675,6 +821,63 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_reference_range_test");
 
                     b.ToTable("reference_range", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.SpecimenRejectionReason", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<bool>("RequiresNewSample")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_new_sample");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_specimen_rejection_reason_org_code");
+
+                    b.ToTable("specimen_rejection_reason", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.SpecimenType", b =>
@@ -819,6 +1022,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(120)")
                         .HasColumnName("additive");
 
+                    b.Property<decimal?>("CapacityMl")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("capacity_ml");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -833,6 +1041,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<decimal?>("DeadVolumeMl")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
+                        .HasColumnName("dead_volume_ml");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1237,6 +1450,270 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("join_requests", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("at");
+
+                    b.Property<Guid?>("By")
+                        .HasColumnType("uuid")
+                        .HasColumnName("by");
+
+                    b.Property<Guid>("CollectionPlanContainerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("collection_plan_container_id");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("detail");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("type");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectionPlanContainerId")
+                        .HasDatabaseName("ix_collection_event_container");
+
+                    b.ToTable("collection_event", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("ComputedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("computed_by");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EncounterFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("encounter_fhir_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PatientFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("patient_fhir_id");
+
+                    b.Property<string>("Requisition")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("requisition");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Requisition")
+                        .IsUnique()
+                        .HasDatabaseName("ux_collection_plan_org_requisition");
+
+                    b.ToTable("collection_plan", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlanContainer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AccessionNumber")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("accession_number");
+
+                    b.Property<string>("Additive")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("additive");
+
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("barcode");
+
+                    b.Property<DateTimeOffset?>("CollectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("collected_at");
+
+                    b.Property<Guid>("CollectionPlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("collection_plan_id");
+
+                    b.Property<DateTimeOffset?>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received_at");
+
+                    b.Property<string>("RejectionReasonCode")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("rejection_reason_code");
+
+                    b.Property<decimal>("RequiredVolumeMl")
+                        .HasPrecision(7, 2)
+                        .HasColumnType("numeric(7,2)")
+                        .HasColumnName("required_volume_ml");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("sequence");
+
+                    b.Property<string>("SpecimenFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("specimen_fhir_id");
+
+                    b.Property<string>("SpecimenTypeCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("specimen_type_code");
+
+                    b.Property<string>("SpecimenTypeName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("specimen_type_name");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StorageLocation")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("storage_location");
+
+                    b.Property<string>("TubeTypeCode")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("tube_type_code");
+
+                    b.Property<string>("TubeTypeName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("tube_type_name");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectionPlanId")
+                        .HasDatabaseName("ix_collection_plan_container_plan");
+
+                    b.ToTable("collection_plan_container", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlanItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CollectionPlanContainerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("collection_plan_container_id");
+
+                    b.Property<string>("LabTestCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("lab_test_code");
+
+                    b.Property<string>("LabTestName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("lab_test_name");
+
+                    b.Property<string>("ServiceRequestFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("service_request_fhir_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectionPlanContainerId")
+                        .HasDatabaseName("ix_collection_plan_item_container");
+
+                    b.ToTable("collection_plan_item", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlanUnavailableItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CollectionPlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("collection_plan_id");
+
+                    b.Property<string>("Display")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("display");
+
+                    b.Property<string>("LoincCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("loinc_code");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("ServiceRequestFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("service_request_fhir_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectionPlanId")
+                        .HasDatabaseName("ix_collection_plan_unavailable_plan");
+
+                    b.ToTable("collection_plan_unavailable_item", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Lab.LabAccessionCounter", b =>
                 {
                     b.Property<Guid>("OrganizationId")
@@ -1254,6 +1731,49 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.HasKey("OrganizationId", "Day");
 
                     b.ToTable("lab_accession_counter", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.LabOrderCheckIn", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Requisition")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("requisition");
+
+                    b.Property<DateTimeOffset>("CheckedInAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("checked_in_at");
+
+                    b.Property<Guid>("CheckedInBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("checked_in_by");
+
+                    b.HasKey("OrganizationId", "Requisition");
+
+                    b.ToTable("lab_order_checkin", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.LabOrderCounter", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date")
+                        .HasColumnName("day");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("integer")
+                        .HasColumnName("seq");
+
+                    b.HasKey("OrganizationId", "Day");
+
+                    b.ToTable("lab_order_counter", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Lab.OrderIntake", b =>
@@ -1276,6 +1796,16 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("ExamLoincCode")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("exam_loinc_code");
+
+                    b.Property<string>("ExamText")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("exam_text");
 
                     b.Property<bool>("FastingRequired")
                         .HasColumnType("boolean")
@@ -1644,6 +2174,63 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_user_tier_assignments_org");
 
                     b.ToTable("user_tier_assignments", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.LabLabelFormatAssignment", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Catalogs.Lab.LabLabelFormat", null)
+                        .WithMany()
+                        .HasForeignKey("LabLabelFormatId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionEvent", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Lab.CollectionPlanContainer", null)
+                        .WithMany()
+                        .HasForeignKey("CollectionPlanContainerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlanContainer", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Lab.CollectionPlan", null)
+                        .WithMany("Containers")
+                        .HasForeignKey("CollectionPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlanItem", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Lab.CollectionPlanContainer", null)
+                        .WithMany("Items")
+                        .HasForeignKey("CollectionPlanContainerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlanUnavailableItem", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Lab.CollectionPlan", null)
+                        .WithMany("UnavailableItems")
+                        .HasForeignKey("CollectionPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlan", b =>
+                {
+                    b.Navigation("Containers");
+
+                    b.Navigation("UnavailableItems");
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionPlanContainer", b =>
+                {
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }

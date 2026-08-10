@@ -17,6 +17,18 @@ public static class LabResultsEndpoints
             .WithSummary("Captura resultados → Observations (con flags) + DiagnosticReport (preliminary).")
             .RequireAuthorization("LabValidator");
 
+        app.MapGet("/api/lab/results/entry-sheet/{serviceRequestId}", EntrySheetAsync)
+            .WithTags("LabResults")
+            .WithName("GetResultEntrySheet")
+            .WithSummary("Contexto de captura de una orden: paciente, analitos del panel expandidos, unidad, rango del paciente y valor previo (LIS-4b).")
+            .RequireAuthorization("LabRead");
+
+        app.MapPost("/api/lab/results/observations/{observationId}/correct", CorrectAsync)
+            .WithTags("LabResults")
+            .WithName("CorrectLabResult")
+            .WithSummary("Corrige un resultado aún no liberado, con motivo. Recalcula el flag y versiona el recurso (LIS-4b).")
+            .RequireAuthorization("LabValidator");
+
         app.MapGet("/api/lab/results/by-patient/{patientId}", ByPatientAsync)
             .WithTags("LabResults")
             .WithName("GetLabResultsByPatient")
@@ -113,6 +125,47 @@ public static class LabResultsEndpoints
         return result is null ? Results.NotFound() : Results.Ok(result);
     }
 
+    private static async Task<IResult> EntrySheetAsync(
+        string serviceRequestId, ClaimsPrincipal principal,
+        GetResultEntrySheetHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrg(principal);
+        if (orgId is null)
+        {
+            return Results.Problem(title: "Sin organización", statusCode: StatusCodes.Status403Forbidden);
+        }
+        var sheet = await handler.HandleAsync(orgId.Value, serviceRequestId, ct);
+        return sheet is null ? Results.NotFound() : Results.Ok(sheet);
+    }
+
+    private static async Task<IResult> CorrectAsync(
+        string observationId, CorrectResultRequest request, ClaimsPrincipal principal,
+        CorrectResultHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrg(principal);
+        var userRaw = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub");
+        var userId = Guid.TryParse(userRaw, out var uid) ? uid : (Guid?)null;
+        if (orgId is null || userId is null)
+        {
+            return Results.Problem(title: "Sin organización", statusCode: StatusCodes.Status403Forbidden);
+        }
+        try
+        {
+            var result = await handler.HandleAsync(new CorrectResultCommand(
+                orgId.Value, userId.Value, observationId,
+                request.ValueNumeric, request.ValueString, request.Unit, request.Reason), ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(title: "Conflicto", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     private static Guid? ParseOrg(ClaimsPrincipal principal) =>
         Guid.TryParse(principal.FindFirstValue("organization_id"), out var id) ? id : null;
 
@@ -150,3 +203,10 @@ public sealed record EnterResultsRequest(
     string? ExternalLabName,
     IReadOnlyList<ResultLine> Results,
     string? Conclusion);
+
+/// <summary>Corrección de un resultado no liberado. El motivo es obligatorio (LIS-4b).</summary>
+public sealed record CorrectResultRequest(
+    decimal? ValueNumeric,
+    string? ValueString,
+    string? Unit,
+    string Reason);

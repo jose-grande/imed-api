@@ -83,6 +83,40 @@ public sealed class ResultInterpreterTests
         ResultInterpreter.Interpret(ranges, ReferenceSex.Any, 10, 65m).Code.Should().Be("N");
     }
 
+    /// <summary>
+    /// La pantalla de captura muestra el rango con <c>SelectRange</c> y el sistema calcula el
+    /// flag con <c>Interpret</c>. Si eligieran rangos distintos, el técnico vería un límite y
+    /// el sistema decidiría con otro — por eso comparten la misma selección.
+    /// </summary>
+    [Fact]
+    public void SelectRange_eligeElMismoRangoQueUsaInterpret()
+    {
+        var ranges = new[]
+        {
+            Range(ReferenceSex.Male, 13.5m, 17.5m, 6m, 20m),
+            Range(ReferenceSex.Female, 12.0m, 15.5m, 6m, 20m),
+            Range(ReferenceSex.Any, 11.0m, 18.0m, 6m, 20m),
+        };
+
+        foreach (var sex in new[] { ReferenceSex.Male, ReferenceSex.Female, ReferenceSex.Any })
+        {
+            var selected = ResultInterpreter.SelectRange(ranges, sex, 40);
+            var interpreted = ResultInterpreter.Interpret(ranges, sex, 40, 14m);
+
+            selected.Should().NotBeNull();
+            selected!.Low.Should().Be(interpreted.Low);
+            selected.High.Should().Be(interpreted.High);
+        }
+    }
+
+    [Fact]
+    public void SelectRange_sinRangoAplicable_devuelveNull()
+    {
+        // Rango solo pediátrico: un adulto no matchea y la captura debe mostrar "sin rango".
+        var ranges = new[] { Range(ReferenceSex.Any, 60m, 100m, 40m, 200m, ageMin: 0, ageMax: 12) };
+        ResultInterpreter.SelectRange(ranges, ReferenceSex.Any, 40).Should().BeNull();
+    }
+
     [Theory]
     [InlineData("male", ReferenceSex.Male)]
     [InlineData("female", ReferenceSex.Female)]

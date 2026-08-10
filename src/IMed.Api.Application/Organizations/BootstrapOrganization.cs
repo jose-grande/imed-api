@@ -23,6 +23,7 @@ public sealed class BootstrapOrganizationHandler(
     IKeycloakAdminClient keycloakAdmin,
     IHapiFhirClient hapiFhir,
     IBootstrapOrganizationPersistence persistence,
+    ILabCatalogProvisioning labCatalogProvisioning,
     ILogger<BootstrapOrganizationHandler> logger,
     TimeProvider timeProvider)
 {
@@ -83,6 +84,21 @@ public sealed class BootstrapOrganizationHandler(
             RoleName: OrgAdminRole,
             CreatedAt: now),
             cancellationToken);
+
+        // 4.5 Aprovisionar el catálogo de laboratorio (copy-on-create, rev 53):
+        //      clona las plantillas globales al catálogo propio de la org. Resiliente —
+        //      si falla, el LabCatalogProvisioningBackfill lo recupera al próximo arranque;
+        //      no debe tumbar la creación de la org.
+        try
+        {
+            await labCatalogProvisioning.ProvisionOrganizationAsync(organizationId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "Aprovisionamiento del catálogo de laboratorio falló para org {OrgId}; " +
+                "el backfill de arranque lo recuperará.", organizationId);
+        }
 
         // 5. Hot-path: sincronizar Keycloak. Si falla, el OutboxProcessor lo
         //    retomará. NO propagamos la excepción para que el cliente reciba

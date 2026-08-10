@@ -45,6 +45,26 @@ public interface ILabCatalogRepository
     Task<IReadOnlyList<SpecimenType>> ListSpecimenTypesAsync(Guid? organizationId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TubeType>> ListTubeTypesAsync(Guid? organizationId, CancellationToken cancellationToken = default);
 
+    // ---- Motivos de rechazo de muestra (R6-F1a) ----
+    Task<IReadOnlyList<SpecimenRejectionReason>> ListSpecimenRejectionReasonsAsync(Guid? organizationId, CancellationToken cancellationToken = default);
+
+    // ---- Formatos de etiqueta (R6-F4b) ----
+    Task<IReadOnlyList<LabLabelFormat>> ListLabelFormatsAsync(Guid? organizationId, bool includeInactive = false, CancellationToken cancellationToken = default);
+    Task<LabLabelFormat?> GetLabelFormatByIdAsync(Guid organizationId, Guid id, CancellationToken cancellationToken = default);
+    Task AddLabelFormatAsync(LabLabelFormat format, CancellationToken cancellationToken = default);
+    Task UpdateLabelFormatAsync(LabLabelFormat format, CancellationToken cancellationToken = default);
+
+    /// <summary>Quita la marca de default a los demás formatos de la org (solo uno puede serlo).</summary>
+    Task ClearDefaultLabelFormatAsync(Guid organizationId, Guid exceptId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<LabLabelFormatAssignment>> ListLabelFormatAssignmentsAsync(Guid? organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Crea o reapunta la asignación de un tubo/tipo de muestra a un formato.</summary>
+    Task UpsertLabelFormatAssignmentAsync(Guid organizationId, string? tubeTypeCode, string? specimenTypeCode, Guid labelFormatId, CancellationToken cancellationToken = default);
+
+    /// <summary>Borra la asignación de un tubo/tipo de muestra (vuelve al formato default).</summary>
+    Task DeleteLabelFormatAssignmentAsync(Guid organizationId, string? tubeTypeCode, string? specimenTypeCode, CancellationToken cancellationToken = default);
+
     // ---- Ofertas por sede ----
     Task<LabTestOffering?> GetOfferingAsync(Guid organizationId, Guid testId, CancellationToken cancellationToken = default);
     Task UpsertOfferingAsync(LabTestOffering offering, CancellationToken cancellationToken = default);

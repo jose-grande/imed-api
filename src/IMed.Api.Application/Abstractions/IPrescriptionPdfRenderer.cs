@@ -23,7 +23,9 @@ public sealed record PrescriptionPdfModel(
     PdfPractitionerInfo Practitioner,
     PdfPatientInfo Patient,
     IReadOnlyList<PdfMedicationItem> Items,
-    DateTimeOffset IssuedAt);
+    DateTimeOffset IssuedAt,
+    // Indicaciones generales de la receta (a nivel de receta, no por medicamento).
+    string? GeneralIndications = null);
 
 public sealed record PdfOrgInfo(string Name, string? TaxId);
 

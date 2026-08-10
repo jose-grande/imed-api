@@ -9,9 +9,11 @@ namespace IMed.Api.IntegrationTests.LabCatalog;
 
 /// <summary>
 /// Tests del catálogo de laboratorio (Épica LIS-1, L1-F5). El catálogo global
-/// (mock HN) lo siembra <c>LabCatalogSeeder</c> al arrancar el host; no se trunca
-/// en <c>ResetStateAsync</c>, así que los globales están disponibles. Las
-/// escrituras se aíslan por organización (token con org aleatoria por test).
+/// (mock HN) lo siembra <c>LabCatalogSeeder</c> al arrancar el host. Con el modelo
+/// copy-on-create (rev 53) las lecturas son estrictas por org, así que
+/// <see cref="AuthedClient"/> <b>aprovisiona el catálogo</b> de la org del token
+/// (clona las globales), espejando lo que hace el bootstrap en producción — por eso
+/// los tests "traeSeed" ven su copia propia.
 /// </summary>
 [Collection(ImedApiCollection.Name)]
 public sealed class LabCatalogTests(ImedApiFixture fixture) : IAsyncLifetime
@@ -25,10 +27,16 @@ public sealed class LabCatalogTests(ImedApiFixture fixture) : IAsyncLifetime
     {
         await Task.Delay(800);
         var userId = Guid.NewGuid();
+        var organizationId = Guid.NewGuid();
+
+        // Copy-on-create: en prod lo hace el bootstrap; acá lo forzamos para que la
+        // org tenga su catálogo propio clonado de las globales del seed.
+        await fixture.ProvisionLabCatalogAsync(organizationId);
+
         fixture.Keycloak.RegisterUser(userId);
         var token = fixture.Keycloak.IssueUserToken(
             userId,
-            organizationId: Guid.NewGuid().ToString(),
+            organizationId: organizationId.ToString(),
             realmRoles: roles.Length == 0 ? ["org_admin"] : roles);
         return fixture.CreateClientWithToken(token);
     }

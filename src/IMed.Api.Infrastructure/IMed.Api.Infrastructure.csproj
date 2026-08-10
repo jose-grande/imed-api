@@ -26,6 +26,7 @@
     <PackageReference Include="PdfSharpCore" />
     <PackageReference Include="MigraDocCore.DocumentObjectModel" />
     <PackageReference Include="MigraDocCore.Rendering" />
+    <PackageReference Include="ZXing.Net" />
   </ItemGroup>
 
 </Project>

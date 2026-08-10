@@ -236,11 +236,10 @@ public sealed class KeycloakAdminClient(
         getResponse.EnsureSuccessStatusCode();
 
         var existing = await getResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-        var merged = new Dictionary<string, object?>();
-        foreach (var prop in existing.EnumerateObject())
-        {
-            merged[prop.Name] = prop.Value.Clone();
-        }
+        // Reutilizamos MergeAttributes (sin updates) para deduplicar los valores
+        // de atributos single-valued; un PUT con duplicados sería rechazado por
+        // Declarative User Profile con 400 incluso en un simple toggle de enabled.
+        var merged = MergeAttributes(existing, new Dictionary<string, string[]>());
         merged["enabled"] = enabled;
 
         using var putResponse = await httpClient.PutAsJsonAsync(userPath, merged, cancellationToken);
@@ -368,8 +367,16 @@ public sealed class KeycloakAdminClient(
             {
                 if (prop.Value.ValueKind == JsonValueKind.Array)
                 {
+                    // De-dup valores: con Declarative User Profile, los atributos
+                    // single-valued (organization_id / practitioner_id /
+                    // subscription_tier) rechazan el PUT con 400
+                    // "error-invalid-multivalued-size" si reenviamos valores
+                    // repetidos. KC puede devolver duplicados en el GET (quirk de
+                    // storage); al deduplicar antes del PUT la escritura se
+                    // auto-sana en vez de propagar la corrupción.
                     mergedAttrs[prop.Name] = prop.Value.EnumerateArray()
                         .Select(x => x.GetString() ?? string.Empty)
+                        .Distinct(StringComparer.Ordinal)
                         .ToArray();
                 }
             }
@@ -383,7 +390,7 @@ public sealed class KeycloakAdminClient(
             }
             else
             {
-                mergedAttrs[k] = v;
+                mergedAttrs[k] = v.Distinct(StringComparer.Ordinal).ToArray();
             }
         }
 

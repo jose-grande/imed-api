@@ -10,6 +10,10 @@ internal static class LabCatalogParsing
     public static LabDepartment Department(string value) => ParseEnum<LabDepartment>(value, nameof(LabDepartment));
     public static ReferenceSex Sex(string value) => ParseEnum<ReferenceSex>(value, nameof(ReferenceSex));
 
+    /// <summary>Modo de colección opcional (override); null/vacío = hereda del tipo de muestra.</summary>
+    public static CollectionMode? CollectionModeOrNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : ParseEnum<CollectionMode>(value, nameof(CollectionMode));
+
     private static TEnum ParseEnum<TEnum>(string value, string name) where TEnum : struct, Enum
     {
         if (string.IsNullOrWhiteSpace(value) || !Enum.TryParse<TEnum>(value, ignoreCase: true, out var parsed))
@@ -25,7 +29,9 @@ internal static class LabCatalogParsing
 
 public sealed record CreateLabTestCommand(
     Guid? OrganizationId, string Code, string Name, string Datatype, string? LoincCode, string? Unit,
-    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction);
+    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction,
+    Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
+    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 
 public sealed class CreateLabTestHandler(ILabCatalogRepository repo, TimeProvider timeProvider)
 {
@@ -39,6 +45,10 @@ public sealed class CreateLabTestHandler(ILabCatalogRepository repo, TimeProvide
             cmd.Code, cmd.Name, LabCatalogParsing.Datatype(cmd.Datatype), cmd.LoincCode, cmd.Unit,
             LabCatalogParsing.Department(cmd.Department), cmd.FastingHours, cmd.CollectionType,
             cmd.PatientInstruction, cmd.OrganizationId, active: true, timeProvider: timeProvider);
+        test.SetSpecimenMapping(
+            cmd.SpecimenTypeId, cmd.TubeTypeId, LabCatalogParsing.CollectionModeOrNull(cmd.CollectionMode), timeProvider);
+        test.SetCollectionRequirements(
+            cmd.MinVolumeMl, cmd.PreferredVolumeMl, cmd.AnalyzerMinVolumeMl, cmd.StabilityMinutes, timeProvider);
         await repo.AddTestAsync(test, cancellationToken);
         return LabTestDto.FromDomain(test);
     }
@@ -46,7 +56,9 @@ public sealed class CreateLabTestHandler(ILabCatalogRepository repo, TimeProvide
 
 public sealed record UpdateLabTestCommand(
     Guid Id, string Name, string Datatype, string? LoincCode, string? Unit,
-    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction);
+    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction,
+    Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
+    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 
 public sealed class UpdateLabTestHandler(ILabCatalogRepository repo, TimeProvider timeProvider)
 {
@@ -57,6 +69,10 @@ public sealed class UpdateLabTestHandler(ILabCatalogRepository repo, TimeProvide
         test.Edit(cmd.Name, LabCatalogParsing.Datatype(cmd.Datatype), cmd.LoincCode, cmd.Unit,
             LabCatalogParsing.Department(cmd.Department), cmd.FastingHours, cmd.CollectionType,
             cmd.PatientInstruction, timeProvider);
+        test.SetSpecimenMapping(
+            cmd.SpecimenTypeId, cmd.TubeTypeId, LabCatalogParsing.CollectionModeOrNull(cmd.CollectionMode), timeProvider);
+        test.SetCollectionRequirements(
+            cmd.MinVolumeMl, cmd.PreferredVolumeMl, cmd.AnalyzerMinVolumeMl, cmd.StabilityMinutes, timeProvider);
         await repo.UpdateTestAsync(test, cancellationToken);
         return LabTestDto.FromDomain(test);
     }

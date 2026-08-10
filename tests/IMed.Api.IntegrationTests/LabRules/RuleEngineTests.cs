@@ -25,8 +25,10 @@ public sealed class RuleEngineTests(ImedApiFixture fixture) : IAsyncLifetime
         await Task.Delay(800);
         var userId = Guid.NewGuid();
         fixture.Keycloak.RegisterUser(userId);
+        var organizationId = Guid.NewGuid();
+        await fixture.ProvisionLabCatalogAsync(organizationId);
         var token = fixture.Keycloak.IssueUserToken(
-            userId, organizationId: Guid.NewGuid().ToString(),
+            userId, organizationId: organizationId.ToString(),
             realmRoles: roles.Length == 0 ? ["org_admin"] : roles);
         return fixture.CreateClientWithToken(token);
     }

@@ -164,13 +164,61 @@ public sealed class LabCatalogSeeder(
         ("TISSUE", "Tejido (biopsia)", CollectionMode.OnSite, "Biopsia", null, ContainerKind.SterileContainer, null, LabDepartment.Other),
     ];
 
-    // (code, name, color, additive, volumeMinMl) — LIS-RD-16
-    private static readonly (string Code, string Name, string Color, string Additive, decimal? Vol)[] TubeTypes =
+    // (code, name, color, additive, volumeMinMl, capacityMl, deadVolumeMl) — LIS-RD-16 + R6-F1a
+    private static readonly (string Code, string Name, string Color, string Additive, decimal? Vol, decimal? Cap, decimal? Dead)[] TubeTypes =
     [
-        ("EDTA", "Tubo EDTA (tapa lila)", "lila", "EDTA K2/K3", 3m),
-        ("SST", "Tubo con gel separador (tapa dorada)", "dorado", "Activador de coágulo + gel (SST)", 5m),
-        ("CIT", "Tubo citrato (tapa celeste)", "celeste", "Citrato de sodio 3.2%", 2.7m),
-        ("HEP", "Tubo heparina (tapa verde)", "verde", "Heparina de litio", 4m),
+        ("EDTA", "Tubo EDTA (tapa lila)", "lila", "EDTA K2/K3", 3m, 4m, 0.5m),
+        ("SST", "Tubo con gel separador (tapa dorada)", "dorado", "Activador de coágulo + gel (SST)", 5m, 5m, 0.5m),
+        ("CIT", "Tubo citrato (tapa celeste)", "celeste", "Citrato de sodio 3.2%", 2.7m, 2.7m, 0.3m),
+        ("HEP", "Tubo heparina (tapa verde)", "verde", "Heparina de litio", 4m, 5m, 0.5m),
+    ];
+
+    // (code, name, requiresNewSample, sortOrder) — R6-F1a, lista completa decisión UX §8.7
+    private static readonly (string Code, string Name, bool RequiresNew, int Sort)[] RejectionReasons =
+    [
+        ("WRONG_CONTAINER", "Tubo/contenedor incorrecto", true, 1),
+        ("LABEL_ILLEGIBLE", "Etiqueta ilegible", true, 2),
+        ("LABEL_MISMATCH", "Etiqueta no coincide con el paciente/orden", true, 3),
+        ("INSUFFICIENT_VOLUME", "Volumen/cantidad insuficiente", true, 4),
+        ("HEMOLYSIS", "Hemólisis", true, 5),
+        ("CLOTTED", "Muestra coagulada", true, 6),
+        ("BROKEN_CONTAINER", "Recipiente roto o derramado", true, 7),
+        ("EXPIRED", "Muestra vencida (fuera de estabilidad)", true, 8),
+        ("TEMPERATURE_TRANSPORT", "Temperatura/traslado fuera de rango", true, 9),
+    ];
+
+    // (code, name, widthMm, heightMm, marginMm, isDefault, sortOrder) — R6-F4b.
+    // Tamaños estándar de la industria de etiquetas térmicas: el laboratorio los edita
+    // o agrega los suyos según el rollo que compre (Zebra, Brother, TSC…).
+    private static readonly (string Code, string Name, decimal W, decimal H, decimal Margin, bool Default, int Sort)[] LabelFormats =
+    [
+        ("TUBE-51X25", "Tubo estándar — 51 × 25 mm (2\" × 1\")", 51m, 25m, 1.5m, true, 1),
+        ("TUBE-76X25", "Tubo wrap / largo — 76 × 25 mm (3\" × 1\")", 76m, 25m, 1.5m, false, 2),
+        ("MICRO-38X19", "Microtainer pediátrico — 38 × 19 mm", 38m, 19m, 1m, false, 3),
+        ("CRYO-33X13", "Cryovial — 33 × 13 mm", 33m, 13m, 0.8m, false, 4),
+        ("CUP-76X51", "Frasco orina/heces — 76 × 51 mm (3\" × 2\")", 76m, 51m, 2.5m, false, 5),
+    ];
+
+    // Asignación por defecto formato ← tubo / tipo de muestra (R6-F4b). Los tubos de
+    // sangre usan la etiqueta estándar; los recipientes sin tubo (orina, heces, semen,
+    // saliva) usan la de frasco, que es la que físicamente le cabe al envase.
+    private static readonly (string TubeCode, string FormatCode)[] TubeLabelAssignments =
+    [
+        ("EDTA", "TUBE-51X25"),
+        ("SST", "TUBE-51X25"),
+        ("CIT", "TUBE-51X25"),
+        ("HEP", "TUBE-51X25"),
+    ];
+
+    private static readonly (string SpecimenCode, string FormatCode)[] SpecimenLabelAssignments =
+    [
+        ("URINE", "CUP-76X51"),
+        ("STOOL", "CUP-76X51"),
+        ("SEMEN", "CUP-76X51"),
+        ("SALIVA", "CUP-76X51"),
+        ("SWAB", "CRYO-33X13"),
+        ("CSF", "MICRO-38X19"),
+        ("TISSUE", "CUP-76X51"),
     ];
 
     /// <summary>Mapea una prueba a su tipo de muestra + tubo por departamento (LIS-RD-16/26).</summary>
@@ -307,7 +355,86 @@ public sealed class LabCatalogSeeder(
             }
             foreach (var t in TubeTypes)
             {
-                db.TubeTypes.Add(TubeType.Create(t.Code, t.Name, t.Color, t.Additive, t.Vol, timeProvider: timeProvider));
+                db.TubeTypes.Add(TubeType.Create(
+                    t.Code, t.Name, t.Color, t.Additive, t.Vol, t.Cap, t.Dead, timeProvider: timeProvider));
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Motivos de rechazo de muestra (R6-F1a). Idempotente.
+        if (!await db.SpecimenRejectionReasons.AnyAsync(r => r.OrganizationId == null, cancellationToken))
+        {
+            foreach (var r in RejectionReasons)
+            {
+                db.SpecimenRejectionReasons.Add(SpecimenRejectionReason.Create(
+                    r.Code, r.Name, requiresNewSample: r.RequiresNew, sortOrder: r.Sort, timeProvider: timeProvider));
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Formatos de etiqueta + sus asignaciones (R6-F4b). Idempotente.
+        if (!await db.LabLabelFormats.AnyAsync(f => f.OrganizationId == null, cancellationToken))
+        {
+            var formatIdByCode = new Dictionary<string, Guid>(StringComparer.Ordinal);
+            foreach (var f in LabelFormats)
+            {
+                var format = LabLabelFormat.Create(
+                    f.Code, f.Name, f.W, f.H, f.Margin, isDefault: f.Default, sortOrder: f.Sort, timeProvider: timeProvider);
+                db.LabLabelFormats.Add(format);
+                formatIdByCode[f.Code] = format.Id;
+            }
+            foreach (var (tubeCode, formatCode) in TubeLabelAssignments)
+            {
+                if (formatIdByCode.TryGetValue(formatCode, out var formatId))
+                {
+                    db.LabLabelFormatAssignments.Add(
+                        LabLabelFormatAssignment.ForTube(tubeCode, formatId, timeProvider: timeProvider));
+                }
+            }
+            foreach (var (specimenCode, formatCode) in SpecimenLabelAssignments)
+            {
+                if (formatIdByCode.TryGetValue(formatCode, out var formatId))
+                {
+                    db.LabLabelFormatAssignments.Add(
+                        LabLabelFormatAssignment.ForSpecimen(specimenCode, formatId, timeProvider: timeProvider));
+                }
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Backfill de capacidad/volumen muerto en tubos globales ya sembrados (R6-F1a).
+        // El bloque de seed de arriba solo corre en BD fresca; en DBs ya sembradas
+        // (R1-F1) los tubos existen sin estas columnas, así que las rellenamos por código.
+        var tubesNeedingCapacity = await db.TubeTypes
+            .Where(t => t.OrganizationId == null && t.CapacityMl == null)
+            .ToListAsync(cancellationToken);
+        if (tubesNeedingCapacity.Count > 0)
+        {
+            var tubeSpecByCode = TubeTypes.ToDictionary(x => x.Code, StringComparer.Ordinal);
+            foreach (var tube in tubesNeedingCapacity)
+            {
+                if (tubeSpecByCode.TryGetValue(tube.Code, out var spec))
+                {
+                    tube.Edit(tube.Name, tube.Color, tube.Additive, tube.VolumeMinMl, spec.Cap, spec.Dead, timeProvider);
+                }
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Backfill de requerimientos de colección (R6-F1a): pruebas globales sin volumen.
+        // Por ahora defaults conservadores y uniformes; se refinan por prueba cuando
+        // llegue el catálogo real de analizadores (LIS-12). El motor de plan (R6-F2)
+        // consume estos valores para derivar contenedores y consolidar por aditivo+capacidad.
+        var testsNeedingVolume = await db.LabTests
+            .Where(t => t.OrganizationId == null && t.MinVolumeMl == null)
+            .ToListAsync(cancellationToken);
+        if (testsNeedingVolume.Count > 0)
+        {
+            foreach (var test in testsNeedingVolume)
+            {
+                test.SetCollectionRequirements(
+                    minVolumeMl: 0.5m, preferredVolumeMl: 1.0m, analyzerMinVolumeMl: 0.2m,
+                    stabilityMinutes: null, timeProvider: timeProvider);
             }
             await db.SaveChangesAsync(cancellationToken);
         }

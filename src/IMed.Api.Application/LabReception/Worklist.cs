@@ -16,7 +16,12 @@ public sealed record WorklistItem(
     DateTimeOffset? ReceivedAt,
     int? ElapsedMinutes,
     int? TargetMinutes,
-    bool TatBreached);
+    bool TatBreached,
+    /// <summary>Nombre del paciente: la worklist mostraba el id FHIR crudo, que no le dice nada al técnico.</summary>
+    string? PatientName = null,
+    /// <summary>Examen/panel a resultar. Sin esto la fila dice a quién, pero no qué.</summary>
+    string? ExamText = null,
+    string? ExamLoincCode = null);
 
 public sealed record WorklistQuery(Guid OrganizationId, string? Status);
 
@@ -26,13 +31,35 @@ public sealed record WorklistQuery(Guid OrganizationId, string? Status);
 /// por prioridad; el objetivo fino por prueba (`tat_target`) queda como follow-up
 /// (requiere resolver el código de prueba de cada orden — N+1 contra HAPI).
 /// </summary>
-public sealed class GetWorklistHandler(ILabOperationsRepository ops, TimeProvider timeProvider)
+public sealed class GetWorklistHandler(
+    ILabOperationsRepository ops, IHapiFhirClient hapi, TimeProvider timeProvider)
 {
     public async Task<IReadOnlyList<WorklistItem>> HandleAsync(WorklistQuery query, CancellationToken ct = default)
     {
         OrderIntakeStatus? status = Enum.TryParse<OrderIntakeStatus>(query.Status, ignoreCase: true, out var s) ? s : null;
         var rows = await ops.ListInHouseIntakesAsync(query.OrganizationId, status, ct);
         var now = timeProvider.GetUtcNow();
+
+        // Nombres en lote (un lookup por paciente, no por fila): la worklist repite pacientes
+        // cuando una visita trae varias órdenes.
+        var partition = LabRouting.PartitionOf(query.OrganizationId);
+        var names = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var patientId in rows.Select(r => r.PatientFhirId).Distinct(StringComparer.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(patientId))
+            {
+                continue;
+            }
+            try
+            {
+                names[patientId] = (await hapi.GetPatientAsync(patientId, partition, ct))?.DisplayName;
+            }
+            catch
+            {
+                // Un blip de HAPI degrada a mostrar el id, no vacía la worklist.
+                names[patientId] = null;
+            }
+        }
 
         return rows.Select(x =>
         {
@@ -50,7 +77,10 @@ public sealed class GetWorklistHandler(ILabOperationsRepository ops, TimeProvide
                 ReceivedAt: x.ReceivedAt,
                 ElapsedMinutes: elapsed,
                 TargetMinutes: target,
-                TatBreached: breached);
+                TatBreached: breached,
+                PatientName: names.GetValueOrDefault(x.PatientFhirId),
+                ExamText: x.ExamText,
+                ExamLoincCode: x.ExamLoincCode);
         }).ToList();
     }
 

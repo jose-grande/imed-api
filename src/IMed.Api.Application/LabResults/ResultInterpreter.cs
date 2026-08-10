@@ -18,15 +18,26 @@ public sealed record InterpretationResult(
 /// </summary>
 public static class ResultInterpreter
 {
-    public static InterpretationResult Interpret(
-        IReadOnlyList<ReferenceRange> ranges, ReferenceSex sex, int? ageYears, decimal value)
-    {
-        var match = ranges
+    /// <summary>
+    /// Elige el rango aplicable a un paciente concreto (sexo/edad), sin evaluar ningún valor.
+    ///
+    /// <para>Lo usa la pantalla de captura para <b>mostrar el rango mientras se digita</b>, con
+    /// la misma regla de selección que después aplicará <see cref="Interpret"/> al calcular el
+    /// flag: si divergieran, el técnico vería un rango y el sistema decidiría con otro.</para>
+    /// </summary>
+    public static ReferenceRange? SelectRange(
+        IReadOnlyList<ReferenceRange> ranges, ReferenceSex sex, int? ageYears) =>
+        ranges
             .Where(r => SexMatches(r.Sex, sex) && AgeMatches(r, ageYears))
             // Preferir rango sexo-específico y con bornes de edad (más específico).
             .OrderByDescending(r => r.Sex != ReferenceSex.Any && r.Sex == sex)
             .ThenByDescending(r => r.AgeMinYears != null || r.AgeMaxYears != null)
             .FirstOrDefault();
+
+    public static InterpretationResult Interpret(
+        IReadOnlyList<ReferenceRange> ranges, ReferenceSex sex, int? ageYears, decimal value)
+    {
+        var match = SelectRange(ranges, sex, ageYears);
 
         if (match is null)
         {

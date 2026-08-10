@@ -177,6 +177,7 @@ public sealed class ReceiveSpecimenHandler(
             var sendOut = OrderIntake.Create(
                 cmd.OrganizationId, cmd.ServiceRequestId, order.PatientFhirId, OrderRouting.SendOut,
                 priority, fastingRequired: false, cmd.ScheduledFor, cmd.IsWalkIn, timeProvider);
+            sendOut.DescribeExam(order.LoincCode, order.CodeText, timeProvider);
             sendOut.MarkCompleted(timeProvider);
             await ops.AddIntakeAsync(sendOut, ct);
             return new ReceiveResult(sendOut.Id, sendOut.Status.ToString(), "SendOut", null, null, null);
@@ -188,6 +189,7 @@ public sealed class ReceiveSpecimenHandler(
             var blocked = OrderIntake.Create(
                 cmd.OrganizationId, cmd.ServiceRequestId, order.PatientFhirId, OrderRouting.InHouse,
                 priority, fastingRequired: true, cmd.ScheduledFor, cmd.IsWalkIn, timeProvider);
+            blocked.DescribeExam(order.LoincCode, order.CodeText, timeProvider);
             blocked.MarkBlocked($"Precondición no cumplida: requiere ayuno de {test!.FastingHours}h.", cmd.UserId, timeProvider);
             await ops.AddIntakeAsync(blocked, ct);
             return new ReceiveResult(blocked.Id, blocked.Status.ToString(), "InHouse", null, null, blocked.BlockReason);
@@ -215,6 +217,7 @@ public sealed class ReceiveSpecimenHandler(
         var intake = OrderIntake.Create(
             cmd.OrganizationId, cmd.ServiceRequestId, order.PatientFhirId, OrderRouting.InHouse,
             priority, fastingRequired, cmd.ScheduledFor, cmd.IsWalkIn, timeProvider);
+        intake.DescribeExam(order.LoincCode, order.CodeText, timeProvider);
         intake.MarkReceived(specimenId, accession, cmd.UserId, cmd.FastingSatisfied, timeProvider);
         await ops.AddIntakeAsync(intake, ct);
         await ops.AddSpecimenEventAsync(

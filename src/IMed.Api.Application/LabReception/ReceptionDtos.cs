@@ -120,7 +120,9 @@ public sealed record PendingOrder(
     string? LoincCode,
     string? CodeText,
     string? Priority,
-    DateTimeOffset? AuthoredOn);
+    DateTimeOffset? AuthoredOn,
+    // Fase 2: N.º de orden (requisición) para agrupar/navegar en la cola de toma.
+    string? Requisition = null);
 
 // -------------------- Cola de toma on-site (R1-F7, LIS-RD-24) --------------------
 

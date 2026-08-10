@@ -20,6 +20,8 @@ public enum OrderIntakeStatus
     Rejected = 4,
     /// <summary>En cola de toma de muestra on-site (sangre/hisopado/OGTT) — LIS-RD-24.</summary>
     PendingCollection = 5,
+    /// <summary>Referida a laboratorio externo (no realizable en la sede o por elección del paciente) — F3.</summary>
+    Referred = 6,
 }
 
 /// <summary>Tipo de evento del ciclo de vida de la muestra.</summary>

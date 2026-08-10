@@ -23,8 +23,12 @@ public sealed class LabRequisitionTests(ImedApiFixture fixture) : IAsyncLifetime
         await Task.Delay(800);
         var userId = Guid.NewGuid();
         fixture.Keycloak.RegisterUser(userId);
+        var organizationId = Guid.NewGuid();
+        // Las lecturas del catálogo son estrictas por org (copy-on-create, rev 53): sin
+        // aprovisionar, la org no tiene pruebas ni paneles y la orden no resuelve.
+        await fixture.ProvisionLabCatalogAsync(organizationId);
         var token = fixture.Keycloak.IssueUserToken(
-            userId, organizationId: Guid.NewGuid().ToString(),
+            userId, organizationId: organizationId.ToString(),
             realmRoles: roles.Length == 0 ? ["org_admin"] : roles);
         return fixture.CreateClientWithToken(token);
     }
@@ -37,6 +41,10 @@ public sealed class LabRequisitionTests(ImedApiFixture fixture) : IAsyncLifetime
         // CMP está sembrado; se ordena por su código local de panel (matchea por Code,
         // independiente del backfill de loinc del panel). Sus pruebas son de química → "sangre".
         var srId = fixture.Hapi.SeedServiceRequest("pat-req-1", "CMP", "Perfil metabolico completo", encounter: enc, requisition: enc);
+
+        // F2 (rev 31): resolver también filtra por órdenes ingresadas.
+        var checkIn = await client.PostAsJsonAsync("/api/lab/reception/check-in", new { requisition = enc });
+        checkIn.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Resolver: la orden-panel se expande y agrupa por tipo de muestra.
         var view = await (await client.GetAsync($"/api/lab/reception/requisition/{enc}"))
@@ -81,6 +89,11 @@ public sealed class LabRequisitionTests(ImedApiFixture fixture) : IAsyncLifetime
         var client = await AuthedClient();
         var enc = $"enc-{Guid.NewGuid():N}";
         var srId = fixture.Hapi.SeedServiceRequest("pat-req-2", "2345-7", "Glucosa", encounter: enc, requisition: enc);
+
+        // F2 (rev 31): la cola solo muestra órdenes **ingresadas**. Sin registrar el ingreso
+        // la orden no aparece — es el comportamiento buscado, no una omisión.
+        var checkIn = await client.PostAsJsonAsync("/api/lab/reception/check-in", new { requisition = enc });
+        checkIn.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var pending = await (await client.GetAsync("/api/lab/reception/pending"))
             .Content.ReadFromJsonAsync<PendingOrder[]>();

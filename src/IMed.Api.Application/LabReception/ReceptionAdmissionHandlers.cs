@@ -1,0 +1,183 @@
+using IMed.Api.Application.Abstractions;
+using IMed.Api.Domain.Lab;
+
+namespace IMed.Api.Application.LabReception;
+
+/// <summary>
+/// Rediseño por estaciones — Fase 1 (estación Recepción). Worklist de órdenes
+/// **solicitadas por un médico pero aún no admitidas** (sin check-in y sin intake).
+/// Es el inverso de <see cref="GetPendingOrdersHandler"/> (que muestra las ya
+/// admitidas): acá el recepcionista ve lo que falta dar por admitido. Agrupa por
+/// requisición (número de orden) con nombre del paciente y disponibilidad por examen.
+/// </summary>
+public sealed class GetAwaitingAdmissionHandler(
+    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops)
+{
+    public async Task<IReadOnlyList<AwaitingAdmissionOrder>> HandleAsync(Guid orgId, CancellationToken ct = default)
+    {
+        var partition = LabRouting.PartitionOf(orgId);
+        var orders = await hapi.SearchActiveLabOrdersAsync(partition, ct);
+        var checkedIn = await ops.GetCheckedInRequisitionsAsync(orgId, ct);
+
+        var groups = new Dictionary<string, AwaitingGroupBuilder>();
+        var patientNames = new Dictionary<string, string?>();
+
+        foreach (var o in orders)
+        {
+            // Ya admitida (check-in) → no está "por admitir".
+            if (o.Requisition is not null && checkedIn.Contains(o.Requisition))
+            {
+                continue;
+            }
+            // Ya tiene intake (referida/recibida/bloqueada/rechazada) → fuera de "por admitir".
+            var intake = await ops.GetIntakeByServiceRequestAsync(orgId, o.Id, ct);
+            if (intake is not null)
+            {
+                continue;
+            }
+
+            var key = o.Requisition ?? $"__sr__:{o.Id}";
+            if (!groups.TryGetValue(key, out var g))
+            {
+                if (!patientNames.TryGetValue(o.PatientFhirId, out var name))
+                {
+                    var p = await hapi.GetPatientAsync(o.PatientFhirId, partition, ct);
+                    name = p?.DisplayName;
+                    patientNames[o.PatientFhirId] = name;
+                }
+                g = new AwaitingGroupBuilder(o.Requisition, o.PatientFhirId, name, o.EncounterFhirId);
+                groups[key] = g;
+            }
+            var availability = await ClassifyAsync(catalog, orgId, o.LoincCode, ct);
+            g.Exams.Add(new AwaitingAdmissionExam(o.Id, o.LoincCode, o.CodeText, availability));
+        }
+
+        return groups.Values
+            .Select(g => new AwaitingAdmissionOrder(g.Requisition, g.PatientFhirId, g.PatientName, g.EncounterFhirId, g.Exams))
+            .ToList();
+    }
+
+    /// <summary>Disponibilidad agregada de un examen/panel: in-house / send-out / partial / unknown.</summary>
+    private static async Task<string> ClassifyAsync(ILabCatalogRepository catalog, Guid orgId, string? code, CancellationToken ct)
+    {
+        var expanded = await LabRouting.ExpandOrderAsync(catalog, orgId, code, ct);
+        if (expanded.Count == 0)
+        {
+            return "unknown";
+        }
+        var inHouse = expanded.Count(e => e.Routing == OrderRouting.InHouse);
+        if (inHouse == expanded.Count)
+        {
+            return "in-house";
+        }
+        return inHouse == 0 ? "send-out" : "partial";
+    }
+
+    private sealed class AwaitingGroupBuilder(string? requisition, string patientFhirId, string? patientName, string? encounterFhirId)
+    {
+        public string? Requisition { get; } = requisition;
+        public string PatientFhirId { get; } = patientFhirId;
+        public string? PatientName { get; } = patientName;
+        public string? EncounterFhirId { get; } = encounterFhirId;
+        public List<AwaitingAdmissionExam> Exams { get; } = [];
+    }
+}
+
+/// <summary>
+/// Rediseño por estaciones — Fase 1 (estación Recepción). Crea una orden externa con
+/// **varios exámenes/paneles** (a diferencia de <see cref="CreateExternalOrderHandler"/>,
+/// que es de un solo examen): dedupe/crea el médico externo, asigna un número de orden
+/// (requisición) y crea N <c>ServiceRequest</c> que la comparten (dual coding). La
+/// admisión (check-in) la hace el frontend con la requisición devuelta, reusando el
+/// split in-house/send-out del flujo de check-in.
+/// </summary>
+public sealed class CreateExternalOrderMultiHandler(IHapiFhirClient hapi, ILabOperationsRepository ops, TimeProvider timeProvider)
+{
+    public async Task<CreatedExternalOrderMulti> HandleAsync(CreateExternalOrderMultiCommand cmd, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(cmd.PatientFhirId))
+        {
+            throw new ArgumentException("PatientFhirId es obligatorio.", nameof(cmd));
+        }
+        if (string.IsNullOrWhiteSpace(cmd.RequesterName))
+        {
+            throw new ArgumentException("El médico solicitante externo es obligatorio.", nameof(cmd));
+        }
+        if (cmd.Exams.Count == 0)
+        {
+            throw new ArgumentException("Agregá al menos un examen o panel.", nameof(cmd));
+        }
+
+        var partition = LabRouting.PartitionOf(cmd.OrganizationId);
+
+        // Médico externo: reusar si ya existe (dedupe), si no crear (LIS-DEC-10).
+        var practId = await hapi.FindExternalPractitionerByNameAsync(cmd.RequesterName, partition, ct)
+            ?? await hapi.CreateExternalPractitionerAsync(
+                new ExternalPractitionerRequest(partition, cmd.RequesterName, cmd.RequesterIdentifier), ct);
+
+        var day = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        var seq = await ops.NextOrderSeqAsync(cmd.OrganizationId, day, ct);
+        var requisition = $"ORD-{day:yyyyMMdd}-{seq:D4}";
+
+        var note = ComposeNote(cmd.RequesterInstitution, cmd.Note);
+        var ids = new List<string>();
+        foreach (var exam in cmd.Exams)
+        {
+            var id = await hapi.CreateLabOrderAsync(new UpsertLabOrderRequest(
+                PartitionName: partition,
+                PatientFhirId: cmd.PatientFhirId,
+                EncounterFhirId: null,
+                RequesterPractitionerId: practId,
+                Status: "active",
+                Intent: "order",
+                LoincCode: exam.LoincCode,
+                CodeDisplay: exam.CodeDisplay,
+                CodeText: exam.CodeText,
+                Priority: cmd.Priority,
+                OccurrenceDateTime: cmd.OccurrenceDateTime,
+                ReasonText: cmd.ReasonText,
+                Note: note,
+                Requisition: requisition,
+                LocalCode: exam.LocalCode,
+                LocalSystem: exam.LocalSystem), ct);
+            ids.Add(id);
+        }
+
+        return new CreatedExternalOrderMulti(requisition, ids);
+    }
+
+    /// <summary>La institución externa (trazabilidad) se anota en la nota de la orden (MVP Fase 1).</summary>
+    private static string? ComposeNote(string? institution, string? note)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(institution))
+        {
+            parts.Add($"Institución: {institution.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            parts.Add(note.Trim());
+        }
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
+    }
+}
+
+// ── DTOs (Fase 1) ───────────────────────────────────────────────────────────
+
+/// <summary>Un examen dentro de una orden esperando admisión, con su disponibilidad.</summary>
+public sealed record AwaitingAdmissionExam(string ServiceRequestId, string? LoincCode, string? CodeText, string Availability);
+
+/// <summary>Una orden solicitada aún no admitida, agrupada por requisición.</summary>
+public sealed record AwaitingAdmissionOrder(
+    string? Requisition, string PatientFhirId, string? PatientName, string? EncounterFhirId,
+    IReadOnlyList<AwaitingAdmissionExam> Exams);
+
+/// <summary>Un examen/panel a crear en una orden externa (dual coding opcional).</summary>
+public sealed record ExternalOrderExam(string? LoincCode, string? LocalCode, string? LocalSystem, string CodeText, string? CodeDisplay);
+
+public sealed record CreateExternalOrderMultiCommand(
+    Guid OrganizationId, string PatientFhirId, string RequesterName, string? RequesterIdentifier,
+    string? RequesterInstitution, string? Priority, string? OccurrenceDateTime, string? ReasonText, string? Note,
+    IReadOnlyList<ExternalOrderExam> Exams);
+
+public sealed record CreatedExternalOrderMulti(string Requisition, IReadOnlyList<string> ServiceRequestIds);

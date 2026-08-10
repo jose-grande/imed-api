@@ -52,6 +52,215 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
         return seqs[0];
     }
 
+    public async Task CheckInOrderAsync(LabOrderCheckIn checkIn, CancellationToken cancellationToken = default)
+    {
+        // Idempotente: si la orden ya fue ingresada, no-op.
+        var exists = await db.LabOrderCheckIns.AsNoTracking().AnyAsync(
+            x => x.OrganizationId == checkIn.OrganizationId && x.Requisition == checkIn.Requisition,
+            cancellationToken);
+        if (exists)
+        {
+            return;
+        }
+        db.LabOrderCheckIns.Add(checkIn);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlySet<string>> GetCheckedInRequisitionsAsync(
+        Guid organizationId, CancellationToken cancellationToken = default)
+    {
+        var rows = await db.LabOrderCheckIns.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId)
+            .Select(x => x.Requisition)
+            .ToListAsync(cancellationToken);
+        return rows.ToHashSet(StringComparer.Ordinal);
+    }
+
+    public async Task<int> NextOrderSeqAsync(
+        Guid organizationId, DateOnly day, CancellationToken cancellationToken = default)
+    {
+        // Mismo upsert atómico que el accession, contra el contador de órdenes (F1).
+        var seqs = await db.Database
+            .SqlQuery<int>($"""
+                INSERT INTO lab_order_counter (organization_id, day, seq)
+                VALUES ({organizationId}, {day}, 1)
+                ON CONFLICT (organization_id, day)
+                DO UPDATE SET seq = lab_order_counter.seq + 1
+                RETURNING seq AS "Value"
+                """)
+            .ToListAsync(cancellationToken);
+        return seqs[0];
+    }
+
+    public Task<CollectionPlan?> GetCollectionPlanByRequisitionAsync(
+        Guid organizationId, string requisition, CancellationToken cancellationToken = default) =>
+        db.CollectionPlans.AsNoTracking()
+            .Include(p => p.Containers.OrderBy(c => c.Sequence))
+                .ThenInclude(c => c.Items)
+            .Include(p => p.UnavailableItems)
+            .FirstOrDefaultAsync(
+                p => p.OrganizationId == organizationId && p.Requisition == requisition, cancellationToken);
+
+    public async Task UpsertCollectionPlanAsync(CollectionPlan plan, CancellationToken cancellationToken = default)
+    {
+        // Recalcular = reemplazar: borra el plan anterior (cascade a contenedores/items) y agrega el nuevo.
+        var existing = await db.CollectionPlans
+            .Where(p => p.OrganizationId == plan.OrganizationId && p.Requisition == plan.Requisition)
+            .ToListAsync(cancellationToken);
+        if (existing.Count > 0)
+        {
+            db.CollectionPlans.RemoveRange(existing);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        db.CollectionPlans.Add(plan);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public Task<CollectionPlan?> GetCollectionPlanForUpdateAsync(
+        Guid organizationId, string requisition, CancellationToken cancellationToken = default) =>
+        db.CollectionPlans
+            .Include(p => p.Containers.OrderBy(c => c.Sequence))
+                .ThenInclude(c => c.Items)
+            .FirstOrDefaultAsync(
+                p => p.OrganizationId == organizationId && p.Requisition == requisition, cancellationToken);
+
+    public Task<CollectionPlanContainer?> GetContainerForUpdateAsync(
+        Guid organizationId, Guid containerId, CancellationToken cancellationToken = default) =>
+        db.CollectionPlanContainers
+            .Include(c => c.Items)
+            .FirstOrDefaultAsync(
+                c => c.Id == containerId
+                  && db.CollectionPlans.Any(p => p.Id == c.CollectionPlanId && p.OrganizationId == organizationId),
+                cancellationToken);
+
+    public Task<CollectionPlan?> GetCollectionPlanByContainerIdAsync(
+        Guid organizationId, Guid containerId, CancellationToken cancellationToken = default) =>
+        db.CollectionPlans
+            .Include(p => p.Containers.OrderBy(c => c.Sequence))
+                .ThenInclude(c => c.Items)
+            .FirstOrDefaultAsync(
+                p => p.OrganizationId == organizationId
+                  && p.Containers.Any(c => c.Id == containerId),
+                cancellationToken);
+
+    public async Task SaveCollectionEventsAsync(
+        IEnumerable<CollectionEvent> events, CancellationToken cancellationToken = default)
+    {
+        db.CollectionEvents.AddRange(events);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CollectionEvent>> ListCollectionEventsAsync(
+        Guid containerId, CancellationToken cancellationToken = default) =>
+        await db.CollectionEvents.AsNoTracking()
+            .Where(e => e.CollectionPlanContainerId == containerId)
+            .OrderBy(e => e.At)
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<TechnicalReceptionRow>> ListContainersForTechnicalReceptionAsync(
+        Guid organizationId, IReadOnlyList<ContainerStatus> statuses, CancellationToken cancellationToken = default)
+    {
+        // 1) contenedores candidatos + info del plan (join plano, sin navegación).
+        var flat = await (
+            from c in db.CollectionPlanContainers.AsNoTracking()
+            join p in db.CollectionPlans.AsNoTracking() on c.CollectionPlanId equals p.Id
+            where p.OrganizationId == organizationId && statuses.Contains(c.Status)
+            orderby c.CollectedAt
+            select new { c.Id, p.Requisition, p.PatientFhirId })
+            .ToListAsync(cancellationToken);
+
+        if (flat.Count == 0)
+        {
+            return [];
+        }
+
+        // 2) contenedores con sus items (Include garantizado al no proyectar).
+        var ids = flat.Select(f => f.Id).ToList();
+        var containers = await db.CollectionPlanContainers.AsNoTracking()
+            .Include(c => c.Items)
+            .Where(c => ids.Contains(c.Id))
+            .ToListAsync(cancellationToken);
+        var byId = containers.ToDictionary(c => c.Id);
+
+        return flat
+            .Where(f => byId.ContainsKey(f.Id))
+            .Select(f => new TechnicalReceptionRow(byId[f.Id], f.Requisition, f.PatientFhirId))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<TechnicalReceptionRow>> ListSiblingContainersForTechnicalReceptionAsync(
+        Guid organizationId, IReadOnlyList<ContainerStatus> pendingStatuses, CancellationToken cancellationToken = default)
+    {
+        // 1) Planes que tienen al menos un contenedor esperando bench. El técnico recibe la
+        //    gradilla por orden, así que la worklist se arma por plan, no por contenedor suelto.
+        var planIds = await (
+            from c in db.CollectionPlanContainers.AsNoTracking()
+            join p in db.CollectionPlans.AsNoTracking() on c.CollectionPlanId equals p.Id
+            where p.OrganizationId == organizationId && pendingStatuses.Contains(c.Status)
+            select p.Id)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (planIds.Count == 0)
+        {
+            return [];
+        }
+
+        // 2) TODOS los contenedores de esos planes — también los ya recibidos, para poder
+        //    mostrar "1 de 3" y que el técnico note si le falta un tubo de la gradilla.
+        var plans = await db.CollectionPlans.AsNoTracking()
+            .Include(p => p.Containers.OrderBy(c => c.Sequence))
+                .ThenInclude(c => c.Items)
+            .Where(p => planIds.Contains(p.Id))
+            .ToListAsync(cancellationToken);
+
+        return plans
+            .SelectMany(p => p.Containers.Select(c => new TechnicalReceptionRow(c, p.Requisition, p.PatientFhirId)))
+            .ToList();
+    }
+
+    public async Task<TechnicalReceptionRow?> FindContainerByBarcodeAsync(
+        Guid organizationId, string code, CancellationToken cancellationToken = default)
+    {
+        var trimmed = code.Trim();
+
+        // El lector puede disparar el barcode o el técnico teclear el accession: son el mismo
+        // valor hoy (R6-F4), pero se buscan por separado por si algún día divergen.
+        var flat = await (
+            from c in db.CollectionPlanContainers.AsNoTracking()
+            join p in db.CollectionPlans.AsNoTracking() on c.CollectionPlanId equals p.Id
+            where p.OrganizationId == organizationId
+               && (c.Barcode == trimmed || c.AccessionNumber == trimmed)
+            select new { c.Id, p.Requisition, p.PatientFhirId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (flat is null)
+        {
+            return null;
+        }
+
+        var container = await db.CollectionPlanContainers.AsNoTracking()
+            .Include(c => c.Items)
+            .FirstOrDefaultAsync(c => c.Id == flat.Id, cancellationToken);
+
+        return container is null ? null : new TechnicalReceptionRow(container, flat.Requisition, flat.PatientFhirId);
+    }
+
+    public async Task<IReadOnlySet<Guid>> ListContainersWithEventAsync(
+        IReadOnlyList<Guid> containerIds, CollectionEventType type, CancellationToken cancellationToken = default)
+    {
+        if (containerIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+        var ids = await db.CollectionEvents.AsNoTracking()
+            .Where(e => containerIds.Contains(e.CollectionPlanContainerId) && e.Type == type)
+            .Select(e => e.CollectionPlanContainerId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        return ids.ToHashSet();
+    }
+
     public async Task<IReadOnlyList<OrderIntake>> ListInHouseIntakesAsync(
         Guid organizationId, OrderIntakeStatus? status, CancellationToken cancellationToken = default)
     {

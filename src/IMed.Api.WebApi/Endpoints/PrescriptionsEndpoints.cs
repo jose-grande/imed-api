@@ -22,7 +22,11 @@ public static class PrescriptionsEndpoints
 
         group.MapGet("/{id}/pdf", DownloadPdfAsync)
             .WithName("DownloadPrescriptionPdf")
-            .WithSummary("Devuelve el PDF renderizado de un MedicationRequest.");
+            .WithSummary("Devuelve el PDF renderizado de un MedicationRequest (receta de 1 medicamento / legacy).");
+
+        group.MapGet("/group/{groupValue}/pdf", DownloadGroupPdfAsync)
+            .WithName("DownloadPrescriptionGroupPdf")
+            .WithSummary("Devuelve el PDF de una receta (todos los medicamentos que comparten groupIdentifier).");
 
         return app;
     }
@@ -52,6 +56,39 @@ public static class PrescriptionsEndpoints
 
         var result = await handler.HandleAsync(
             new GetPrescriptionPdfQuery(orgId, id), cancellationToken);
+        if (result is null)
+        {
+            return Results.NotFound();
+        }
+
+        return Results.File(result.Bytes, "application/pdf", fileDownloadName: result.FileName);
+    }
+
+    private static async Task<IResult> DownloadGroupPdfAsync(
+        string groupValue,
+        ClaimsPrincipal principal,
+        GetPrescriptionPdfHandler handler,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(groupValue))
+        {
+            return Results.Problem(
+                title: "groupValue requerido",
+                detail: "Falta el identificador de grupo de la receta.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var orgRaw = principal.FindFirstValue("organization_id");
+        if (!Guid.TryParse(orgRaw, out var orgId))
+        {
+            return Results.Problem(
+                title: "Sin organización",
+                detail: "El JWT no trae organization_id.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var result = await handler.HandleGroupAsync(
+            new GetPrescriptionGroupPdfQuery(orgId, groupValue), cancellationToken);
         if (result is null)
         {
             return Results.NotFound();

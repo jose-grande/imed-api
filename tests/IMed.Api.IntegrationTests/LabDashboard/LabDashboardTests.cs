@@ -20,7 +20,11 @@ public sealed class LabDashboardTests(ImedApiFixture fixture) : IAsyncLifetime
         await Task.Delay(800);
         var userId = Guid.NewGuid();
         fixture.Keycloak.RegisterUser(userId);
-        var token = fixture.Keycloak.IssueUserToken(userId, organizationId: Guid.NewGuid().ToString(), realmRoles: ["org_admin"]);
+        var organizationId = Guid.NewGuid();
+        // Catálogo estricto por org (copy-on-create, rev 53): sin aprovisionar, las pruebas no
+        // resuelven, la orden se enruta a externo y el dashboard cuenta cero.
+        await fixture.ProvisionLabCatalogAsync(organizationId);
+        var token = fixture.Keycloak.IssueUserToken(userId, organizationId: organizationId.ToString(), realmRoles: ["org_admin"]);
         return fixture.CreateClientWithToken(token);
     }
 

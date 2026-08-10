@@ -172,6 +172,16 @@ public interface IHapiFhirClient
         string partitionName,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lista los MedicationRequests que comparten un <c>groupIdentifier</c> — es
+    /// decir, todos los medicamentos de una misma "receta" (multi-medicamento).
+    /// Usado por el renderer PDF de receta agrupada.
+    /// </summary>
+    Task<IReadOnlyList<MedicationRequestSnapshot>> SearchMedicationRequestsByGroupAsync(
+        string groupIdentifierValue,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
     // ──────────────── ServiceRequest / Lab Orders (Épica L) ────────────────
 
     /// <summary>
@@ -201,6 +211,16 @@ public interface IHapiFhirClient
     /// <summary>Lista órdenes de laboratorio asociadas a un Encounter.</summary>
     Task<IReadOnlyList<LabOrderSnapshot>> SearchLabOrdersByEncounterAsync(
         string encounterFhirId,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lista las órdenes de laboratorio que comparten un <c>requisition</c> — es
+    /// decir, todos los exámenes/paneles de una misma "orden de laboratorio".
+    /// Usado por el renderer PDF de orden agrupada.
+    /// </summary>
+    Task<IReadOnlyList<LabOrderSnapshot>> SearchLabOrdersByRequisitionAsync(
+        string requisitionValue,
         string partitionName,
         CancellationToken cancellationToken = default);
 
@@ -260,6 +280,16 @@ public interface IHapiFhirClient
 
     /// <summary>Crea un <c>Observation</c> FHIR R5 (resultado de laboratorio). Devuelve el id.</summary>
     Task<string> CreateObservationAsync(
+        UpsertObservationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reemplaza un <c>Observation</c> existente (corrección de resultado, LIS-4b). HAPI versiona
+    /// el recurso, así que el valor anterior queda accesible en <c>_history</c> y la corrección
+    /// es auditable sin necesidad de una tabla propia.
+    /// </summary>
+    Task UpdateObservationAsync(
+        string observationFhirId,
         UpsertObservationRequest request,
         CancellationToken cancellationToken = default);
 
@@ -342,7 +372,12 @@ public sealed record MedicationRequestSnapshot(
     string? DispenseUnit,
     string? Note,
     string? RequesterPractitionerId,
-    DateTimeOffset? AuthoredOn);
+    DateTimeOffset? AuthoredOn,
+    // groupIdentifier.value — agrupa los medicamentos de una misma receta.
+    string? GroupIdentifierValue = null,
+    // dosageInstruction[0].patientInstruction — indicaciones POR medicamento
+    // (las indicaciones generales de la receta van en Note).
+    string? PatientInstruction = null);
 
 /// <summary>
 /// Datos para crear/reemplazar un ServiceRequest FHIR R5 con category=laboratory
@@ -369,7 +404,11 @@ public sealed record UpsertLabOrderRequest(
     string? Priority,
     string? OccurrenceDateTime,
     string? ReasonText,
-    string? Note);
+    string? Note,
+    // R3/LIS-RD-02: requisición de la visita; dual coding del orderable (panel local + LOINC).
+    string? Requisition = null,
+    string? LocalCode = null,
+    string? LocalSystem = null);
 
 public sealed record LabOrderSnapshot(
     string Id,
@@ -385,7 +424,9 @@ public sealed record LabOrderSnapshot(
     string? ReasonText,
     string? Note,
     string? RequesterPractitionerId,
-    DateTimeOffset? AuthoredOn);
+    DateTimeOffset? AuthoredOn,
+    // requisition.value — agrupa las órdenes de una misma "orden de laboratorio".
+    string? Requisition = null);
 
 /// <summary>
 /// Datos para crear un <c>Specimen</c> FHIR R5 (recepción, LIS-3).
@@ -498,7 +539,13 @@ public sealed record ObservationSnapshot(
     string? FlagCode,
     decimal? ReferenceLow,
     decimal? ReferenceHigh,
-    string? EffectiveDateTime);
+    string? EffectiveDateTime,
+    // Vínculos que hay que preservar al reescribir la Observation (corrección, LIS-4b):
+    // un PUT reemplaza el recurso entero, y perderlos desconectaría el resultado de su
+    // orden, su muestra y quien lo ejecutó.
+    string? ServiceRequestFhirId = null,
+    string? SpecimenFhirId = null,
+    string? PerformerReference = null);
 
 /// <summary>Datos para crear un <c>DiagnosticReport</c> FHIR R5 (informe, LIS-4).</summary>
 public sealed record UpsertDiagnosticReportRequest(

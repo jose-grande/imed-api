@@ -6,10 +6,15 @@ namespace IMed.Api.Infrastructure.Persistence;
 
 /// <summary>
 /// Implementación EF Core del catálogo de laboratorio (Épica LIS-1, L1-F3).
-/// Lecturas resuelven global (org_id NULL) + override por org, deduplicando por
-/// code y prefiriendo la fila específica de la org cuando coexisten (L1-D1).
+///
+/// <para><b>Modelo copy-on-create (rev 53):</b> la config de negocio (pruebas,
+/// paneles, rangos, fórmulas, TAT, motivos de rechazo) se clona por org al crearla
+/// (<see cref="ILabCatalogProvisioning"/>), así que estas lecturas son <b>estrictas
+/// por org</b> (<c>org_id == organizationId</c>) — el usuario nunca ve las plantillas
+/// globales, solo lo propio. Excepción: tipos de muestra y tubos son referencia
+/// estándar compartida y siguen resolviendo global + override por org.</para>
 /// </summary>
-public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepository
+public sealed class LabCatalogRepository(AppDbContext db, TimeProvider timeProvider) : ILabCatalogRepository
 {
     // ----------------------------- Pruebas -----------------------------
 
@@ -18,7 +23,7 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
         CancellationToken cancellationToken = default)
     {
         var q = db.LabTests.AsNoTracking()
-            .Where(x => x.OrganizationId == null || x.OrganizationId == organizationId);
+            .Where(x => x.OrganizationId == organizationId);
 
         if (activeOnly)
         {
@@ -56,10 +61,9 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
         }
         var code = loincCode.Trim();
         var rows = await db.LabTests.AsNoTracking()
-            .Where(x => x.LoincCode == code && (x.OrganizationId == null || x.OrganizationId == organizationId))
+            .Where(x => x.LoincCode == code && x.OrganizationId == organizationId)
             .ToListAsync(cancellationToken);
-        // Override de org sobre global.
-        return rows.OrderByDescending(x => x.OrganizationId == organizationId && organizationId != null).FirstOrDefault();
+        return rows.FirstOrDefault();
     }
 
     public Task<bool> TestCodeExistsAsync(Guid? organizationId, string code, CancellationToken cancellationToken = default)
@@ -98,7 +102,7 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
         Guid? organizationId, CancellationToken cancellationToken = default)
     {
         var rows = await db.LabPanels.AsNoTracking()
-            .Where(x => x.OrganizationId == null || x.OrganizationId == organizationId)
+            .Where(x => x.OrganizationId == organizationId)
             .OrderBy(x => x.Name)
             .ToListAsync(cancellationToken);
         return DedupeByCodePreferOrg(rows, organizationId, x => x.Code, x => x.OrganizationId).ToList();
@@ -111,9 +115,8 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
         Guid? organizationId, string codeOrLoinc, CancellationToken cancellationToken = default) =>
         db.LabPanels.AsNoTracking()
             .Where(x => x.Active
-                        && (x.OrganizationId == null || x.OrganizationId == organizationId)
+                        && x.OrganizationId == organizationId
                         && (x.Code == codeOrLoinc || x.LoincCode == codeOrLoinc))
-            .OrderByDescending(x => x.OrganizationId != null) // preferir override por org sobre el global
             .FirstOrDefaultAsync(cancellationToken);
 
     public Task<bool> PanelCodeExistsAsync(Guid? organizationId, string code, CancellationToken cancellationToken = default)
@@ -175,7 +178,7 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
     public async Task<IReadOnlyList<ReferenceRange>> ListRangesByTestAsync(
         Guid? organizationId, Guid testId, CancellationToken cancellationToken = default) =>
         await db.ReferenceRanges.AsNoTracking()
-            .Where(x => x.LabTestId == testId && (x.OrganizationId == null || x.OrganizationId == organizationId))
+            .Where(x => x.LabTestId == testId && x.OrganizationId == organizationId)
             .OrderBy(x => x.Sex).ThenBy(x => x.AgeMinYears)
             .ToListAsync(cancellationToken);
 
@@ -216,6 +219,104 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
             .OrderBy(x => x.Name)
             .ToListAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<SpecimenRejectionReason>> ListSpecimenRejectionReasonsAsync(
+        Guid? organizationId, CancellationToken cancellationToken = default) =>
+        await db.SpecimenRejectionReasons.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId)
+            .Where(x => x.Active)
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+    // --------------------- Formatos de etiqueta (R6-F4b) ---------------
+    // Lectura estricta por org (copy-on-create, rev 53): el laboratorio solo ve
+    // y edita sus propios formatos, nunca las plantillas globales del seed.
+
+    public async Task<IReadOnlyList<LabLabelFormat>> ListLabelFormatsAsync(
+        Guid? organizationId, bool includeInactive = false, CancellationToken cancellationToken = default) =>
+        await db.LabLabelFormats.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId)
+            .Where(x => includeInactive || x.Active)
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+    public Task<LabLabelFormat?> GetLabelFormatByIdAsync(
+        Guid organizationId, Guid id, CancellationToken cancellationToken = default) =>
+        db.LabLabelFormats.FirstOrDefaultAsync(
+            x => x.Id == id && x.OrganizationId == organizationId, cancellationToken);
+
+    public async Task AddLabelFormatAsync(LabLabelFormat format, CancellationToken cancellationToken = default)
+    {
+        db.LabLabelFormats.Add(format);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task UpdateLabelFormatAsync(LabLabelFormat format, CancellationToken cancellationToken = default)
+    {
+        db.LabLabelFormats.Update(format);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ClearDefaultLabelFormatAsync(
+        Guid organizationId, Guid exceptId, CancellationToken cancellationToken = default)
+    {
+        var others = await db.LabLabelFormats
+            .Where(x => x.OrganizationId == organizationId && x.IsDefault && x.Id != exceptId)
+            .ToListAsync(cancellationToken);
+        if (others.Count == 0)
+        {
+            return;
+        }
+        foreach (var f in others)
+        {
+            f.SetDefault(false, timeProvider);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<LabLabelFormatAssignment>> ListLabelFormatAssignmentsAsync(
+        Guid? organizationId, CancellationToken cancellationToken = default) =>
+        await db.LabLabelFormatAssignments.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId)
+            .ToListAsync(cancellationToken);
+
+    public async Task UpsertLabelFormatAssignmentAsync(
+        Guid organizationId, string? tubeTypeCode, string? specimenTypeCode, Guid labelFormatId,
+        CancellationToken cancellationToken = default)
+    {
+        var existing = await FindAssignmentAsync(organizationId, tubeTypeCode, specimenTypeCode, cancellationToken);
+        if (existing is not null)
+        {
+            existing.Reassign(labelFormatId, timeProvider);
+        }
+        else
+        {
+            db.LabLabelFormatAssignments.Add(tubeTypeCode is not null
+                ? LabLabelFormatAssignment.ForTube(tubeTypeCode, labelFormatId, organizationId, timeProvider)
+                : LabLabelFormatAssignment.ForSpecimen(specimenTypeCode!, labelFormatId, organizationId, timeProvider));
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteLabelFormatAssignmentAsync(
+        Guid organizationId, string? tubeTypeCode, string? specimenTypeCode, CancellationToken cancellationToken = default)
+    {
+        var existing = await FindAssignmentAsync(organizationId, tubeTypeCode, specimenTypeCode, cancellationToken);
+        if (existing is null)
+        {
+            return;
+        }
+        db.LabLabelFormatAssignments.Remove(existing);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private Task<LabLabelFormatAssignment?> FindAssignmentAsync(
+        Guid organizationId, string? tubeTypeCode, string? specimenTypeCode, CancellationToken cancellationToken) =>
+        tubeTypeCode is not null
+            ? db.LabLabelFormatAssignments.FirstOrDefaultAsync(
+                x => x.OrganizationId == organizationId && x.TubeTypeCode == tubeTypeCode, cancellationToken)
+            : db.LabLabelFormatAssignments.FirstOrDefaultAsync(
+                x => x.OrganizationId == organizationId && x.SpecimenTypeCode == specimenTypeCode, cancellationToken);
+
     // ------------------------- Ofertas por sede ------------------------
 
     public Task<LabTestOffering?> GetOfferingAsync(
@@ -243,23 +344,23 @@ public sealed class LabCatalogRepository(AppDbContext db) : ILabCatalogRepositor
     public async Task<IReadOnlyList<DerivedCalculation>> ListDerivedAsync(
         Guid? organizationId, CancellationToken cancellationToken = default) =>
         await db.DerivedCalculations.AsNoTracking()
-            .Where(x => x.OrganizationId == null || x.OrganizationId == organizationId)
+            .Where(x => x.OrganizationId == organizationId)
             .OrderBy(x => x.OutputTestCode)
             .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<TatTarget>> ListTatTargetsAsync(
         Guid? organizationId, CancellationToken cancellationToken = default) =>
         await db.TatTargets.AsNoTracking()
-            .Where(x => x.OrganizationId == null || x.OrganizationId == organizationId)
+            .Where(x => x.OrganizationId == organizationId)
             .OrderBy(x => x.TargetCode).ThenBy(x => x.Priority)
             .ToListAsync(cancellationToken);
 
     // ------------------------------ helpers ----------------------------
 
     /// <summary>
-    /// Cuando coexisten una fila global (org null) y una override de la org con el
-    /// mismo code, la override gana (L1-D1). En LIS-1 aún no hay UI de clonado, así
-    /// que en la práctica solo hay globales — pero la lógica deja el modelo listo.
+    /// Deduplica por code prefiriendo la fila de la org. Con el modelo copy-on-create
+    /// (rev 53) las lecturas de negocio ya son estrictas por org, así que en la práctica
+    /// no hay colisión global/override; se conserva como salvaguarda barata.
     /// </summary>
     private static IEnumerable<T> DedupeByCodePreferOrg<T>(
         IEnumerable<T> rows, Guid? organizationId, Func<T, string> codeOf, Func<T, Guid?> orgOf) =>

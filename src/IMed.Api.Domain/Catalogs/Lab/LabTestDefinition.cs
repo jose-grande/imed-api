@@ -52,6 +52,24 @@ public sealed class LabTestDefinition
     /// <summary>Override del modo de colección; null = hereda del tipo de muestra (LIS-RD-23).</summary>
     public CollectionMode? CollectionMode { get; private set; }
 
+    // ── Requerimientos del plan de colección (R6-F1a, decisión UX §8.9) ──
+    // Alimentan al motor de plan de colección (R6-F2): cuánta muestra consume la
+    // prueba para derivar contenedores/volúmenes y consolidar por aditivo+capacidad.
+
+    /// <summary>Volumen mínimo de muestra que requiere la prueba, en mL. Null = sin definir.</summary>
+    public decimal? MinVolumeMl { get; private set; }
+
+    /// <summary>Volumen preferido (con margen para repeticiones/reflejos), en mL.</summary>
+    public decimal? PreferredVolumeMl { get; private set; }
+
+    /// <summary>Requerimiento mínimo del analizador en mL (volumen muerto + consumo por
+    /// corrida). Aproximación hasta que llegue el catálogo real de analizadores (LIS-12).</summary>
+    public decimal? AnalyzerMinVolumeMl { get; private set; }
+
+    /// <summary>Ventana de estabilidad de la prueba en minutos si difiere del tipo de
+    /// muestra; null = hereda de <c>SpecimenType.StabilityMinutes</c>.</summary>
+    public int? StabilityMinutes { get; private set; }
+
     /// <summary>Permite deprecar sin borrar para preservar referencias históricas.</summary>
     public bool Active { get; private set; } = true;
 
@@ -148,6 +166,24 @@ public sealed class LabTestDefinition
         SpecimenTypeId = specimenTypeId;
         TubeTypeId = tubeTypeId;
         CollectionMode = collectionMode;
+        Touch(timeProvider);
+    }
+
+    /// <summary>
+    /// Define los requerimientos de volumen/estabilidad del plan de colección
+    /// (R6-F1a). Separado de <see cref="Edit"/> para no tocar el flujo CRUD actual.
+    /// </summary>
+    public void SetCollectionRequirements(
+        decimal? minVolumeMl,
+        decimal? preferredVolumeMl,
+        decimal? analyzerMinVolumeMl,
+        int? stabilityMinutes,
+        TimeProvider? timeProvider = null)
+    {
+        MinVolumeMl = minVolumeMl;
+        PreferredVolumeMl = preferredVolumeMl;
+        AnalyzerMinVolumeMl = analyzerMinVolumeMl;
+        StabilityMinutes = stabilityMinutes;
         Touch(timeProvider);
     }
 

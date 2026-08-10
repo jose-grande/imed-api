@@ -17,11 +17,31 @@ public sealed class ResolveRequisitionHandler(
     {
         var partition = LabRouting.PartitionOf(orgId);
         var orders = await hapi.SearchLabOrdersByEncounterAsync(encounterId, partition, ct);
+        // F2: solo se resuelven las órdenes ingresadas (check-in del paciente).
+        var checkedIn = await ops.GetCheckedInRequisitionsAsync(orgId, ct);
+        orders = orders.Where(o => o.Requisition is not null && checkedIn.Contains(o.Requisition)).ToList();
         if (orders.Count == 0)
         {
             return null;
         }
+        return await BuildViewAsync(orgId, encounterId, orders, ct);
+    }
 
+    /// <summary>Resuelve una orden específica por su número (requisition) — buscador de recepción (F2).</summary>
+    public async Task<RequisitionView?> HandleByOrderAsync(Guid orgId, string requisition, CancellationToken ct = default)
+    {
+        var partition = LabRouting.PartitionOf(orgId);
+        var orders = await hapi.SearchLabOrdersByRequisitionAsync(requisition, partition, ct);
+        if (orders.Count == 0)
+        {
+            return null;
+        }
+        return await BuildViewAsync(orgId, requisition, orders, ct);
+    }
+
+    private async Task<RequisitionView?> BuildViewAsync(
+        Guid orgId, string viewId, IReadOnlyList<LabOrderSnapshot> orders, CancellationToken ct)
+    {
         var specimenTypes = (await catalog.ListSpecimenTypesAsync(orgId, ct)).ToDictionary(s => s.Id);
         var tubeTypes = (await catalog.ListTubeTypesAsync(orgId, ct)).ToDictionary(t => t.Id);
 
@@ -86,7 +106,7 @@ public sealed class ResolveRequisitionHandler(
             kv.Key, meta[kv.Key].Name, meta[kv.Key].CollectionMode,
             meta[kv.Key].TubeCode, meta[kv.Key].TubeName, meta[kv.Key].TubeColor, kv.Value)).ToList();
 
-        return new RequisitionView(encounterId, patientId ?? string.Empty, groups);
+        return new RequisitionView(viewId, patientId ?? string.Empty, groups);
     }
 
     private sealed record GroupMeta(string Name, string CollectionMode, string? TubeCode, string? TubeName, string? TubeColor);
@@ -221,6 +241,7 @@ public sealed class ReceiveRequisitionHandler(
             cmd.OrganizationId, ord.Id, ord.PatientFhirId, OrderRouting.InHouse,
             LabRouting.ParsePriority(ord.Priority), test?.FastingHours is not null, timeProvider: timeProvider);
         intake.Classify(cmd.Requisition, group.SpecimenTypeCode, group.TubeCode, timeProvider);
+        intake.DescribeExam(ord.LoincCode, ord.CodeText, timeProvider);
         return intake;
     }
 

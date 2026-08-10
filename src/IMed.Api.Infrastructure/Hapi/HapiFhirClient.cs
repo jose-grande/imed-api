@@ -1377,7 +1377,7 @@ public sealed class HapiFhirClient(
 
         string? code = null;
         string? codeDisplay = null;
-        if (doc.TryGetProperty("code", out var codeEl))
+        if (TryGetObjectProperty(doc, "code", out var codeEl))
         {
             if (codeEl.TryGetProperty("coding", out var codingEl)
                 && codingEl.ValueKind == JsonValueKind.Array
@@ -1601,6 +1601,23 @@ public sealed class HapiFhirClient(
         return await SearchMedicationRequestsAsync(url, partitionName, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<MedicationRequestSnapshot>> SearchMedicationRequestsByGroupAsync(
+        string groupIdentifierValue,
+        string partitionName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(groupIdentifierValue))
+        {
+            throw new ArgumentException("groupIdentifierValue es obligatorio.", nameof(groupIdentifierValue));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        // Búsqueda por token de groupIdentifier (search param `group-identifier`).
+        // Buscamos por valor sin system: los valores son UUID únicos.
+        var url = $"MedicationRequest?group-identifier={Uri.EscapeDataString(groupIdentifierValue)}&_count=100";
+        return await SearchMedicationRequestsAsync(url, partitionName, cancellationToken);
+    }
+
     private async Task<IReadOnlyList<MedicationRequestSnapshot>> SearchMedicationRequestsAsync(
         string url, string partitionName, CancellationToken cancellationToken)
     {
@@ -1747,7 +1764,7 @@ public sealed class HapiFhirClient(
         }
 
         string patientFhirId = string.Empty;
-        if (doc.TryGetProperty("subject", out var subjEl)
+        if (TryGetObjectProperty(doc, "subject", out var subjEl)
             && subjEl.TryGetProperty("reference", out var refEl)
             && refEl.ValueKind == JsonValueKind.String)
         {
@@ -1756,7 +1773,7 @@ public sealed class HapiFhirClient(
         }
 
         string? encounterFhirId = null;
-        if (doc.TryGetProperty("encounter", out var encEl)
+        if (TryGetObjectProperty(doc, "encounter", out var encEl)
             && encEl.TryGetProperty("reference", out var encRefEl)
             && encRefEl.ValueKind == JsonValueKind.String)
         {
@@ -1765,7 +1782,7 @@ public sealed class HapiFhirClient(
         }
 
         string? requesterPractitionerId = null;
-        if (doc.TryGetProperty("requester", out var reqEl)
+        if (TryGetObjectProperty(doc, "requester", out var reqEl)
             && reqEl.TryGetProperty("reference", out var reqRefEl)
             && reqRefEl.ValueKind == JsonValueKind.String)
         {
@@ -1815,6 +1832,7 @@ public sealed class HapiFhirClient(
         // dosage: tomamos el primer item.
         string? dosageText = null;
         string? route = null;
+        string? patientInstruction = null;
         if (doc.TryGetProperty("dosageInstruction", out var dosArr)
             && dosArr.ValueKind == JsonValueKind.Array
             && dosArr.GetArrayLength() > 0)
@@ -1823,6 +1841,10 @@ public sealed class HapiFhirClient(
             if (first.TryGetProperty("text", out var dosTextEl) && dosTextEl.ValueKind == JsonValueKind.String)
             {
                 dosageText = dosTextEl.GetString();
+            }
+            if (first.TryGetProperty("patientInstruction", out var pInstrEl) && pInstrEl.ValueKind == JsonValueKind.String)
+            {
+                patientInstruction = pInstrEl.GetString();
             }
             if (first.TryGetProperty("route", out var routeEl))
             {
@@ -1875,6 +1897,15 @@ public sealed class HapiFhirClient(
             authoredOn = parsedDate;
         }
 
+        // groupIdentifier: agrupa los medicamentos de una misma receta.
+        string? groupIdentifierValue = null;
+        if (doc.TryGetProperty("groupIdentifier", out var gidEl)
+            && gidEl.TryGetProperty("value", out var gidValEl)
+            && gidValEl.ValueKind == JsonValueKind.String)
+        {
+            groupIdentifierValue = gidValEl.GetString();
+        }
+
         return new MedicationRequestSnapshot(
             Id: id,
             PatientFhirId: patientFhirId,
@@ -1890,7 +1921,9 @@ public sealed class HapiFhirClient(
             DispenseUnit: dispenseUnit,
             Note: note,
             RequesterPractitionerId: requesterPractitionerId,
-            AuthoredOn: authoredOn);
+            AuthoredOn: authoredOn,
+            GroupIdentifierValue: groupIdentifierValue,
+            PatientInstruction: patientInstruction);
     }
 
     // ──────────────── ServiceRequest / Lab Orders (Épica L) ────────────────
@@ -2018,6 +2051,24 @@ public sealed class HapiFhirClient(
         // Filtramos por categoría para no traer órdenes de imagen/referidos
         // cuando esos casos de uso aparezcan (post-piloto).
         var url = $"ServiceRequest?encounter=Encounter/{Uri.EscapeDataString(encounterFhirId)}"
+                  + $"&category={Uri.EscapeDataString(SnomedSystem + "|" + LabCategoryCode)}"
+                  + "&_count=100";
+        return await SearchLabOrdersAsync(url, partitionName, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<LabOrderSnapshot>> SearchLabOrdersByRequisitionAsync(
+        string requisitionValue,
+        string partitionName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(requisitionValue))
+        {
+            throw new ArgumentException("requisitionValue es obligatorio.", nameof(requisitionValue));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        // Token search por ServiceRequest.requisition (valor único por orden).
+        var url = $"ServiceRequest?requisition={Uri.EscapeDataString(requisitionValue)}"
                   + $"&category={Uri.EscapeDataString(SnomedSystem + "|" + LabCategoryCode)}"
                   + "&_count=100";
         return await SearchLabOrdersAsync(url, partitionName, cancellationToken);
@@ -2454,6 +2505,44 @@ public sealed class HapiFhirClient(
         ArgumentNullException.ThrowIfNull(request);
         await EnsureBearerAsync(cancellationToken);
 
+        var payload = BuildObservationPayload(request, idForPut: null);
+        return await PostFhirResourceAsync("Observation", payload, request.PartitionName, cancellationToken);
+    }
+
+    public async Task UpdateObservationAsync(
+        string observationFhirId, UpsertObservationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(observationFhirId))
+        {
+            throw new ArgumentException("observationFhirId es obligatorio.", nameof(observationFhirId));
+        }
+        ArgumentNullException.ThrowIfNull(request);
+        await EnsureBearerAsync(cancellationToken);
+
+        // PUT sobre el mismo id: HAPI versiona el recurso, así que el valor anterior queda
+        // en `_history` y la corrección es auditable sin tabla propia.
+        var payload = BuildObservationPayload(request, idForPut: observationFhirId);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Put, $"Observation/{observationFhirId}")
+        {
+            Content = JsonContent.Create(payload, options: FhirJson)
+        };
+        httpRequest.Headers.Add(TenantPartitionHeader, request.PartitionName);
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError(
+                "PUT /fhir/Observation/{Id} falló. Status={Status}, Body={Body}",
+                observationFhirId, (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
+        logger.LogInformation("Observation {Id} actualizada.", observationFhirId);
+    }
+
+    private static Dictionary<string, object?> BuildObservationPayload(
+        UpsertObservationRequest request, string? idForPut)
+    {
         var payload = new Dictionary<string, object?>
         {
             ["resourceType"] = "Observation",
@@ -2467,6 +2556,10 @@ public sealed class HapiFhirClient(
             ["effectiveDateTime"] = request.EffectiveDateTime,
             ["issued"] = request.EffectiveDateTime,
         };
+        if (!string.IsNullOrWhiteSpace(idForPut))
+        {
+            payload["id"] = idForPut;
+        }
         if (!string.IsNullOrWhiteSpace(request.ServiceRequestFhirId))
         {
             payload["basedOn"] = new object[] { new { reference = $"ServiceRequest/{request.ServiceRequestFhirId}" } };
@@ -2554,7 +2647,7 @@ public sealed class HapiFhirClient(
             };
         }
 
-        return await PostFhirResourceAsync("Observation", payload, request.PartitionName, cancellationToken);
+        return payload;
     }
 
     public async Task<string> CreateDiagnosticReportAsync(
@@ -2806,7 +2899,30 @@ public sealed class HapiFhirClient(
             }
         }
         var effective = doc.TryGetProperty("effectiveDateTime", out var ed) && ed.ValueKind == JsonValueKind.String ? ed.GetString() : null;
-        return new ObservationSnapshot(id, patient, status, loinc, codeText, valueNumeric, valueUnit, valueString, flag, low, high, effective);
+
+        // Vínculos a preservar si el recurso se reescribe (corrección de resultado, LIS-4b).
+        string? serviceRequestId = null;
+        if (doc.TryGetProperty("basedOn", out var basedOn) && basedOn.ValueKind == JsonValueKind.Array
+            && basedOn.GetArrayLength() > 0 && basedOn[0].TryGetProperty("reference", out var boRef))
+        {
+            serviceRequestId = StripRef(boRef, "ServiceRequest/");
+        }
+        string? specimenId = null;
+        if (doc.TryGetProperty("specimen", out var specimen) && specimen.TryGetProperty("reference", out var spRef))
+        {
+            specimenId = StripRef(spRef, "Specimen/");
+        }
+        string? performerRef = null;
+        if (doc.TryGetProperty("performer", out var performer) && performer.ValueKind == JsonValueKind.Array
+            && performer.GetArrayLength() > 0 && performer[0].TryGetProperty("reference", out var pfRef)
+            && pfRef.ValueKind == JsonValueKind.String)
+        {
+            performerRef = pfRef.GetString();
+        }
+
+        return new ObservationSnapshot(
+            id, patient, status, loinc, codeText, valueNumeric, valueUnit, valueString, flag, low, high, effective,
+            serviceRequestId, specimenId, performerRef);
     }
 
     public async Task<decimal?> GetLatestNumericObservationAsync(
@@ -3013,24 +3129,30 @@ public sealed class HapiFhirClient(
         {
             payload["requester"] = new { reference = $"Practitioner/{req.RequesterPractitionerId}" };
         }
+        // R3/LIS-RD-02: requisición de la visita (agrupa las órdenes en recepción).
+        if (!string.IsNullOrWhiteSpace(req.Requisition))
+        {
+            payload["requisition"] = new { system = "http://imed.local/requisition", value = req.Requisition };
+        }
 
         // R5: ServiceRequest.code es CodeableReference (no CodeableConcept como
         // en R4). HAPI rechaza coding/text en la raíz — hay que envolver en
         // .concept (mismo cambio que sufrió MedicationRequest.medication).
-        var concept = new Dictionary<string, object?>();
+        // Dual coding (LIS-RD-22): LOINC primero (si existe) + código local del panel.
+        var coding = new List<object>();
         if (!string.IsNullOrWhiteSpace(req.LoincCode))
         {
-            concept["coding"] = new object[]
-            {
-                new
-                {
-                    system = LoincSystem,
-                    code = req.LoincCode,
-                    display = req.CodeDisplay ?? req.CodeText
-                }
-            };
+            coding.Add(new { system = LoincSystem, code = req.LoincCode, display = req.CodeDisplay ?? req.CodeText });
         }
-        concept["text"] = req.CodeText;
+        if (!string.IsNullOrWhiteSpace(req.LocalCode) && !string.IsNullOrWhiteSpace(req.LocalSystem))
+        {
+            coding.Add(new { system = req.LocalSystem, code = req.LocalCode, display = req.CodeText });
+        }
+        var concept = new Dictionary<string, object?> { ["text"] = req.CodeText };
+        if (coding.Count > 0)
+        {
+            concept["coding"] = coding.ToArray();
+        }
         payload["code"] = new { concept };
 
         if (!string.IsNullOrWhiteSpace(req.Priority))
@@ -3057,6 +3179,26 @@ public sealed class HapiFhirClient(
         }
 
         return payload;
+    }
+
+    /// <summary>
+    /// Accede a una propiedad que se espera objeto, tolerando que venga como <c>null</c> explícito.
+    ///
+    /// <para>Necesario porque <c>JsonElement.TryGetProperty</c> <b>lanza</b> (no devuelve false) si
+    /// se lo invoca sobre un elemento nulo. Un emisor que serializa <c>"encounter": null</c> en vez
+    /// de omitir la propiedad tumbaba el parseo de la orden entera — y con ella el endpoint.</para>
+    /// </summary>
+    private static bool TryGetObjectProperty(JsonElement parent, string name, out JsonElement value)
+    {
+        if (parent.ValueKind == JsonValueKind.Object
+            && parent.TryGetProperty(name, out var el)
+            && el.ValueKind == JsonValueKind.Object)
+        {
+            value = el;
+            return true;
+        }
+        value = default;
+        return false;
     }
 
     private static LabOrderSnapshot? ParseLabOrderSnapshot(JsonElement doc)
@@ -3114,7 +3256,7 @@ public sealed class HapiFhirClient(
             // Soportamos también el shape legacy (coding/text en la raíz) para
             // que recursos viejos no rompan el listado.
             JsonElement? conceptEl = null;
-            if (codeEl.TryGetProperty("concept", out var c5))
+            if (TryGetObjectProperty(codeEl, "concept", out var c5))
             {
                 conceptEl = c5;
             }
@@ -3192,6 +3334,18 @@ public sealed class HapiFhirClient(
             authoredOn = parsedDate;
         }
 
+        // requisition: agrupa los exámenes/paneles de una misma orden de laboratorio.
+        // El chequeo de `Object` no es decorativo: un emisor puede mandar `"requisition": null`
+        // explícito (en vez de omitir la propiedad), y `TryGetProperty` sobre un elemento nulo
+        // lanza en vez de devolver false — tumbando el parseo de toda la orden.
+        string? requisition = null;
+        if (TryGetObjectProperty(doc, "requisition", out var reqIdEl)
+            && reqIdEl.TryGetProperty("value", out var reqValEl)
+            && reqValEl.ValueKind == JsonValueKind.String)
+        {
+            requisition = reqValEl.GetString();
+        }
+
         return new LabOrderSnapshot(
             Id: id,
             PatientFhirId: patientFhirId,
@@ -3206,7 +3360,8 @@ public sealed class HapiFhirClient(
             ReasonText: reasonText,
             Note: note,
             RequesterPractitionerId: requesterPractitionerId,
-            AuthoredOn: authoredOn);
+            AuthoredOn: authoredOn,
+            Requisition: requisition);
     }
 
     /// <summary>
