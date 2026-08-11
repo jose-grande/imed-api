@@ -1781,6 +1781,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
 
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
                     b.Property<DateOnly>("Day")
                         .HasColumnType("date")
                         .HasColumnName("day");
@@ -1789,7 +1793,7 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("seq");
 
-                    b.HasKey("OrganizationId", "Day");
+                    b.HasKey("OrganizationId", "LocationId", "Day");
 
                     b.ToTable("lab_accession_counter", (string)null);
                 });
@@ -1828,6 +1832,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
 
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
                     b.Property<DateOnly>("Day")
                         .HasColumnType("date")
                         .HasColumnName("day");
@@ -1836,7 +1844,7 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("seq");
 
-                    b.HasKey("OrganizationId", "Day");
+                    b.HasKey("OrganizationId", "LocationId", "Day");
 
                     b.ToTable("lab_order_counter", (string)null);
                 });

@@ -80,6 +80,11 @@ public sealed class CollectionStationsTests(ImedApiFixture fixture) : IAsyncLife
         var container = labeled.Containers[0];
         container.AccessionNumber.Should().NotBeNullOrWhiteSpace();
 
+        // El accession lleva el segmento de sede (ADR-008). No es decorativo: con correlativos
+        // independientes por sede, sin él dos sucursales emitirían el mismo número el mismo día.
+        container.AccessionNumber!.Split('-').Should().HaveCount(4, "ORG-SEDE-FECHA-SECUENCIA");
+        container.AccessionNumber.Split('-')[1].Should().Be("PRIN", "es la sede principal, PRINCIPAL truncada a 4");
+
         var containerUrl = $"/api/lab/reception/collection-plan/container/{container.Id}";
 
         // Estación 3 — identificación positiva antes de pinchar al paciente.

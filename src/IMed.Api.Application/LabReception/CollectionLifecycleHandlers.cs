@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Lab;
 
@@ -9,7 +10,11 @@ namespace IMed.Api.Application.LabReception;
 /// antes de la toma — decisión UX §8.4). Idempotente: solo etiqueta los contenedores
 /// que aún no tienen accession, así reusar el endpoint no consume números de más.
 /// </summary>
-public sealed class GenerateLabelsHandler(ILabOperationsRepository ops, TimeProvider timeProvider)
+public sealed class GenerateLabelsHandler(
+    ILabOperationsRepository ops,
+    ILocationRepository locations,
+    ResolveActiveLocationHandler activeLocation,
+    TimeProvider timeProvider)
 {
     public async Task<CollectionPlanDto?> HandleAsync(Guid orgId, string requisition, Guid? userId, CancellationToken ct = default)
     {
@@ -22,14 +27,19 @@ public sealed class GenerateLabelsHandler(ILabOperationsRepository ops, TimeProv
         var now = timeProvider.GetUtcNow();
         var day = DateOnly.FromDateTime(now.UtcDateTime);
         var events = new List<CollectionEvent>();
+
+        // El correlativo es por sede. La del plan manda —es donde se va a tomar la muestra—; si
+        // el plan es anterior al eje de sede, se cae a la sede activa del usuario.
+        var locationId = plan.LocationId ?? await activeLocation.HandleAsync(orgId, userId, null, ct);
+        var locationCode = (await locations.GetAsync(orgId, locationId, ct))?.Code;
         foreach (var c in plan.Containers)
         {
             if (c.AccessionNumber is not null)
             {
                 continue;
             }
-            var seq = await ops.NextAccessionSeqAsync(orgId, day, ct);
-            var accession = $"{orgId:N}"[..4].ToUpperInvariant() + $"-{day:yyyyMMdd}-{seq:D4}";
+            var seq = await ops.NextAccessionSeqAsync(orgId, locationId, day, ct);
+            var accession = LabAccession.Build(orgId, locationCode, day, seq);
             c.AssignLabel(accession, accession); // barcode = accession (Code128, igual que R1-F3)
             events.Add(CollectionEvent.Create(c.Id, CollectionEventType.LabelGenerated, userId, accession, timeProvider));
         }

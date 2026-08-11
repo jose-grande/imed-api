@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Lab;
 
 namespace IMed.Api.Application.LabReception;
@@ -91,7 +92,9 @@ public sealed class GetAwaitingAdmissionHandler(
 /// admisión (check-in) la hace el frontend con la requisición devuelta, reusando el
 /// split in-house/send-out del flujo de check-in.
 /// </summary>
-public sealed class CreateExternalOrderMultiHandler(IHapiFhirClient hapi, ILabOperationsRepository ops, TimeProvider timeProvider)
+public sealed class CreateExternalOrderMultiHandler(
+    IHapiFhirClient hapi, ILabOperationsRepository ops,
+    ResolveActiveLocationHandler activeLocation, TimeProvider timeProvider)
 {
     public async Task<CreatedExternalOrderMulti> HandleAsync(CreateExternalOrderMultiCommand cmd, CancellationToken ct = default)
     {
@@ -116,7 +119,8 @@ public sealed class CreateExternalOrderMultiHandler(IHapiFhirClient hapi, ILabOp
                 new ExternalPractitionerRequest(partition, cmd.RequesterName, cmd.RequesterIdentifier), ct);
 
         var day = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-        var seq = await ops.NextOrderSeqAsync(cmd.OrganizationId, day, ct);
+        var locationId = await activeLocation.HandleAsync(cmd.OrganizationId, null, null, ct);
+        var seq = await ops.NextOrderSeqAsync(cmd.OrganizationId, locationId, day, ct);
         var requisition = $"ORD-{day:yyyyMMdd}-{seq:D4}";
 
         var note = ComposeNote(cmd.RequesterInstitution, cmd.Note);

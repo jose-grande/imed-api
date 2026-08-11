@@ -17,10 +17,10 @@ public interface ILabOperationsRepository
     Task AddSpecimenEventAsync(SpecimenEvent specimenEvent, CancellationToken cancellationToken = default);
 
     /// <summary>Incremento atómico del contador diario; devuelve el nuevo `seq` (L3-D5).</summary>
-    Task<int> NextAccessionSeqAsync(Guid organizationId, DateOnly day, CancellationToken cancellationToken = default);
+    Task<int> NextAccessionSeqAsync(Guid organizationId, Guid locationId, DateOnly day, CancellationToken cancellationToken = default);
 
     /// <summary>Incremento atómico del contador diario de número de orden (F1); devuelve el nuevo `seq`.</summary>
-    Task<int> NextOrderSeqAsync(Guid organizationId, DateOnly day, CancellationToken cancellationToken = default);
+    Task<int> NextOrderSeqAsync(Guid organizationId, Guid locationId, DateOnly day, CancellationToken cancellationToken = default);
 
     /// <summary>Worklist: intakes in-house por org filtrados por estado (LIS-3 F3).</summary>
     Task<IReadOnlyList<OrderIntake>> ListInHouseIntakesAsync(Guid organizationId, OrderIntakeStatus? status, CancellationToken cancellationToken = default);

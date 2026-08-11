@@ -1090,7 +1090,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         b.Entity<LabAccessionCounter>(e =>
         {
             e.ToTable("lab_accession_counter");
-            e.HasKey(x => new { x.OrganizationId, x.Day });
+            e.HasKey(x => new { x.OrganizationId, x.LocationId, x.Day });
             e.Property(x => x.Seq).IsRequired();
         });
     }
@@ -1100,7 +1100,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         b.Entity<LabOrderCounter>(e =>
         {
             e.ToTable("lab_order_counter");
-            e.HasKey(x => new { x.OrganizationId, x.Day });
+            e.HasKey(x => new { x.OrganizationId, x.LocationId, x.Day });
             e.Property(x => x.Seq).IsRequired();
         });
     }

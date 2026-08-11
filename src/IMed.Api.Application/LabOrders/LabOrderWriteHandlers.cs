@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Application.LabReception;
 using IMed.Api.Domain.Lab;
 
@@ -143,15 +144,18 @@ public sealed class UpsertLabOrderHandler(IHapiFhirClient hapi, ILabCatalogRepos
 
 /// <summary>
 /// Asigna un número de orden correlativo legible (F1): <c>ORD-{yyyyMMdd}-{seq}</c>
-/// por organización, secuencial diario. Se llama al iniciar una nueva orden en el
+/// <b>por sede</b> (ADR-008), secuencial diario. Se llama al iniciar una nueva orden en el
 /// encuentro; el valor se usa como <c>requisition</c> de todos sus exámenes.
 /// </summary>
-public sealed class AllocateOrderNumberHandler(ILabOperationsRepository ops, TimeProvider timeProvider)
+public sealed class AllocateOrderNumberHandler(
+    ILabOperationsRepository ops, ResolveActiveLocationHandler activeLocation, TimeProvider timeProvider)
 {
-    public async Task<string> HandleAsync(Guid orgId, CancellationToken ct = default)
+    public async Task<string> HandleAsync(Guid orgId, Guid? userId = null, CancellationToken ct = default)
     {
         var day = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-        var seq = await ops.NextOrderSeqAsync(orgId, day, ct);
+        // El correlativo de orden es por sede (ADR-008).
+        var locationId = await activeLocation.HandleAsync(orgId, userId, null, ct);
+        var seq = await ops.NextOrderSeqAsync(orgId, locationId, day, ct);
         return $"ORD-{day:yyyyMMdd}-{seq:D4}";
     }
 }

@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Lab;
 using Microsoft.Extensions.Logging;
@@ -123,6 +124,8 @@ public sealed class ReceiveRequisitionHandler(
     ILabCatalogRepository catalog,
     ILabOperationsRepository ops,
     IUserPractitionerAssignmentRepository assignments,
+    ILocationRepository locations,
+    ResolveActiveLocationHandler activeLocation,
     TimeProvider timeProvider,
     ILogger<ReceiveRequisitionHandler> logger)
 {
@@ -134,6 +137,10 @@ public sealed class ReceiveRequisitionHandler(
         // Practitioner del técnico/flebotomista → collector de la muestra + agente de Provenance.
         var assignment = await assignments.GetAsync(cmd.UserId, cmd.OrganizationId, ct);
         var collectorRef = string.IsNullOrWhiteSpace(assignment?.PractitionerFhirId) ? null : assignment!.PractitionerFhirId;
+
+        // Sede de la recepción: de ella salen el correlativo y el segmento de sede del accession.
+        var locationId = await activeLocation.HandleAsync(cmd.OrganizationId, cmd.UserId, null, ct);
+        var locationCode = (await locations.GetAsync(cmd.OrganizationId, locationId, ct))?.Code;
 
         foreach (var group in cmd.Groups)
         {
@@ -192,8 +199,8 @@ public sealed class ReceiveRequisitionHandler(
             // Recepción: una muestra compartida por todas las órdenes del grupo (N:M).
             var now = timeProvider.GetUtcNow();
             var day = DateOnly.FromDateTime(now.UtcDateTime);
-            var seq = await ops.NextAccessionSeqAsync(cmd.OrganizationId, day, ct);
-            var accession = $"{cmd.OrganizationId:N}"[..4].ToUpperInvariant() + $"-{day:yyyyMMdd}-{seq:D4}";
+            var seq = await ops.NextAccessionSeqAsync(cmd.OrganizationId, locationId, day, ct);
+            var accession = LabAccession.Build(cmd.OrganizationId, locationCode, day, seq);
 
             var srIds = snaps.Select(s => s.Order.Id).ToList();
             var maxFasting = snaps

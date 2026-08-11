@@ -78,7 +78,65 @@ public sealed class LocationBackfill(
             $"UPDATE collection_plan SET location_id = {locationId} WHERE organization_id = {organizationId} AND location_id IS NULL", ct);
         total += await db.Database.ExecuteSqlAsync(
             $"UPDATE lab_order_checkin SET location_id = {locationId} WHERE organization_id = {organizationId} AND location_id IS NULL", ct);
+
+        total += await RekeyAccessionCounterAsync(db, organizationId, locationId, ct);
+        total += await RekeyOrderCounterAsync(db, organizationId, locationId, ct);
         return total;
+    }
+
+    /// <summary>
+    /// Re-clava los contadores del sentinel (guid cero que dejó la migración) a la sede principal.
+    ///
+    /// <para><b>Por qué con GREATEST y no con un UPDATE.</b> Los correlativos son diarios: si hoy
+    /// ya se emitieron accessions con la secuencia vieja y el contador arrancara de cero para la
+    /// sede, se reemitirían números ya impresos en tubos. Tomar el máximo entre lo que había y lo
+    /// que hubiera garantiza que ninguna secuencia retroceda.</para>
+    /// </summary>
+    private static async Task<int> RekeyAccessionCounterAsync(
+        AppDbContext db, Guid organizationId, Guid locationId, CancellationToken ct)
+    {
+        var sentinel = Guid.Empty;
+        var moved = await db.Database.ExecuteSqlAsync(
+            $"""
+             INSERT INTO lab_accession_counter (organization_id, location_id, day, seq)
+             SELECT organization_id, {locationId}, day, seq
+               FROM lab_accession_counter
+              WHERE organization_id = {organizationId} AND location_id = {sentinel}
+             ON CONFLICT (organization_id, location_id, day)
+             DO UPDATE SET seq = GREATEST(lab_accession_counter.seq, EXCLUDED.seq)
+             """, ct);
+
+        if (moved > 0)
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"DELETE FROM lab_accession_counter WHERE organization_id = {organizationId} AND location_id = {sentinel}",
+                ct);
+        }
+        return moved;
+    }
+
+    /// <inheritdoc cref="RekeyAccessionCounterAsync"/>
+    private static async Task<int> RekeyOrderCounterAsync(
+        AppDbContext db, Guid organizationId, Guid locationId, CancellationToken ct)
+    {
+        var sentinel = Guid.Empty;
+        var moved = await db.Database.ExecuteSqlAsync(
+            $"""
+             INSERT INTO lab_order_counter (organization_id, location_id, day, seq)
+             SELECT organization_id, {locationId}, day, seq
+               FROM lab_order_counter
+              WHERE organization_id = {organizationId} AND location_id = {sentinel}
+             ON CONFLICT (organization_id, location_id, day)
+             DO UPDATE SET seq = GREATEST(lab_order_counter.seq, EXCLUDED.seq)
+             """, ct);
+
+        if (moved > 0)
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"DELETE FROM lab_order_counter WHERE organization_id = {organizationId} AND location_id = {sentinel}",
+                ct);
+        }
+        return moved;
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

@@ -37,15 +37,16 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
     }
 
     public async Task<int> NextAccessionSeqAsync(
-        Guid organizationId, DateOnly day, CancellationToken cancellationToken = default)
+        Guid organizationId, Guid locationId, DateOnly day, CancellationToken cancellationToken = default)
     {
         // Upsert atómico: inserta seq=1 o incrementa el existente, devolviendo el nuevo valor.
         // Evita duplicados bajo concurrencia sin transacción explícita (L3-D5).
+        // La clave incluye la sede: cada una lleva su propia numeración contigua (ADR-008).
         var seqs = await db.Database
             .SqlQuery<int>($"""
-                INSERT INTO lab_accession_counter (organization_id, day, seq)
-                VALUES ({organizationId}, {day}, 1)
-                ON CONFLICT (organization_id, day)
+                INSERT INTO lab_accession_counter (organization_id, location_id, day, seq)
+                VALUES ({organizationId}, {locationId}, {day}, 1)
+                ON CONFLICT (organization_id, location_id, day)
                 DO UPDATE SET seq = lab_accession_counter.seq + 1
                 RETURNING seq AS "Value"
                 """)
@@ -78,14 +79,14 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
     }
 
     public async Task<int> NextOrderSeqAsync(
-        Guid organizationId, DateOnly day, CancellationToken cancellationToken = default)
+        Guid organizationId, Guid locationId, DateOnly day, CancellationToken cancellationToken = default)
     {
-        // Mismo upsert atómico que el accession, contra el contador de órdenes (F1).
+        // Mismo upsert atómico que el accession, contra el contador de órdenes (F1), por sede.
         var seqs = await db.Database
             .SqlQuery<int>($"""
-                INSERT INTO lab_order_counter (organization_id, day, seq)
-                VALUES ({organizationId}, {day}, 1)
-                ON CONFLICT (organization_id, day)
+                INSERT INTO lab_order_counter (organization_id, location_id, day, seq)
+                VALUES ({organizationId}, {locationId}, {day}, 1)
+                ON CONFLICT (organization_id, location_id, day)
                 DO UPDATE SET seq = lab_order_counter.seq + 1
                 RETURNING seq AS "Value"
                 """)

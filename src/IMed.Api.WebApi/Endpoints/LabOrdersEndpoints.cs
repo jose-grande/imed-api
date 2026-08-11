@@ -46,7 +46,11 @@ public static class LabOrdersEndpoints
     {
         var orgId = ParseOrg(principal);
         if (orgId is null) { return ForbiddenOrg(); }
-        var number = await handler.HandleAsync(orgId.Value, ct);
+        // El número de orden es por sede: se pasa el usuario para resolver en cuál está parado.
+        var userId = Guid.TryParse(
+            principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub"),
+            out var sub) ? sub : (Guid?)null;
+        var number = await handler.HandleAsync(orgId.Value, userId, ct);
         return Results.Ok(new { requisition = number });
     }
 

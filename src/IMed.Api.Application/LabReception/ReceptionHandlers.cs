@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Lab;
 using Microsoft.Extensions.Logging;
@@ -152,6 +153,8 @@ public sealed class ReceiveSpecimenHandler(
     ILabCatalogRepository catalog,
     ILabOperationsRepository ops,
     IUserPractitionerAssignmentRepository assignments,
+    ILocationRepository locations,
+    ResolveActiveLocationHandler activeLocation,
     TimeProvider timeProvider,
     ILogger<ReceiveSpecimenHandler> logger)
 {
@@ -198,9 +201,10 @@ public sealed class ReceiveSpecimenHandler(
         // Recepción in-house: accession + Specimen + intake + evento + provenance.
         var now = timeProvider.GetUtcNow();
         var day = DateOnly.FromDateTime(now.UtcDateTime);
-        var seq = await ops.NextAccessionSeqAsync(cmd.OrganizationId, day, ct);
-        var accession = $"{cmd.OrganizationId:N}"[..4].ToUpperInvariant()
-            + $"-{day:yyyyMMdd}-{seq:D4}";
+        var locationId = await activeLocation.HandleAsync(cmd.OrganizationId, cmd.UserId, null, ct);
+        var locationCode = (await locations.GetAsync(cmd.OrganizationId, locationId, ct))?.Code;
+        var seq = await ops.NextAccessionSeqAsync(cmd.OrganizationId, locationId, day, ct);
+        var accession = LabAccession.Build(cmd.OrganizationId, locationCode, day, seq);
 
         var specimenId = await hapi.CreateSpecimenAsync(new UpsertSpecimenRequest(
             PartitionName: partition,
