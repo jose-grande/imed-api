@@ -21,7 +21,8 @@ namespace IMed.Api.Application.Locations;
 /// </summary>
 public sealed class ResolveActiveLocationHandler(
     ILocationRepository locations,
-    ILocationProvisioning provisioning)
+    ILocationProvisioning provisioning,
+    IRequestLocationContext requestContext)
 {
     public async Task<Guid> HandleAsync(
         Guid organizationId,
@@ -29,6 +30,10 @@ public sealed class ResolveActiveLocationHandler(
         Guid? requestedLocationId = null,
         CancellationToken ct = default)
     {
+        // La sede declarada en el request (selector de sede activa) vale como elección explícita
+        // del usuario. Es una declaración, no una autorización: abajo se verifica el acceso.
+        requestedLocationId ??= requestContext.RequestedLocationId;
+
         var assignments = userId is null
             ? []
             : await locations.ListForUserAsync(organizationId, userId.Value, ct);

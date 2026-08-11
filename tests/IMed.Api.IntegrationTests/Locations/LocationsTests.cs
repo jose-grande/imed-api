@@ -152,5 +152,55 @@ public sealed class LocationsTests(ImedApiFixture fixture) : IAsyncLifetime
             .Which.Code.Should().Be("SUR");
     }
 
+    [Fact]
+    public async Task LaSedeDeclaradaEnElHeader_mandaSobreLaInferida()
+    {
+        var (client, _, _) = await AuthedOrgAsync("lab_tech", "org_admin");
+        var sur = await (await client.PostAsJsonAsync("/api/locations", new { code = "SUR", name = "Sucursal Sur" }))
+            .Content.ReadFromJsonAsync<LocationDto>();
+
+        var enc = $"enc-{Guid.NewGuid():N}";
+        fixture.Hapi.SeedServiceRequest("pat-sede-1", "CMP", "Perfil metabolico completo", encounter: enc, requisition: enc);
+
+        // El usuario declara que está parado en la Sucursal Sur. Es lo que hace que el selector
+        // de sede signifique algo: sin esto el backend inferiría siempre la principal.
+        client.DefaultRequestHeaders.Add("X-IMed-Location", sur!.Id.ToString());
+
+        await client.PostAsJsonAsync("/api/lab/reception/check-in", new { requisition = enc });
+        await client.PostAsJsonAsync("/api/lab/reception/collection-plan", new { requisition = enc });
+        var labeled = await (await client.PostAsJsonAsync($"/api/lab/reception/collection-plan/{enc}/labels", new { }))
+            .Content.ReadFromJsonAsync<CollectionPlanProbe>();
+
+        labeled.Should().NotBeNull();
+        var accession = labeled!.Containers[0].AccessionNumber;
+        accession.Should().NotBeNullOrWhiteSpace();
+        accession!.Split('-')[1].Should().Be("SUR",
+            "el accession lleva la sede declarada, no la principal de la organización");
+    }
+
+    [Fact]
+    public async Task UnaSedeAjena_declaradaEnElHeader_noSeAcepta()
+    {
+        // Organización A crea su sede; el usuario de la organización B intenta usarla.
+        var (clientA, _, _) = await AuthedOrgAsync();
+        var ajena = await (await clientA.PostAsJsonAsync("/api/locations", new { code = "AJENA", name = "Sede ajena" }))
+            .Content.ReadFromJsonAsync<LocationDto>();
+
+        var (clientB, _, _) = await AuthedOrgAsync("lab_tech", "org_admin");
+        clientB.DefaultRequestHeaders.Add("X-IMed-Location", ajena!.Id.ToString());
+
+        var enc = $"enc-{Guid.NewGuid():N}";
+        fixture.Hapi.SeedServiceRequest("pat-sede-2", "CMP", "Perfil metabolico completo", encounter: enc, requisition: enc);
+
+        var resp = await clientB.PostAsJsonAsync("/api/lab/reception/check-in", new { requisition = enc });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "un header no puede habilitar a operar en la sede de otra organización");
+    }
+
     private sealed record BootstrapProbe(Guid OrganizationId);
+
+    private sealed record CollectionPlanProbe(IReadOnlyList<ContainerProbe> Containers);
+
+    private sealed record ContainerProbe(Guid Id, string? AccessionNumber);
 }

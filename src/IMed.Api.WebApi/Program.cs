@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Text.Json;
+using IMed.Api.Application.Abstractions;
 using IMed.Api.Infrastructure;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Infrastructure.Persistence;
 using IMed.Api.WebApi.Endpoints;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -20,6 +22,16 @@ var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<st
 
 // --- Services --------------------------------------------------------------
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// Sede declarada por el cliente (ADR-008). Vive acá y no en Infrastructure porque leer un
+// header es una preocupación de transporte: la capa de datos no debe saber que existe HTTP.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IRequestLocationContext, RequestLocationContext>();
+
+// Un argumento inválido es un 400, no un 500. Sin esto, la validación que hacen los handlers
+// con ArgumentException llega como error del servidor en los endpoints que no la atrapan a mano.
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ArgumentExceptionHandler>();
 
 // CORS para los portales Angular
 const string CorsPolicyName = "ImedPortals";
@@ -126,6 +138,8 @@ if (app.Environment.IsDevelopment())
         options.Title = "IMed API (dev)";
     });
 }
+
+app.UseExceptionHandler();
 
 app.UseCors(CorsPolicyName);
 
