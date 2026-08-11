@@ -1,5 +1,6 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Lab;
+using Microsoft.Extensions.Logging;
 
 namespace IMed.Api.Application.LabReception;
 
@@ -26,7 +27,9 @@ public sealed class CollectionIntakeConvergence(
     ILabOperationsRepository ops,
     ILabCatalogRepository catalog,
     IHapiFhirClient hapi,
-    TimeProvider timeProvider)
+    IUserPractitionerAssignmentRepository assignments,
+    TimeProvider timeProvider,
+    ILogger<CollectionIntakeConvergence> logger)
 {
     /// <summary>Cota de lectura del catálogo para resolver el ayuno por código de prueba.</summary>
     private const int CatalogLookupLimit = 1000;
@@ -88,6 +91,14 @@ public sealed class CollectionIntakeConvergence(
             .DefaultIfEmpty(0)
             .Max();
 
+        // Practitioner del técnico que resolvió el QC → collector de la muestra y agente de la
+        // cadena de custodia, igual que en el camino legacy. Sin esto la muestra queda sin firma
+        // de quién la recibió y la evidencia solo vive en la tabla local `collection_event`.
+        var collectorRef = userId is null
+            ? null
+            : (await assignments.GetAsync(userId.Value, orgId, ct))?.PractitionerFhirId;
+        collectorRef = string.IsNullOrWhiteSpace(collectorRef) ? null : collectorRef;
+
         // Una muestra FHIR por contenedor, compartida por sus órdenes. Solo si el QC aceptó:
         // una muestra rechazada no ingresa al laboratorio.
         var specimenId = container.SpecimenFhirId;
@@ -105,10 +116,12 @@ public sealed class CollectionIntakeConvergence(
                 FastingHours: fastingHours == 0 ? null : fastingHours,
                 Note: null,
                 AdditionalServiceRequestFhirIds: serviceRequestIds.Skip(1).ToList(),
-                CollectorPractitionerId: null,
+                CollectorPractitionerId: collectorRef,
                 CollectionMethod: null,
                 CollectionBodySite: null), ct);
             container.SetSpecimenFhirId(specimenId);
+
+            await TryProvenanceAsync(partition, collectorRef, specimenId, now, ct);
         }
 
         foreach (var order in toRegister)
@@ -147,5 +160,29 @@ public sealed class CollectionIntakeConvergence(
         }
 
         return toRegister.Count;
+    }
+
+    /// <summary>
+    /// Cadena de custodia de la muestra en FHIR. Best-effort y con el mismo contrato que el camino
+    /// legacy (<c>ReceiveRequisitionHandler</c>): si no hay Practitioner detrás del usuario no hay
+    /// a quién atribuirle el acto, y un fallo de HAPI no puede tumbar una recepción ya registrada.
+    /// </summary>
+    private async Task TryProvenanceAsync(
+        string partition, string? collectorRef, string specimenId, DateTimeOffset now, CancellationToken ct)
+    {
+        if (collectorRef is null)
+        {
+            return;
+        }
+        try
+        {
+            await hapi.CreateProvenanceAsync(new CreateProvenanceRequest(
+                partition, $"Specimen/{specimenId}", "CREATE", "Recepción de muestra",
+                $"Practitioner/{collectorRef}", now.ToString("o")), ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "No se pudo registrar Provenance para Specimen {Id} (best-effort).", specimenId);
+        }
     }
 }

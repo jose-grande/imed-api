@@ -28,6 +28,7 @@ public sealed class HapiMockServer : IDisposable
     private readonly Dictionary<string, FakeServiceRequest> _serviceRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakeObservation> _observations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakeDiagnosticReport> _diagnosticReports = new(StringComparer.Ordinal);
+    private readonly List<CreatedProvenance> _provenances = new();
     private int _failingCreatePractitionerRemaining;
     public int CreatePractitionerCallCount { get; private set; }
     public int CreatePractitionerRoleCallCount { get; private set; }
@@ -36,6 +37,7 @@ public sealed class HapiMockServer : IDisposable
 
     public IReadOnlyCollection<string> CreatedPartitions => _createdPartitions;
     public IReadOnlyCollection<CreatedOrganization> Organizations => _organizations;
+    public IReadOnlyCollection<CreatedProvenance> Provenances => _provenances;
 
     public HapiMockServer()
     {
@@ -73,6 +75,7 @@ public sealed class HapiMockServer : IDisposable
         _serviceRequests.Clear();
         _observations.Clear();
         _diagnosticReports.Clear();
+        _provenances.Clear();
         _failingCreatePractitionerRemaining = 0;
         CreatePractitionerCallCount = 0;
         CreatePractitionerRoleCallCount = 0;
@@ -550,8 +553,52 @@ public sealed class HapiMockServer : IDisposable
     {
         _server
             .Given(Request.Create().WithPath("/fhir/Provenance").UsingPost())
-            .RespondWith(Response.Create().WithCallback(_ =>
-                JsonMessage(HttpStatusCode.Created, new { resourceType = "Provenance", id = $"prov-{Guid.NewGuid():N}", meta = new { versionId = "1" } })));
+            .RespondWith(Response.Create().WithCallback(req =>
+            {
+                // Se registra lo creado para poder afirmar sobre la cadena de custodia: sin esto
+                // un camino que deja de escribir Provenance pasa los tests igual.
+                var id = $"prov-{Guid.NewGuid():N}";
+                var root = JsonDocument.Parse(req.Body ?? "{}").RootElement;
+                _provenances.Add(new CreatedProvenance(
+                    id,
+                    ParseFirstArrayReference(root, "target"),
+                    root.TryGetProperty("activity", out var act)
+                        && act.TryGetProperty("coding", out var codings)
+                        && codings.ValueKind == JsonValueKind.Array
+                        && codings.GetArrayLength() > 0
+                        && codings[0].TryGetProperty("code", out var code)
+                            ? code.GetString()
+                            : null,
+                    ParseAgentWho(root)));
+                return JsonMessage(HttpStatusCode.Created, new { resourceType = "Provenance", id, meta = new { versionId = "1" } });
+            }));
+    }
+
+    /// <summary>Primera referencia de un arreglo de referencias (`target` de Provenance).</summary>
+    private static string ParseFirstArrayReference(JsonElement root, string property)
+    {
+        if (root.TryGetProperty(property, out var arr)
+            && arr.ValueKind == JsonValueKind.Array
+            && arr.GetArrayLength() > 0
+            && arr[0].TryGetProperty("reference", out var r))
+        {
+            return r.GetString() ?? string.Empty;
+        }
+        return string.Empty;
+    }
+
+    /// <summary>Referencia del primer agente (`agent[0].who.reference`).</summary>
+    private static string? ParseAgentWho(JsonElement root)
+    {
+        if (root.TryGetProperty("agent", out var agents)
+            && agents.ValueKind == JsonValueKind.Array
+            && agents.GetArrayLength() > 0
+            && agents[0].TryGetProperty("who", out var who)
+            && who.TryGetProperty("reference", out var r))
+        {
+            return r.GetString();
+        }
+        return null;
     }
 
     private static string ParseReference(JsonElement root, string property, string prefix)
@@ -945,6 +992,9 @@ public sealed class HapiMockServer : IDisposable
     }
 
     public sealed record CreatedOrganization(string? Partition, string FhirId, string BodyJson);
+
+    /// <summary>Cadena de custodia creada: sobre qué recurso, qué actividad y quién la firmó.</summary>
+    public sealed record CreatedProvenance(string Id, string TargetReference, string? ActivityCode, string? AgentWhoReference);
 
     private sealed record FakePractitioner(string Id, string Family, string Given, bool Active);
 
