@@ -94,6 +94,102 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("app_audit_log", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Authorization.Permission", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Module")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("module");
+
+                    b.HasKey("Code");
+
+                    b.ToTable("permission", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Authorization.PolicyVersion", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("OrganizationId");
+
+                    b.ToTable("policy_version", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Authorization.RolePermission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Denied")
+                        .HasColumnType("boolean")
+                        .HasColumnName("denied");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PermissionCode")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("permission_code");
+
+                    b.Property<string>("RoleCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("role_code");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("scope");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RoleCode")
+                        .HasDatabaseName("ix_role_permission_role");
+
+                    b.HasIndex("OrganizationId", "RoleCode", "PermissionCode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_role_permission_org_role_perm");
+
+                    b.ToTable("role_permission", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Catalogs.AllergyCatalogEntry", b =>
                 {
                     b.Property<string>("Code")

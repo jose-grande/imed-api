@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using IMed.Api.Domain.Authorization;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Application.LabReception;
 
 namespace IMed.Api.WebApi.Endpoints;
@@ -15,7 +17,7 @@ public static class LabReceptionEndpoints
         // Baseline lectura (LabRead); las escrituras exigen LabTechnician.
         var group = app.MapGroup("/api/lab/reception")
             .WithTags("LabReception")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         group.MapGet("/order/{serviceRequestId}", ResolveAsync)
             .WithName("ResolveReceptionOrder")
@@ -24,12 +26,12 @@ public static class LabReceptionEndpoints
         group.MapPost("/external-order", CreateExternalAsync)
             .WithName("CreateExternalOrder")
             .WithSummary("Crea una orden externa (médico externo + ServiceRequest) para un paciente ya resuelto.")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapPost("/receive", ReceiveAsync)
             .WithName("ReceiveSpecimen")
             .WithSummary("Recibe la muestra: crea Specimen/accession/intake o bloquea por precondición.")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapGet("/requisition/{encounterId}", ResolveRequisitionAsync)
             .WithName("ResolveRequisition")
@@ -42,17 +44,17 @@ public static class LabReceptionEndpoints
         group.MapPost("/check-in", CheckInAsync)
             .WithName("CheckInOrder")
             .WithSummary("Registra el ingreso de una orden a la cola (el paciente la hará en la clínica) — F2.")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapPost("/refer-external", ReferExternalAsync)
             .WithName("ReferOrderExternal")
             .WithSummary("Refiere una orden completa a un laboratorio externo (trazabilidad) — F3.")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapPost("/receive-requisition", ReceiveRequisitionAsync)
             .WithName("ReceiveRequisition")
             .WithSummary("Recibe una requisición: una muestra por grupo (N:M), con rechazo/bloqueo por grupo.")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapGet("/awaiting-admission", GetAwaitingAdmissionAsync)
             .WithName("GetAwaitingAdmission")
@@ -61,7 +63,7 @@ public static class LabReceptionEndpoints
         group.MapPost("/external-order-multi", CreateExternalOrderMultiAsync)
             .WithName("CreateExternalOrderMulti")
             .WithSummary("Crea una orden externa con varios exámenes/paneles (médico/institución externa) — Fase 1.")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapGet("/pending", GetPendingAsync)
             .WithName("GetPendingOrders")
@@ -86,7 +88,7 @@ public static class LabReceptionEndpoints
         group.MapPost("/collection-plan", ComputePlanAsync)
             .WithName("ComputeCollectionPlan")
             .WithSummary("Calcula y persiste el plan de colección de una requisición: contenedores/tubos/volúmenes consolidados (R6-F2).")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapGet("/collection-plan/{requisition}", GetPlanAsync)
             .WithName("GetCollectionPlan")
@@ -95,24 +97,24 @@ public static class LabReceptionEndpoints
         group.MapPost("/collection-plan/{requisition}/labels", GenerateLabelsAsync)
             .WithName("GenerateCollectionLabels")
             .WithSummary("Genera accession/barcode por contenedor del plan, antes de la toma (R6-F4).")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         // Impresión real de etiqueta (R6-F4b). Es POST y no GET porque emitir una etiqueta
         // muta el ciclo de vida del contenedor y deja rastro en la cadena de custodia.
         group.MapPost("/collection-plan/container/{containerId:guid}/print", PrintContainerLabelAsync)
             .WithName("PrintCollectionContainerLabel")
             .WithSummary("Devuelve el PDF de la etiqueta de un contenedor, con el tamaño configurado para su tubo, y registra la impresión (R6-F4b).")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapPost("/collection-plan/{requisition}/print", PrintPlanLabelsAsync)
             .WithName("PrintCollectionPlanLabels")
             .WithSummary("Devuelve un PDF con todas las etiquetas del plan (una por página, en order of draw) y registra las impresiones (R6-F4b).")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapPost("/collection-plan/container/{containerId:guid}/advance", AdvanceContainerAsync)
             .WithName("AdvanceCollectionContainer")
             .WithSummary("Avanza el ciclo de vida de un contenedor (imprimir/toma/recibir/rechazar/almacenar) — R6-F3.")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapGet("/collection-plan/container/{containerId:guid}/timeline", GetTimelineAsync)
             .WithName("GetCollectionContainerTimeline")
@@ -121,12 +123,12 @@ public static class LabReceptionEndpoints
         group.MapPost("/collection-plan/container/{containerId:guid}/verify-identity", VerifyIdentityAsync)
             .WithName("VerifyCollectionContainerIdentity")
             .WithSummary("Identificación positiva del paciente (nombre + fecha de nacimiento) en admisión/toma (R6-F6).")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapPost("/collection-plan/container/{containerId:guid}/qc", QualityControlAsync)
             .WithName("CollectionContainerQualityControl")
             .WithSummary("Control de calidad preanalítico: acepta (recibe) o rechaza con motivo del catálogo (R6-F6).")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         return app;
     }

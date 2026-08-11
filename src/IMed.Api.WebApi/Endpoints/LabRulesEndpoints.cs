@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using IMed.Api.Domain.Authorization;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Application.LabRules;
 
 namespace IMed.Api.WebApi.Endpoints;
@@ -11,10 +13,10 @@ public static class LabRulesEndpoints
 {
     public static IEndpointRouteBuilder MapLabRulesEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/lab-catalog/rules").WithTags("LabRules").RequireAuthorization("LabRead");
+        var group = app.MapGroup("/api/lab-catalog/rules").WithTags("LabRules").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         group.MapGet("/", ListAsync).WithName("ListLabRules");
-        group.MapPost("/", CreateAsync).WithName("CreateLabRule").RequireAuthorization("LabSupervisor");
+        group.MapPost("/", CreateAsync).WithName("CreateLabRule").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
 
         return app;
     }

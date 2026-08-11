@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using IMed.Api.Domain.Authorization;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Application.LabResults;
 
 namespace IMed.Api.WebApi.Endpoints;
@@ -15,67 +17,67 @@ public static class LabResultsEndpoints
             .WithTags("LabResults")
             .WithName("EnterLabResults")
             .WithSummary("Captura resultados → Observations (con flags) + DiagnosticReport (preliminary).")
-            .RequireAuthorization("LabValidator");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabValidate));
 
         app.MapGet("/api/lab/results/entry-sheet/{serviceRequestId}", EntrySheetAsync)
             .WithTags("LabResults")
             .WithName("GetResultEntrySheet")
             .WithSummary("Contexto de captura de una orden: paciente, analitos del panel expandidos, unidad, rango del paciente y valor previo (LIS-4b).")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         app.MapPost("/api/lab/results/observations/{observationId}/correct", CorrectAsync)
             .WithTags("LabResults")
             .WithName("CorrectLabResult")
             .WithSummary("Corrige un resultado aún no liberado, con motivo. Recalcula el flag y versiona el recurso (LIS-4b).")
-            .RequireAuthorization("LabValidator");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabValidate));
 
         app.MapGet("/api/lab/results/by-patient/{patientId}", ByPatientAsync)
             .WithTags("LabResults")
             .WithName("GetLabResultsByPatient")
             .WithSummary("Lista los informes (DiagnosticReport) de un paciente.")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         app.MapGet("/api/lab/results/pending", PendingAsync)
             .WithTags("LabResults")
             .WithName("GetPendingValidation")
             .WithSummary("Informes preliminary pendientes de validación (LIS-6).")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         app.MapGet("/api/lab/results/{reportId}/history", HistoryAsync)
             .WithTags("LabResults")
             .WithName("GetReportHistory")
             .WithSummary("Tendencia (valores previos) del LOINC del informe.")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         app.MapGet("/api/lab/results/{reportId}", DetailAsync)
             .WithTags("LabResults")
             .WithName("GetLabResultDetail")
             .WithSummary("Detalle de un informe con sus observaciones.")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         app.MapPost("/api/lab/results/{reportId}/release", ReleaseAsync)
             .WithTags("LabResults")
             .WithName("ReleaseLabResult")
             .WithSummary("Valida y libera un informe → final + Provenance, con comentario opcional (LIS-6).")
-            .RequireAuthorization("LabValidator");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabValidate));
 
         app.MapPost("/api/lab/results/{reportId}/reject", RejectAsync)
             .WithTags("LabResults")
             .WithName("RejectLabResult")
             .WithSummary("Devuelve el informe al técnico con motivo catalogado, en vez de liberarlo (LIS-6).")
-            .RequireAuthorization("LabValidator");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabValidate));
 
         app.MapGet("/api/lab/results/{reportId}/pdf", ReportPdfAsync)
             .WithTags("LabResults")
             .WithName("GetLabReportPdf")
             .WithSummary("Informe de resultados imprimible. Un informe no liberado sale marcado como preliminar.")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         app.MapGet("/api/lab/results/validation-rejection-reasons", RejectionReasonsAsync)
             .WithTags("LabResults")
             .WithName("GetValidationRejectionReasons")
             .WithSummary("Catálogo de motivos de devolución desde Validación.")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         return app;
     }

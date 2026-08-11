@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using IMed.Api.Domain.Authorization;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Application.LabCatalog;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,29 +23,29 @@ public static class LabCatalogEndpoints
         // (LabSupervisor) — RBAC fino de LIS-2 (L2-D4), cierra el follow-up de LIS-1.
         var group = app.MapGroup("/api/lab-catalog")
             .WithTags("LabCatalog")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         // -------- Pruebas --------
         group.MapGet("/tests", SearchTestsAsync).WithName("SearchLabTests");
         group.MapGet("/tests/{id:guid}", GetTestByIdAsync).WithName("GetLabTestById");
-        group.MapPost("/tests", CreateTestAsync).WithName("CreateLabTest").RequireAuthorization("LabSupervisor");
-        group.MapPut("/tests/{id:guid}", UpdateTestAsync).WithName("UpdateLabTest").RequireAuthorization("LabSupervisor");
-        group.MapPost("/tests/{id:guid}/active", SetTestActiveAsync).WithName("SetLabTestActive").RequireAuthorization("LabSupervisor");
+        group.MapPost("/tests", CreateTestAsync).WithName("CreateLabTest").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
+        group.MapPut("/tests/{id:guid}", UpdateTestAsync).WithName("UpdateLabTest").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
+        group.MapPost("/tests/{id:guid}/active", SetTestActiveAsync).WithName("SetLabTestActive").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
 
         // -------- Paneles --------
         group.MapGet("/panels", ListPanelsAsync).WithName("ListLabPanels");
         group.MapGet("/panels/{id:guid}", GetPanelDetailAsync).WithName("GetLabPanelDetail");
-        group.MapPost("/panels", CreatePanelAsync).WithName("CreateLabPanel").RequireAuthorization("LabSupervisor");
-        group.MapPost("/panels/{id:guid}/versions", CreatePanelVersionAsync).WithName("CreateLabPanelVersion").RequireAuthorization("LabSupervisor");
+        group.MapPost("/panels", CreatePanelAsync).WithName("CreateLabPanel").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
+        group.MapPost("/panels/{id:guid}/versions", CreatePanelVersionAsync).WithName("CreateLabPanelVersion").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
 
         // -------- Rangos de referencia --------
         group.MapGet("/reference-ranges", ListRangesAsync).WithName("ListReferenceRanges");
-        group.MapPost("/reference-ranges", CreateRangeAsync).WithName("CreateReferenceRange").RequireAuthorization("LabSupervisor");
-        group.MapPut("/reference-ranges/{id:guid}", UpdateRangeAsync).WithName("UpdateReferenceRange").RequireAuthorization("LabSupervisor");
-        group.MapDelete("/reference-ranges/{id:guid}", DeleteRangeAsync).WithName("DeleteReferenceRange").RequireAuthorization("LabSupervisor");
+        group.MapPost("/reference-ranges", CreateRangeAsync).WithName("CreateReferenceRange").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
+        group.MapPut("/reference-ranges/{id:guid}", UpdateRangeAsync).WithName("UpdateReferenceRange").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
+        group.MapDelete("/reference-ranges/{id:guid}", DeleteRangeAsync).WithName("DeleteReferenceRange").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
 
         // -------- Ofertas por sede --------
-        group.MapPut("/offerings", SetOfferingAsync).WithName("SetLabTestOffering").RequireAuthorization("LabSupervisor");
+        group.MapPut("/offerings", SetOfferingAsync).WithName("SetLabTestOffering").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
 
         // -------- Fórmulas calculadas / TAT (read-only en LIS-1) --------
         group.MapGet("/derived-calculations", ListDerivedAsync).WithName("ListDerivedCalculations");
@@ -58,10 +60,10 @@ public static class LabCatalogEndpoints
 
         // -------- Formatos de etiqueta (R6-F4b) --------
         group.MapGet("/label-formats", ListLabelFormatsAsync).WithName("ListLabLabelFormats");
-        group.MapPost("/label-formats", CreateLabelFormatAsync).WithName("CreateLabLabelFormat").RequireAuthorization("LabSupervisor");
-        group.MapPut("/label-formats/{id:guid}", UpdateLabelFormatAsync).WithName("UpdateLabLabelFormat").RequireAuthorization("LabSupervisor");
+        group.MapPost("/label-formats", CreateLabelFormatAsync).WithName("CreateLabLabelFormat").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
+        group.MapPut("/label-formats/{id:guid}", UpdateLabelFormatAsync).WithName("UpdateLabLabelFormat").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
         group.MapGet("/label-format-assignments", ListLabelFormatAssignmentsAsync).WithName("ListLabLabelFormatAssignments");
-        group.MapPut("/label-format-assignments", SetLabelFormatAssignmentAsync).WithName("SetLabLabelFormatAssignment").RequireAuthorization("LabSupervisor");
+        group.MapPut("/label-format-assignments", SetLabelFormatAssignmentAsync).WithName("SetLabLabelFormatAssignment").RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabManage));
 
         return app;
     }

@@ -155,6 +155,8 @@ public static class DependencyInjection
     {
         // Seeders idempotentes que corren al startup. Si la BD ya tiene los datos,
         // no-op (lo verifican antes de insertar).
+        // La matriz de permisos va primero: sin ella no hay autorización que evaluar.
+        services.AddHostedService<PermissionSeeder>();
         services.AddHostedService<SpecialtySeeder>();
         services.AddHostedService<AllergySeeder>();
         services.AddHostedService<MedicationSeeder>();
@@ -229,6 +231,8 @@ public static class DependencyInjection
         services.AddScoped<IJoinRequestsRepository, JoinRequestsRepository>();
         services.AddScoped<IChangeMemberRolePersistence, ChangeMemberRolePersistence>();
         services.AddScoped<ILabCatalogRepository, LabCatalogRepository>();
+        services.AddMemoryCache();
+        services.AddScoped<IPermissionResolver, PermissionResolver>();
         services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<ILocationProvisioning, LocationProvisioning>();
         services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();

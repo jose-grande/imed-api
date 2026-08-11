@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using IMed.Api.Domain.Authorization;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Application.Locations;
 
 namespace IMed.Api.WebApi.Endpoints;
@@ -28,22 +30,22 @@ public static class LocationsEndpoints
         group.MapPost("/", CreateAsync)
             .WithName("CreateLocation")
             .WithSummary("Crea una sede.")
-            .RequireAuthorization("LabSupervisor");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.OrgLocationsManage));
 
         group.MapPatch("/{locationId:guid}", UpdateAsync)
             .WithName("UpdateLocation")
             .WithSummary("Renombra, activa/desactiva o designa una sede como principal.")
-            .RequireAuthorization("LabSupervisor");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.OrgLocationsManage));
 
         group.MapPost("/{locationId:guid}/users/{userId:guid}", AssignAsync)
             .WithName("AssignUserToLocation")
             .WithSummary("Habilita a un usuario a operar en una sede.")
-            .RequireAuthorization("LabSupervisor");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.OrgLocationsManage));
 
         group.MapDelete("/{locationId:guid}/users/{userId:guid}", UnassignAsync)
             .WithName("UnassignUserFromLocation")
             .WithSummary("Quita a un usuario de una sede.")
-            .RequireAuthorization("LabSupervisor");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.OrgLocationsManage));
 
         return app;
     }

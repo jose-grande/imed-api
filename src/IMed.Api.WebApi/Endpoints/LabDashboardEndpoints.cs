@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using IMed.Api.Domain.Authorization;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Application.LabDashboard;
 
 namespace IMed.Api.WebApi.Endpoints;
@@ -12,7 +14,7 @@ public static class LabDashboardEndpoints
             .WithTags("LabDashboard")
             .WithName("GetLabDashboard")
             .WithSummary("Métricas operacionales: recibidas, en lab, validación, críticos, TAT, prioridad.")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
         return app;
     }
 

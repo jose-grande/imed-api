@@ -1,5 +1,6 @@
 using System.Text.Json;
 using IMed.Api.Domain.Auditing;
+using IMed.Api.Domain.Authorization;
 using IMed.Api.Domain.Catalogs;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Forms;
@@ -66,6 +67,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<CollectionPlanUnavailableItem> CollectionPlanUnavailableItems => Set<CollectionPlanUnavailableItem>();
     public DbSet<CollectionEvent> CollectionEvents => Set<CollectionEvent>();
 
+    // Matriz de permisos (ADR-007)
+    public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<PolicyVersion> PolicyVersions => Set<PolicyVersion>();
+
     // Eje de sede (ADR-008)
     public DbSet<OrganizationLocation> OrganizationLocations => Set<OrganizationLocation>();
     public DbSet<UserLocationAssignment> UserLocations => Set<UserLocationAssignment>();
@@ -74,6 +80,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     {
         base.OnModelCreating(modelBuilder);
 
+        ConfigureAuthorization(modelBuilder);
         ConfigureLocations(modelBuilder);
         ConfigureOrganizationSubscription(modelBuilder);
         ConfigureUserTierAssignment(modelBuilder);
@@ -229,6 +236,53 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .HasDatabaseName("ix_user_location_org_user");
             e.HasIndex(x => x.LocationId)
                 .HasDatabaseName("ix_user_location_location");
+        });
+    }
+
+    /// <summary>
+    /// Matriz de permisos (ADR-007). <c>organization_id</c> nulo = plantilla global del producto;
+    /// con valor = variante de ese tenant, que gana sobre la global al resolver.
+    /// </summary>
+    private static void ConfigureAuthorization(ModelBuilder b)
+    {
+        b.Entity<Permission>(e =>
+        {
+            e.ToTable("permission");
+            e.HasKey(x => x.Code);
+            e.Property(x => x.Code).HasMaxLength(80);
+            e.Property(x => x.Module).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(300).IsRequired();
+        });
+
+        b.Entity<RolePermission>(e =>
+        {
+            e.ToTable("role_permission");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.RoleCode).HasMaxLength(60).IsRequired();
+            e.Property(x => x.PermissionCode).HasMaxLength(80).IsRequired();
+            e.Property(x => x.Scope).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Denied).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            // Una sola fila por (org, rol, permiso): la variante del tenant reemplaza a la
+            // global, no se acumula con ella.
+            e.HasIndex(x => new { x.OrganizationId, x.RoleCode, x.PermissionCode })
+                .IsUnique()
+                .HasDatabaseName("ux_role_permission_org_role_perm");
+            e.HasIndex(x => x.RoleCode).HasDatabaseName("ix_role_permission_role");
+        });
+
+        b.Entity<PolicyVersion>(e =>
+        {
+            e.ToTable("policy_version");
+            // La plantilla global usa el guid cero como clave: Postgres no considera iguales
+            // dos NULL en una PK, y necesitamos exactamente una fila global.
+            e.HasKey(x => x.OrganizationId);
+            e.Property(x => x.OrganizationId).ValueGeneratedNever();
+            e.Property(x => x.Version).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.UpdatedBy);
         });
     }
 

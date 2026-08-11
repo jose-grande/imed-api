@@ -6,6 +6,7 @@ using IMed.Api.WebApi.Http;
 using IMed.Api.Infrastructure.Persistence;
 using IMed.Api.WebApi.Endpoints;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 
@@ -106,19 +107,12 @@ builder.Services
         };
     });
 
-// Políticas de autorización del módulo LIS (Épica LIS-2). Las épicas siguientes
-// aplican estas políticas a sus endpoints en vez de re-listar roles.
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("LabRead", p => p.RequireRole(
-        "lab_tech", "bioanalyst", "lab_supervisor", "pathologist", "practitioner", "org_admin"));
-    options.AddPolicy("LabTechnician", p => p.RequireRole(
-        "lab_tech", "lab_supervisor", "org_admin"));
-    options.AddPolicy("LabValidator", p => p.RequireRole(
-        "bioanalyst", "pathologist", "lab_supervisor", "org_admin"));
-    options.AddPolicy("LabSupervisor", p => p.RequireRole(
-        "lab_supervisor", "org_admin"));
-});
+// Autorización por permisos de la matriz (ADR-007, SEC-2). Antes había cuatro políticas con los
+// roles quemados acá; ahora la política es dato y esto solo enchufa el evaluador. Las políticas
+// `perm:<código>` se materializan bajo demanda: agregar un permiso no vuelve a tocar este archivo.
+builder.Services.AddAuthorization();
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
+builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
 // Health checks
 builder.Services.AddHealthChecks()

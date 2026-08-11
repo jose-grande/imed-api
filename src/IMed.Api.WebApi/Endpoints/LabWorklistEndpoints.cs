@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using IMed.Api.Domain.Authorization;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Application.LabReception;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,7 +15,7 @@ public static class LabWorklistEndpoints
             .WithTags("LabWorklist")
             .WithName("GetLabWorklist")
             .WithSummary("Worklist in-house por estado/prioridad con TAT transcurrido.")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
         return app;
     }
 

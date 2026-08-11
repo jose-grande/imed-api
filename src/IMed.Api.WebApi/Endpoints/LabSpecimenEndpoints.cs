@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using IMed.Api.Domain.Authorization;
+using IMed.Api.WebApi.Http;
 using IMed.Api.Application.LabSpecimens;
 
 namespace IMed.Api.WebApi.Endpoints;
@@ -13,17 +15,17 @@ public static class LabSpecimenEndpoints
     {
         var group = app.MapGroup("/api/lab/specimens")
             .WithTags("LabSpecimens")
-            .RequireAuthorization("LabRead");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         group.MapPost("/aliquot", AliquotAsync)
             .WithName("CreateAliquot")
             .WithSummary("Divide una muestra recibida en N alícuotas (Specimen.parent).")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapPost("/store", StoreAsync)
             .WithName("RecordStorage")
             .WithSummary("Registra almacenamiento o descarte de una muestra.")
-            .RequireAuthorization("LabTechnician");
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabOperate));
 
         group.MapGet("/stability/{intakeId:guid}", StabilityAsync)
             .WithName("CheckStability")
