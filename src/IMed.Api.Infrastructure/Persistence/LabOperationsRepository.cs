@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Lab;
 using Microsoft.EntityFrameworkCore;
 
@@ -259,6 +260,59 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
             .Distinct()
             .ToListAsync(cancellationToken);
         return ids.ToHashSet();
+    }
+
+    // --- Validación: devolución de informes al técnico ---
+
+    public async Task<IReadOnlyList<ValidationRejectionReason>> ListValidationRejectionReasonsAsync(
+        Guid organizationId, CancellationToken cancellationToken = default) =>
+        await db.ValidationRejectionReasons.AsNoTracking()
+            .Where(x => x.Active && (x.OrganizationId == null || x.OrganizationId == organizationId))
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+    public Task<ValidationRejectionReason?> GetValidationRejectionReasonByCodeAsync(
+        Guid organizationId, string code, CancellationToken cancellationToken = default)
+    {
+        var normalized = (code ?? string.Empty).Trim().ToUpperInvariant();
+        // La fila de la org gana sobre la plantilla global si ambas existen.
+        return db.ValidationRejectionReasons.AsNoTracking()
+            .Where(x => x.Active && x.Code == normalized
+                && (x.OrganizationId == null || x.OrganizationId == organizationId))
+            .OrderByDescending(x => x.OrganizationId != null)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task AddValidationRejectionAsync(
+        ResultValidationRejection rejection, CancellationToken cancellationToken = default)
+    {
+        db.ResultValidationRejections.Add(rejection);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ResultValidationRejection>> ListOpenValidationRejectionsAsync(
+        Guid organizationId, CancellationToken cancellationToken = default) =>
+        await db.ResultValidationRejections.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.ResolvedAt == null)
+            .ToListAsync(cancellationToken);
+
+    public async Task<int> ResolveValidationRejectionsAsync(
+        Guid organizationId, string reportFhirId, CancellationToken cancellationToken = default)
+    {
+        var open = await db.ResultValidationRejections
+            .Where(x => x.OrganizationId == organizationId
+                && x.ReportFhirId == reportFhirId && x.ResolvedAt == null)
+            .ToListAsync(cancellationToken);
+        if (open.Count == 0)
+        {
+            return 0;
+        }
+        foreach (var r in open)
+        {
+            r.Resolve();
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return open.Count;
     }
 
     public async Task<IReadOnlyList<OrderIntake>> ListInHouseIntakesAsync(

@@ -91,6 +91,14 @@ public sealed class GetResultEntrySheetHandler(
                 PreviousFlagCode: previousFlag));
         }
 
+        // Si la orden ya se resultó, la pantalla tiene que abrir en modo revisión/corrección.
+        // Antes esto no se devolvía y el estado de "guardado" solo vivía en memoria del
+        // componente: salir de la pantalla lo perdía para siempre y al volver aparecía el
+        // formulario en blanco, invitando a redigitar y duplicar el informe.
+        var saved = intake is null
+            ? null
+            : await LoadSavedResultsAsync(intake, order.PatientFhirId, partition, ct);
+
         return new ResultEntrySheetDto(
             ServiceRequestId: serviceRequestId,
             Requisition: order.Requisition,
@@ -104,9 +112,91 @@ public sealed class GetResultEntrySheetHandler(
             AccessionNumber: intake?.AccessionNumber,
             Received: intake is not null && intake.Status != OrderIntakeStatus.Pending,
             Blocked: intake?.Status == OrderIntakeStatus.Blocked,
-            Analytes: analytes);
+            Analytes: analytes,
+            Saved: saved);
+    }
+
+    /// <summary>
+    /// Trae el informe ya capturado de esta orden, con sus observaciones, para que la pantalla
+    /// pueda reabrirse en modo revisión. Devuelve <c>null</c> si todavía no se resultó.
+    /// </summary>
+    private async Task<SavedResultsDto?> LoadSavedResultsAsync(
+        OrderIntake intake, string patientFhirId, string partition, CancellationToken ct)
+    {
+        var reportId = await LabReportLookup.ResolveReportIdAsync(hapi, intake, patientFhirId, partition, ct);
+        if (reportId is null)
+        {
+            return null;
+        }
+
+        var report = await hapi.GetDiagnosticReportAsync(reportId, partition, ct);
+        if (report is null)
+        {
+            // El ancla apunta a un informe que ya no está: se trata como no resultada en vez
+            // de dejar la pantalla inservible.
+            return null;
+        }
+
+        var observations = new List<SavedObservationDto>();
+        var hasCritical = false;
+        foreach (var obsId in report.ResultObservationIds)
+        {
+            var obs = await hapi.GetObservationAsync(obsId, partition, ct);
+            if (obs is null)
+            {
+                continue;
+            }
+
+            // La observación "grouper" del panel no tiene valor: es el encabezado, no una
+            // línea corregible. Mostrarla como fila vacía era justamente lo que confundía.
+            if (obs.ValueNumeric is null && string.IsNullOrWhiteSpace(obs.ValueString))
+            {
+                continue;
+            }
+
+            if (obs.FlagCode is "HH" or "LL")
+            {
+                hasCritical = true;
+            }
+
+            observations.Add(new SavedObservationDto(
+                ObservationId: obs.Id,
+                CodeText: obs.CodeText ?? obs.LoincCode ?? "—",
+                ValueNumeric: obs.ValueNumeric,
+                ValueString: obs.ValueString,
+                Unit: obs.ValueUnit,
+                FlagCode: obs.FlagCode,
+                Status: obs.Status));
+        }
+
+        return new SavedResultsDto(
+            ReportId: report.Id,
+            Origin: intake.Routing == OrderRouting.InHouse ? "InHouse" : "External",
+            ReportStatus: report.Status,
+            Conclusion: report.Conclusion,
+            HasCritical: hasCritical,
+            Observations: observations);
     }
 }
+
+/// <summary>Resultados ya capturados de una orden — habilita reabrir en modo revisión/corrección.</summary>
+public sealed record SavedResultsDto(
+    string ReportId,
+    string Origin,
+    string ReportStatus,
+    string? Conclusion,
+    bool HasCritical,
+    IReadOnlyList<SavedObservationDto> Observations);
+
+/// <summary>Una observación ya guardada. Excluye el grouper del panel, que no tiene valor.</summary>
+public sealed record SavedObservationDto(
+    string ObservationId,
+    string CodeText,
+    decimal? ValueNumeric,
+    string? ValueString,
+    string? Unit,
+    string? FlagCode,
+    string Status);
 
 /// <summary>Todo lo que la pantalla de captura necesita para una orden (LIS-4b).</summary>
 public sealed record ResultEntrySheetDto(
@@ -122,7 +212,9 @@ public sealed record ResultEntrySheetDto(
     string? AccessionNumber,
     bool Received,
     bool Blocked,
-    IReadOnlyList<ResultAnalyteDto> Analytes);
+    IReadOnlyList<ResultAnalyteDto> Analytes,
+    /// <summary>No nulo si la orden ya se resultó: la pantalla abre en revisión, no en captura.</summary>
+    SavedResultsDto? Saved = null);
 
 /// <summary>Una prueba a resultar, con su unidad, su rango para este paciente y su valor previo.</summary>
 public sealed record ResultAnalyteDto(

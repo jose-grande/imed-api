@@ -187,6 +187,33 @@ public sealed class LabCatalogSeeder(
         ("TEMPERATURE_TRANSPORT", "Temperatura/traslado fuera de rango", true, 9),
     ];
 
+    /// <summary>
+    /// Motivos por los que un validador devuelve un informe al técnico. A diferencia de los de
+    /// arriba —que son preanalíticos, la muestra no sirve— estos son analíticos: la muestra
+    /// sirvió y el resultado no convence. Solo algunos obligan a una muestra nueva; la mayoría
+    /// se resuelve repitiendo la corrida o corrigiendo la transcripción.
+    /// </summary>
+    private static readonly (string Code, string Name, string Description, bool RequiresNew, int Sort)[]
+        ValidationRejectionReasons =
+    [
+        ("RERUN_REQUIRED", "Repetir la corrida",
+            "El valor no es plausible o el equipo dio un comportamiento anómalo; repetir sobre la misma muestra.", false, 1),
+        ("TRANSCRIPTION_SUSPECTED", "Posible error de transcripción",
+            "El valor parece mal digitado (orden de magnitud, coma decimal).", false, 2),
+        ("DELTA_UNEXPLAINED", "Variación contra el previo sin explicación",
+            "El delta contra el resultado anterior no se explica por la clínica del paciente.", false, 3),
+        ("INCONSISTENT_PANEL", "Inconsistente con el resto del panel",
+            "El valor no es coherente con los demás analitos del mismo informe.", false, 4),
+        ("QC_FAILED", "Control de calidad no conforme",
+            "La corrida se hizo con un QC fuera de rango.", false, 5),
+        ("INSTRUMENT_ERROR", "Falla del analizador",
+            "El equipo reportó error o estaba fuera de calibración.", false, 6),
+        ("NEW_SAMPLE_REQUIRED", "Requiere muestra nueva",
+            "La muestra ya no sirve para repetir: hay que volver a tomar.", true, 7),
+        ("MISSING_ANALYTE", "Faltan analitos del panel",
+            "El informe está incompleto respecto de lo solicitado.", false, 8),
+    ];
+
     // (code, name, widthMm, heightMm, marginMm, isDefault, sortOrder) — R6-F4b.
     // Tamaños estándar de la industria de etiquetas térmicas: el laboratorio los edita
     // o agrega los suyos según el rollo que compre (Zebra, Brother, TSC…).
@@ -368,6 +395,19 @@ public sealed class LabCatalogSeeder(
             {
                 db.SpecimenRejectionReasons.Add(SpecimenRejectionReason.Create(
                     r.Code, r.Name, requiresNewSample: r.RequiresNew, sortOrder: r.Sort, timeProvider: timeProvider));
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Motivos de devolución desde Validación. Idempotente. Son analíticos, no preanalíticos:
+        // la muestra sirvió, lo que no convence es el resultado.
+        if (!await db.ValidationRejectionReasons.AnyAsync(r => r.OrganizationId == null, cancellationToken))
+        {
+            foreach (var r in ValidationRejectionReasons)
+            {
+                db.ValidationRejectionReasons.Add(ValidationRejectionReason.Create(
+                    r.Code, r.Name, r.Description, requiresNewSample: r.RequiresNew,
+                    sortOrder: r.Sort, timeProvider: timeProvider));
             }
             await db.SaveChangesAsync(cancellationToken);
         }

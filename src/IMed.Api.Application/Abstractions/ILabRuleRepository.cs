@@ -16,6 +16,16 @@ public sealed record ActiveLabRule(
     int Version,
     string LogicJson);
 
+/// <summary>Una regla que disparó sobre una observación, ya resuelta a nombre legible.</summary>
+public sealed record FiredRuleExecution(
+    string ObservationFhirId,
+    string RuleCode,
+    string RuleName,
+    RuleAction Verdict,
+    RuleSeverity Severity,
+    string? Message,
+    DateTimeOffset EvaluatedAt);
+
 public interface ILabRuleRepository
 {
     /// <summary>Reglas activas (global + por LOINC) con su versión Active, para evaluar un resultado.</summary>
@@ -36,4 +46,15 @@ public interface ILabRuleRepository
 
     /// <summary>Cuenta ejecuciones que dispararon acción crítica desde una fecha (dashboard LIS-8).</summary>
     Task<int> CountCriticalExecutionsAsync(Guid organizationId, DateTimeOffset sinceUtc, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reglas que dispararon sobre estas observaciones, con el nombre de la regla y su veredicto.
+    ///
+    /// <para>Es el "por qué está acá" de la estación de Validación. La auto-validación ya libera
+    /// sola lo normal, así que lo que llega a validar es exactamente lo que el motor decidió no
+    /// firmar — y hasta ahora la pantalla mostraba el valor pero no el motivo de la desconfianza.
+    /// Las ejecuciones se venían guardando desde LIS-5 sin que nada las leyera.</para>
+    /// </summary>
+    Task<IReadOnlyList<FiredRuleExecution>> ListFiredExecutionsAsync(
+        Guid organizationId, IReadOnlyList<string> observationFhirIds, CancellationToken cancellationToken = default);
 }

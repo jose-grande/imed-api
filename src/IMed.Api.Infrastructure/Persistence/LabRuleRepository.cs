@@ -74,6 +74,36 @@ public sealed class LabRuleRepository(AppDbContext db) : ILabRuleRepository
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<FiredRuleExecution>> ListFiredExecutionsAsync(
+        Guid organizationId, IReadOnlyList<string> observationFhirIds, CancellationToken cancellationToken = default)
+    {
+        if (observationFhirIds.Count == 0)
+        {
+            return [];
+        }
+
+        // Join contra el catálogo de reglas: la ejecución guarda el id de la regla, y lo que
+        // el validador necesita leer es el nombre y el mensaje, no un GUID.
+        var rows = await (
+            from ex in db.RuleExecutions.AsNoTracking()
+            join rule in db.LabRules.AsNoTracking() on ex.LabRuleId equals rule.Id
+            where ex.OrganizationId == organizationId
+                && ex.Fired
+                && observationFhirIds.Contains(ex.ObservationFhirId)
+            orderby ex.EvaluatedAt
+            select new FiredRuleExecution(
+                ex.ObservationFhirId,
+                rule.Code,
+                rule.Name,
+                ex.Verdict,
+                rule.Severity,
+                rule.Message,
+                ex.EvaluatedAt))
+            .ToListAsync(cancellationToken);
+
+        return rows;
+    }
+
     public Task<int> CountCriticalExecutionsAsync(Guid organizationId, DateTimeOffset sinceUtc, CancellationToken cancellationToken = default) =>
         db.RuleExecutions.CountAsync(
             x => x.OrganizationId == organizationId

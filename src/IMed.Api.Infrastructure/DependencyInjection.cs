@@ -124,6 +124,7 @@ public static class DependencyInjection
         // se inicializa lazy en el ctor — seguro como singleton.
         services.AddSingleton<IPrescriptionPdfRenderer, PrescriptionPdfRenderer>();
         services.AddSingleton<ILabOrderPdfRenderer, LabOrderPdfRenderer>();
+        services.AddSingleton<ILabReportPdfRenderer, LabReportPdfRenderer>();
         services.AddSingleton<ISpecimenLabelPdfRenderer, SpecimenLabelPdfRenderer>();
         return services;
     }
@@ -415,6 +416,9 @@ public static class DependencyInjection
         services.AddScoped<GetPendingValidationHandler>();
         services.AddScoped<GetReportHistoryHandler>();
         services.AddScoped<ReleaseReportHandler>();
+        services.AddScoped<RejectReportHandler>();
+        services.AddScoped<GetLabReportPdfHandler>();
+        services.AddScoped<GetValidationRejectionReasonsHandler>();
 
         // Lab rules engine (Épica LIS-5)
         services.AddScoped<IResultEvaluationService, ResultEvaluationService>();

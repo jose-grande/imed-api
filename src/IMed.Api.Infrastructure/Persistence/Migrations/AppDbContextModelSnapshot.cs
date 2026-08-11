@@ -1075,6 +1075,63 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("tube_type", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Catalogs.Lab.ValidationRejectionReason", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<bool>("RequiresNewSample")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_new_sample");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_validation_rejection_reason_org_code");
+
+                    b.ToTable("validation_rejection_reason", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Catalogs.LoincCode", b =>
                 {
                     b.Property<string>("Code")
@@ -1843,6 +1900,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("received_by");
 
+                    b.Property<string>("ReportFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("report_fhir_id");
+
                     b.Property<string>("Requisition")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
@@ -1889,6 +1951,15 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
+                    b.Property<DateTimeOffset?>("ValidatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("validated_at");
+
+                    b.Property<string>("ValidatedByPractitionerFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("validated_by_practitioner_fhir_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AccessionNumber")
@@ -1904,6 +1975,57 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_order_intake_org_status");
 
                     b.ToTable("order_intake", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Lab.ResultValidationRejection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("ReasonId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reason_id");
+
+                    b.Property<DateTimeOffset>("RejectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("rejected_at");
+
+                    b.Property<Guid>("RejectedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rejected_by");
+
+                    b.Property<string>("ReportFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("report_fhir_id");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at");
+
+                    b.Property<string>("ServiceRequestFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("service_request_fhir_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ReportFhirId", "ResolvedAt")
+                        .HasDatabaseName("ix_result_validation_rejection_report");
+
+                    b.ToTable("result_validation_rejection", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Lab.RuleExecution", b =>

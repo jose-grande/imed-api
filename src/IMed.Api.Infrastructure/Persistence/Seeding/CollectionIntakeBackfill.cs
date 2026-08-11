@@ -75,6 +75,7 @@ public sealed class CollectionIntakeBackfill(
             }
 
             await BackfillExamDescriptionsAsync(scope, db, cancellationToken);
+            await BackfillReportAnchorsAsync(scope, db, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -124,6 +125,78 @@ public sealed class CollectionIntakeBackfill(
         {
             await db.SaveChangesAsync(cancellationToken);
             logger.LogInformation("Backfill de exámenes: {Count} intake(s) descritos.", described);
+        }
+    }
+
+    /// <summary>
+    /// Completa <c>order_intake.report_fhir_id</c> en las órdenes resultadas antes de que esa
+    /// columna existiera.
+    ///
+    /// <para><b>Por qué hace falta:</b> la columna nació vacía con la migración, así que toda
+    /// orden ya resultada quedaba con el ancla en <c>null</c>. La hoja de captura y la guarda
+    /// contra doble guardado lo resuelven con una búsqueda en HAPI, pero <b>la worklist no</b>:
+    /// resolverlo ahí sería una búsqueda por fila. El efecto visible era que una orden con
+    /// resultados seguía ofreciendo "Ingresar resultados" — el enlace anunciaba lo contrario de
+    /// lo que la pantalla iba a mostrar.</para>
+    ///
+    /// <para>Idempotente: solo toca filas sin ancla, y una vez llenas no vuelve a mirarlas.
+    /// Agrupa por paciente para no repetir la misma búsqueda una vez por orden.</para>
+    /// </summary>
+    private async Task BackfillReportAnchorsAsync(
+        AsyncServiceScope scope, AppDbContext db, CancellationToken cancellationToken)
+    {
+        var pending = await db.OrderIntakes
+            .Where(x => x.ReportFhirId == null && x.Status != OrderIntakeStatus.Pending)
+            .ToListAsync(cancellationToken);
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        var hapi = scope.ServiceProvider.GetRequiredService<IHapiFhirClient>();
+        var anchored = 0;
+        foreach (var group in pending.GroupBy(x => new { x.OrganizationId, x.PatientFhirId }))
+        {
+            if (string.IsNullOrWhiteSpace(group.Key.PatientFhirId))
+            {
+                continue;
+            }
+
+            try
+            {
+                var reports = await hapi.SearchDiagnosticReportsByPatientAsync(
+                    group.Key.PatientFhirId, $"org-{group.Key.OrganizationId}", cancellationToken);
+                if (reports.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var intake in group)
+                {
+                    var report = reports.FirstOrDefault(r => string.Equals(
+                        r.ServiceRequestFhirId, intake.ServiceRequestFhirId, StringComparison.Ordinal));
+                    if (report is null)
+                    {
+                        continue;
+                    }
+                    intake.AttachReport(report.Id);
+                    anchored++;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Un paciente que falla no frena al resto: sin ancla se sigue resolviendo por
+                // búsqueda, que es el comportamiento previo.
+                logger.LogWarning(
+                    ex, "No se pudo anclar el informe de las órdenes del paciente {PatientId}.",
+                    group.Key.PatientFhirId);
+            }
+        }
+
+        if (anchored > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("Backfill de informes: {Count} orden(es) ancladas.", anchored);
         }
     }
 

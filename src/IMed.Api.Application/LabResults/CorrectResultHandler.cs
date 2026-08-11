@@ -37,6 +37,7 @@ public sealed record CorrectResultDto(
 public sealed class CorrectResultHandler(
     IHapiFhirClient hapi,
     ILabCatalogRepository catalog,
+    ILabOperationsRepository ops,
     TimeProvider timeProvider)
 {
     public async Task<CorrectResultDto?> HandleAsync(CorrectResultCommand cmd, CancellationToken ct = default)
@@ -118,6 +119,19 @@ public sealed class CorrectResultHandler(
             AppliesToSex: appliesToSex,
             AppliesToAgeMin: appliesAgeMin,
             AppliesToAgeMax: appliesAgeMax), ct);
+
+        // Corregir es la respuesta a una devolución del validador: cierra la devolución abierta
+        // y el informe vuelve a la cola de validación. Sin esto el caso quedaba en tierra de
+        // nadie — fuera de la cola del validador y ya atendido por el técnico.
+        if (!string.IsNullOrWhiteSpace(observation.ServiceRequestFhirId))
+        {
+            var intake = await ops.GetIntakeByServiceRequestAsync(
+                cmd.OrganizationId, observation.ServiceRequestFhirId!, ct);
+            if (!string.IsNullOrWhiteSpace(intake?.ReportFhirId))
+            {
+                await ops.ResolveValidationRejectionsAsync(cmd.OrganizationId, intake!.ReportFhirId!, ct);
+            }
+        }
 
         return new CorrectResultDto(cmd.ObservationId, CorrectedStatus, flagCode, low, high);
     }

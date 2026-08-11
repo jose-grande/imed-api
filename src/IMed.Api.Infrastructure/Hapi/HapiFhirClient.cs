@@ -2984,6 +2984,37 @@ public sealed class HapiFhirClient(
         }
     }
 
+    public async Task PatchDiagnosticReportConclusionAsync(
+        string reportFhirId, string conclusion, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(reportFhirId))
+        {
+            throw new ArgumentException("reportFhirId es obligatorio.", nameof(reportFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        // "add" y no "replace": el informe puede no traer conclusion todavía, y en JSON Patch
+        // "add" sobre un miembro existente lo reemplaza igual. "replace" fallaría si no existe.
+        var value = JsonSerializer.Serialize(conclusion);
+        var patch = $"[{{\"op\":\"add\",\"path\":\"/conclusion\",\"value\":{value}}}]";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Patch, $"DiagnosticReport/{reportFhirId}")
+        {
+            Content = new StringContent(patch, System.Text.Encoding.UTF8, "application/json-patch+json")
+        };
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError("PATCH /fhir/DiagnosticReport/{Id} (conclusion) falló. Status={Status}, Body={Body}",
+                reportFhirId, (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
+    }
+
     public async Task<IReadOnlyList<DiagnosticReportSnapshot>> SearchPreliminaryReportsAsync(
         string partitionName, CancellationToken cancellationToken = default)
     {

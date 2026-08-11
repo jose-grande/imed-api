@@ -316,6 +316,14 @@ public interface IHapiFhirClient
 
     // ---- LIS-6: validación / liberación ----
 
+    /// <summary>
+    /// Escribe el <c>conclusion</c> de un <c>DiagnosticReport</c> vía JSON Patch. Lo usa el
+    /// comentario del validador al liberar: va en el informe para que viaje con el resultado
+    /// e salga impreso, en vez de quedar en una tabla interna que nadie consulta.
+    /// </summary>
+    Task PatchDiagnosticReportConclusionAsync(
+        string reportFhirId, string conclusion, string partitionName, CancellationToken cancellationToken = default);
+
     /// <summary>Actualiza el <c>status</c> de un recurso vía JSON Patch (LIS-6).</summary>
     Task PatchResourceStatusAsync(
         string resourceType, string resourceFhirId, string status, string partitionName, CancellationToken cancellationToken = default);

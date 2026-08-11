@@ -36,6 +36,20 @@ public sealed class EnterResultsHandler(
             throw new InvalidOperationException("La orden está bloqueada (precondición no cumplida).");
         }
 
+        // Idempotencia de la captura. Sin esto, cada llamada creaba un informe nuevo: un
+        // reintento, un doble clic, o un técnico que salió de la pantalla y volvió a digitar
+        // porque la encontró en blanco, dejaban DOS informes con observaciones duplicadas
+        // para el mismo paciente y la misma orden, sin ningún aviso. Se rechaza en vez de
+        // sobrescribir: los resultados existentes se cambian por el camino de corrección,
+        // que exige motivo y queda auditado.
+        var existingReportId = await LabReportLookup.ResolveReportIdAsync(
+            hapi, intake, order.PatientFhirId, partition, ct);
+        if (existingReportId is not null)
+        {
+            throw new InvalidOperationException(
+                "Esta orden ya tiene resultados guardados. Abrí la orden para revisarlos o corregirlos.");
+        }
+
         var inHouse = intake.Routing == OrderRouting.InHouse;
         var specimenFhirId = inHouse ? intake.SpecimenFhirId : null;
 
@@ -184,11 +198,53 @@ public sealed class EnterResultsHandler(
             Conclusion: cmd.Conclusion,
             EffectiveDateTime: now), ct);
 
+        // Ancla de idempotencia: a partir de acá la orden ya tiene informe y un segundo
+        // guardado se rechaza arriba.
+        intake.AttachReport(reportId, timeProvider);
+        await ops.UpdateIntakeAsync(intake, ct);
+
         await ops.AddSpecimenEventAsync(
             SpecimenEvent.Create(intake.Id, SpecimenEventType.InProcess, cmd.UserId, timeProvider: timeProvider), ct);
         await ruleRepository.AddRuleExecutionsAsync(executions, ct);
 
         return new EnterResultsResult(
             reportId, inHouse ? "InHouse" : "External", reportStatus, hasCritical, requiresReview, observations);
+    }
+}
+
+/// <summary>
+/// Resuelve el informe de una orden. Lo usan la captura (para no duplicar) y la hoja de
+/// captura (para reabrir en modo revisión en vez de mostrar un formulario en blanco). Las
+/// dos preguntas tienen que responderse igual, o la pantalla y el servidor discrepan.
+/// </summary>
+internal static class LabReportLookup
+{
+    public static async Task<string?> ResolveReportIdAsync(
+        IHapiFhirClient hapi,
+        OrderIntake intake,
+        string patientFhirId,
+        string partition,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(intake.ReportFhirId))
+        {
+            return intake.ReportFhirId;
+        }
+
+        // Compatibilidad hacia atrás: las órdenes resultadas antes de que el informe se
+        // guardara en `order_intake` no tienen el ancla local, así que se busca en HAPI por
+        // la orden que le dio origen. Un blip de HAPI degrada al comportamiento anterior
+        // (permitir el guardado) en vez de bloquear la captura por completo; para las órdenes
+        // nuevas nunca se llega acá, porque el ancla local es autoritativa.
+        try
+        {
+            var reports = await hapi.SearchDiagnosticReportsByPatientAsync(patientFhirId, partition, ct);
+            return reports.FirstOrDefault(r => string.Equals(
+                r.ServiceRequestFhirId, intake.ServiceRequestFhirId, StringComparison.Ordinal))?.Id;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

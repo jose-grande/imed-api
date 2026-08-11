@@ -43,6 +43,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<SpecimenType> SpecimenTypes => Set<SpecimenType>();
     public DbSet<TubeType> TubeTypes => Set<TubeType>();
     public DbSet<SpecimenRejectionReason> SpecimenRejectionReasons => Set<SpecimenRejectionReason>();
+    public DbSet<ValidationRejectionReason> ValidationRejectionReasons => Set<ValidationRejectionReason>();
+    public DbSet<ResultValidationRejection> ResultValidationRejections => Set<ResultValidationRejection>();
     public DbSet<LabLabelFormat> LabLabelFormats => Set<LabLabelFormat>();
     public DbSet<LabLabelFormatAssignment> LabLabelFormatAssignments => Set<LabLabelFormatAssignment>();
 
@@ -92,6 +94,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureSpecimenType(modelBuilder);
         ConfigureTubeType(modelBuilder);
         ConfigureSpecimenRejectionReason(modelBuilder);
+        ConfigureValidationRejection(modelBuilder);
         ConfigureLabLabelFormat(modelBuilder);
         ConfigureLabLabelFormatAssignment(modelBuilder);
 
@@ -744,6 +747,47 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         });
     }
 
+    private static void ConfigureValidationRejection(ModelBuilder b)
+    {
+        b.Entity<ValidationRejectionReason>(e =>
+        {
+            e.ToTable("validation_rejection_reason");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.RequiresNewSample).IsRequired();
+            e.Property(x => x.SortOrder).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_validation_rejection_reason_org_code");
+        });
+
+        b.Entity<ResultValidationRejection>(e =>
+        {
+            e.ToTable("result_validation_rejection");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.ReportFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.ServiceRequestFhirId).HasMaxLength(64);
+            e.Property(x => x.ReasonId).IsRequired();
+            e.Property(x => x.Note).HasMaxLength(1000);
+            e.Property(x => x.RejectedBy).IsRequired();
+            e.Property(x => x.RejectedAt).IsRequired();
+            e.Property(x => x.ResolvedAt);
+
+            // La cola de validación pregunta "¿este informe tiene una devolución abierta?"
+            // en cada carga: se indexa por informe y por resolución.
+            e.HasIndex(x => new { x.OrganizationId, x.ReportFhirId, x.ResolvedAt })
+                .HasDatabaseName("ix_result_validation_rejection_report");
+        });
+    }
+
     private static void ConfigureLabLabelFormat(ModelBuilder b)
     {
         b.Entity<LabLabelFormat>(e =>
@@ -947,6 +991,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.AccessionNumber).HasMaxLength(40);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.BlockReason).HasMaxLength(500);
+            e.Property(x => x.ReportFhirId).HasMaxLength(64);
+            e.Property(x => x.ValidatedByPractitionerFhirId).HasMaxLength(64);
+            e.Property(x => x.ValidatedAt);
             e.Property(x => x.ReceivedBy);
             e.Property(x => x.ReceivedAt);
             e.Property(x => x.CreatedAt).IsRequired();

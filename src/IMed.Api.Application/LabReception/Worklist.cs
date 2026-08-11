@@ -21,7 +21,13 @@ public sealed record WorklistItem(
     string? PatientName = null,
     /// <summary>Examen/panel a resultar. Sin esto la fila dice a quién, pero no qué.</summary>
     string? ExamText = null,
-    string? ExamLoincCode = null);
+    string? ExamLoincCode = null,
+    /// <summary>
+    /// La orden ya tiene resultados capturados. La worklist necesita distinguirlo para no
+    /// ofrecer "Ingresar resultados" sobre algo ya resultado, que es lo que llevaba a
+    /// redigitar y duplicar el informe.
+    /// </summary>
+    bool HasResults = false);
 
 public sealed record WorklistQuery(Guid OrganizationId, string? Status);
 
@@ -80,7 +86,8 @@ public sealed class GetWorklistHandler(
                 TatBreached: breached,
                 PatientName: names.GetValueOrDefault(x.PatientFhirId),
                 ExamText: x.ExamText,
-                ExamLoincCode: x.ExamLoincCode);
+                ExamLoincCode: x.ExamLoincCode,
+                HasResults: !string.IsNullOrWhiteSpace(x.ReportFhirId));
         }).ToList();
     }
 

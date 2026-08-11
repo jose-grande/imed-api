@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Lab;
 
 namespace IMed.Api.Application.Abstractions;
@@ -23,6 +24,32 @@ public interface ILabOperationsRepository
 
     /// <summary>Worklist: intakes in-house por org filtrados por estado (LIS-3 F3).</summary>
     Task<IReadOnlyList<OrderIntake>> ListInHouseIntakesAsync(Guid organizationId, OrderIntakeStatus? status, CancellationToken cancellationToken = default);
+
+    // --- Validación: devolución de informes al técnico ---
+
+    /// <summary>Motivos de devolución activos (catálogo global + los de la org).</summary>
+    Task<IReadOnlyList<ValidationRejectionReason>> ListValidationRejectionReasonsAsync(
+        Guid organizationId, CancellationToken cancellationToken = default);
+
+    Task<ValidationRejectionReason?> GetValidationRejectionReasonByCodeAsync(
+        Guid organizationId, string code, CancellationToken cancellationToken = default);
+
+    Task AddValidationRejectionAsync(
+        ResultValidationRejection rejection, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Devoluciones abiertas de la organización, por informe. La cola de validación las usa
+    /// para excluir lo que está en manos del técnico, y la worklist para mostrar el motivo.
+    /// </summary>
+    Task<IReadOnlyList<ResultValidationRejection>> ListOpenValidationRejectionsAsync(
+        Guid organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cierra las devoluciones abiertas de un informe: lo llama la corrección de resultados,
+    /// que es el acto que responde a la devolución y lo devuelve a la cola de validación.
+    /// </summary>
+    Task<int> ResolveValidationRejectionsAsync(
+        Guid organizationId, string reportFhirId, CancellationToken cancellationToken = default);
 
     // --- F2: check-in de orden (ingreso a la cola si el paciente lo solicita) ---
 

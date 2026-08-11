@@ -58,6 +58,29 @@ public sealed class OrderIntake
     public OrderIntakeStatus Status { get; private set; } = OrderIntakeStatus.Pending;
     public string? BlockReason { get; private set; }
 
+    /// <summary>
+    /// Informe (<c>DiagnosticReport</c>) que resultó esta orden, si ya se capturaron resultados.
+    ///
+    /// <para><b>Por qué vive acá y no solo en FHIR:</b> es el ancla de idempotencia de la captura.
+    /// Antes de esto, <c>EnterResultsHandler</c> creaba un informe nuevo en cada llamada sin
+    /// preguntar si la orden ya tenía uno, así que un reintento —o un técnico que salió de la
+    /// pantalla, volvió y la encontró en blanco— producía <b>dos informes con observaciones
+    /// duplicadas</b> para el mismo paciente y la misma orden, en silencio. Guardarlo local
+    /// permite resolverlo con una lectura O(1) sin depender de una búsqueda en HAPI.</para>
+    /// </summary>
+    public string? ReportFhirId { get; private set; }
+
+    /// <summary>
+    /// Profesional que validó y liberó el informe. Es <b>la firma del informe impreso</b>: un
+    /// resultado de laboratorio que sale de la institución sin decir quién lo firma no sirve
+    /// como documento. Se guarda local porque en FHIR vive en un <c>Provenance</c>, y buscarlo
+    /// por recurso en cada impresión sería una consulta cara para un dato que ya conocemos en
+    /// el momento de liberar.
+    /// </summary>
+    public string? ValidatedByPractitionerFhirId { get; private set; }
+
+    public DateTimeOffset? ValidatedAt { get; private set; }
+
     public Guid? ReceivedBy { get; private set; }
     /// <summary>Inicio del reloj de TAT.</summary>
     public DateTimeOffset? ReceivedAt { get; private set; }
@@ -141,10 +164,35 @@ public sealed class OrderIntake
         UpdatedAt = now;
     }
 
+    /// <summary>
+    /// Vincula el informe recién creado a la orden. Se llama una sola vez, al capturar los
+    /// resultados; las correcciones posteriores reescriben las <c>Observation</c> del mismo
+    /// informe y no pasan por acá.
+    /// </summary>
+    public void AttachReport(string reportFhirId, TimeProvider? timeProvider = null)
+    {
+        ReportFhirId = reportFhirId;
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
     public void MarkCompleted(TimeProvider? timeProvider = null)
     {
         Status = OrderIntakeStatus.Completed;
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
+    /// <summary>
+    /// Registra quién firmó el informe, al liberarlo. <paramref name="practitionerFhirId"/> puede
+    /// venir null si el usuario no tiene Practitioner asociado: se guarda la fecha igual, y el
+    /// informe impreso dice explícitamente que el validador no quedó registrado en vez de dejar
+    /// un espacio en blanco que parezca una firma faltante.
+    /// </summary>
+    public void MarkValidated(string? practitionerFhirId, TimeProvider? timeProvider = null)
+    {
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
+        ValidatedByPractitionerFhirId = practitionerFhirId;
+        ValidatedAt = now;
+        UpdatedAt = now;
     }
 
     /// <summary>Referida a laboratorio externo (trazabilidad; sin muestra en la sede) — F3.</summary>

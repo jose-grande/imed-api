@@ -594,62 +594,8 @@ public sealed class HapiMockServer : IDisposable
             .Given(Request.Create().WithPath("/fhir/Observation").UsingPost())
             .RespondWith(Response.Create().WithCallback(req =>
             {
-                var root = JsonDocument.Parse(req.Body ?? "{}").RootElement;
                 var id = $"obs-{Guid.NewGuid():N}";
-                string? loinc = null, codeText = null;
-                if (root.TryGetProperty("code", out var code))
-                {
-                    if (code.TryGetProperty("coding", out var cd) && cd.ValueKind == JsonValueKind.Array && cd.GetArrayLength() > 0
-                        && cd[0].TryGetProperty("code", out var cc))
-                    {
-                        loinc = cc.GetString();
-                    }
-                    if (code.TryGetProperty("text", out var t))
-                    {
-                        codeText = t.GetString();
-                    }
-                }
-                double? valueNum = null;
-                string? unit = null, valueStr = null;
-                if (root.TryGetProperty("valueQuantity", out var vq))
-                {
-                    if (vq.TryGetProperty("value", out var v) && v.TryGetDouble(out var dv))
-                    {
-                        valueNum = dv;
-                    }
-                    if (vq.TryGetProperty("unit", out var u))
-                    {
-                        unit = u.GetString();
-                    }
-                }
-                else if (root.TryGetProperty("valueString", out var vs))
-                {
-                    valueStr = vs.GetString();
-                }
-                string? flag = null;
-                if (root.TryGetProperty("interpretation", out var ip) && ip.ValueKind == JsonValueKind.Array && ip.GetArrayLength() > 0
-                    && ip[0].TryGetProperty("coding", out var ic) && ic.ValueKind == JsonValueKind.Array && ic.GetArrayLength() > 0
-                    && ic[0].TryGetProperty("code", out var fc))
-                {
-                    flag = fc.GetString();
-                }
-                double? low = null, high = null;
-                if (root.TryGetProperty("referenceRange", out var rr) && rr.ValueKind == JsonValueKind.Array && rr.GetArrayLength() > 0)
-                {
-                    if (rr[0].TryGetProperty("low", out var lo) && lo.TryGetProperty("value", out var lov) && lov.TryGetDouble(out var lod))
-                    {
-                        low = lod;
-                    }
-                    if (rr[0].TryGetProperty("high", out var hi) && hi.TryGetProperty("value", out var hiv) && hiv.TryGetDouble(out var hid))
-                    {
-                        high = hid;
-                    }
-                }
-                var status = root.TryGetProperty("status", out var st) ? st.GetString() ?? "preliminary" : "preliminary";
-                var patient = ParseReference(root, "subject", "Patient/");
-                var effective = root.TryGetProperty("effectiveDateTime", out var ed) ? ed.GetString() : null;
-
-                _observations[id] = new FakeObservation(id, patient, loinc, codeText, valueNum, unit, valueStr, flag, low, high, status, effective);
+                _observations[id] = ParseObservation(id, req.Body);
                 return JsonMessage(HttpStatusCode.Created, new { resourceType = "Observation", id, meta = new { versionId = "1" } });
             }));
 
@@ -665,6 +611,23 @@ public sealed class HapiMockServer : IDisposable
                     return JsonMessage(HttpStatusCode.NotFound, new { error = "not found" });
                 }
                 return JsonMessage(HttpStatusCode.OK, ObservationToFhir(o));
+            }));
+
+        // PUT: corrección de resultado (LIS-4b). HAPI versiona el recurso; el mock reemplaza
+        // la fila conservando el id, que es lo que el flujo necesita para releer el valor nuevo.
+        _server
+            .Given(Request.Create()
+                .WithPath(new WireMock.Matchers.RegexMatcher("^/fhir/Observation/[a-zA-Z0-9-]+$"))
+                .UsingPut())
+            .RespondWith(Response.Create().WithCallback(req =>
+            {
+                var id = req.Path.Split('/').Last();
+                if (!_observations.ContainsKey(id))
+                {
+                    return JsonMessage(HttpStatusCode.NotFound, new { error = "not found" });
+                }
+                _observations[id] = ParseObservation(id, req.Body);
+                return JsonMessage(HttpStatusCode.OK, new { resourceType = "Observation", id, meta = new { versionId = "2" } });
             }));
 
         // GET /fhir/Observation?subject=Patient/x&code=loinc|... — delta check (LIS-5).
@@ -792,16 +755,114 @@ public sealed class HapiMockServer : IDisposable
             .RespondWith(Response.Create().WithCallback(req =>
             {
                 var id = req.Path.Split('/').Last();
-                var newStatus = ParsePatchStatus(req.Body) ?? "final";
+                var (patchPath, patchValue) = ParsePatch(req.Body) ?? ("/status", null);
                 if (_diagnosticReports.TryGetValue(id, out var d))
                 {
-                    _diagnosticReports[id] = d with { Status = newStatus };
+                    _diagnosticReports[id] = patchPath == "/conclusion"
+                        ? d with { Conclusion = patchValue }
+                        : d with { Status = patchValue ?? "final" };
                 }
                 return JsonMessage(HttpStatusCode.OK, new { resourceType = "DiagnosticReport", id });
             }));
     }
 
-    private static string? ParsePatchStatus(string? body)
+    /// <summary>
+    /// Parsea el cuerpo de un Observation FHIR a la forma que guarda el mock. Lo comparten el
+    /// POST (alta) y el PUT (corrección de resultado): el PUT no existía, así que el camino de
+    /// corrección nunca se había podido probar de punta a punta.
+    /// </summary>
+    private static FakeObservation ParseObservation(string id, string? body)
+    {
+        var root = JsonDocument.Parse(body ?? "{}").RootElement;
+        string? loinc = null, codeText = null;
+        if (root.TryGetProperty("code", out var code))
+        {
+            if (code.TryGetProperty("coding", out var cd) && cd.ValueKind == JsonValueKind.Array && cd.GetArrayLength() > 0
+                && cd[0].TryGetProperty("code", out var cc))
+            {
+                loinc = cc.GetString();
+            }
+            if (code.TryGetProperty("text", out var t))
+            {
+                codeText = t.GetString();
+            }
+        }
+
+        double? valueNum = null;
+        string? unit = null, valueStr = null;
+        if (root.TryGetProperty("valueQuantity", out var vq))
+        {
+            if (vq.TryGetProperty("value", out var v) && v.TryGetDouble(out var dv))
+            {
+                valueNum = dv;
+            }
+            if (vq.TryGetProperty("unit", out var u))
+            {
+                unit = u.GetString();
+            }
+        }
+        else if (root.TryGetProperty("valueString", out var vs))
+        {
+            valueStr = vs.GetString();
+        }
+
+        string? flag = null;
+        if (root.TryGetProperty("interpretation", out var ip) && ip.ValueKind == JsonValueKind.Array && ip.GetArrayLength() > 0
+            && ip[0].TryGetProperty("coding", out var ic) && ic.ValueKind == JsonValueKind.Array && ic.GetArrayLength() > 0
+            && ic[0].TryGetProperty("code", out var fc))
+        {
+            flag = fc.GetString();
+        }
+
+        double? low = null, high = null;
+        if (root.TryGetProperty("referenceRange", out var rr) && rr.ValueKind == JsonValueKind.Array && rr.GetArrayLength() > 0)
+        {
+            if (rr[0].TryGetProperty("low", out var lo) && lo.TryGetProperty("value", out var lov) && lov.TryGetDouble(out var lod))
+            {
+                low = lod;
+            }
+            if (rr[0].TryGetProperty("high", out var hi) && hi.TryGetProperty("value", out var hiv) && hiv.TryGetDouble(out var hid))
+            {
+                high = hid;
+            }
+        }
+
+        var status = root.TryGetProperty("status", out var st) ? st.GetString() ?? "preliminary" : "preliminary";
+        var patient = ParseReference(root, "subject", "Patient/");
+        var effective = root.TryGetProperty("effectiveDateTime", out var ed) ? ed.GetString() : null;
+
+        var basedOn = ParseFirstReference(root, "basedOn", "ServiceRequest/");
+        return new FakeObservation(
+            id, patient, loinc, codeText, valueNum, unit, valueStr, flag, low, high, status, effective, basedOn);
+    }
+
+    /// <summary>Primera referencia de un array FHIR (<c>basedOn</c>, <c>partOf</c>, …).</summary>
+    private static string? ParseFirstReference(JsonElement root, string property, string prefix)
+    {
+        if (!root.TryGetProperty(property, out var arr)
+            || arr.ValueKind != JsonValueKind.Array || arr.GetArrayLength() == 0)
+        {
+            return null;
+        }
+        if (!arr[0].TryGetProperty("reference", out var refEl))
+        {
+            return null;
+        }
+        var value = refEl.GetString();
+        return value?.StartsWith(prefix, StringComparison.Ordinal) == true
+            ? value[prefix.Length..]
+            : value;
+    }
+
+    private static string? ParsePatchStatus(string? body) =>
+        ParsePatch(body) is { Path: "/status" } op ? op.Value : null;
+
+    /// <summary>
+    /// Primera operación del JSON Patch, con su path. Mirar el path importa: el mismo endpoint
+    /// recibe patches de <c>/status</c> (liberación) y de <c>/conclusion</c> (comentario del
+    /// validador), y leer solo el <c>value</c> guardaba el comentario como si fuera el status.
+    /// </summary>
+    private static (string Path, string? Value)? ParsePatch(string? body)
     {
         if (string.IsNullOrWhiteSpace(body))
         {
@@ -810,10 +871,11 @@ public sealed class HapiMockServer : IDisposable
         try
         {
             var arr = JsonDocument.Parse(body).RootElement;
-            if (arr.ValueKind == JsonValueKind.Array && arr.GetArrayLength() > 0
-                && arr[0].TryGetProperty("value", out var val))
+            if (arr.ValueKind == JsonValueKind.Array && arr.GetArrayLength() > 0)
             {
-                return val.GetString();
+                var path = arr[0].TryGetProperty("path", out var p) ? p.GetString() ?? string.Empty : string.Empty;
+                var value = arr[0].TryGetProperty("value", out var v) ? v.GetString() : null;
+                return (path, value);
             }
         }
         catch (JsonException) { /* ignore */ }
@@ -841,7 +903,10 @@ public sealed class HapiMockServer : IDisposable
         {
             new { low = o.Low is null ? null : new { value = o.Low }, high = o.High is null ? null : new { value = o.High } }
         },
-        effectiveDateTime = o.Effective
+        effectiveDateTime = o.Effective,
+        basedOn = o.ServiceRequestFhirId is null
+            ? null
+            : new[] { new { reference = $"ServiceRequest/{o.ServiceRequestFhirId}" } }
     };
 
     private static object DiagnosticReportToFhir(FakeDiagnosticReport d) => new
@@ -889,7 +954,13 @@ public sealed class HapiMockServer : IDisposable
 
     private sealed record FakeObservation(
         string Id, string PatientFhirId, string? Loinc, string? CodeText, double? ValueNumeric, string? Unit,
-        string? ValueString, string? Flag, double? Low, double? High, string Status, string? Effective);
+        string? ValueString, string? Flag, double? Low, double? High, string Status, string? Effective,
+        /// <summary>
+        /// <c>basedOn</c> → la orden que originó el resultado. El mock no lo guardaba, así que
+        /// devolvía siempre null y cualquier lógica que dependa del vínculo resultado↔orden
+        /// quedaba sin poder probarse — la corrección lo necesita para cerrar la devolución.
+        /// </summary>
+        string? ServiceRequestFhirId = null);
 
     private sealed record FakeDiagnosticReport(
         string Id, string PatientFhirId, string? Loinc, string? CodeText, string Status, string? Conclusion,
