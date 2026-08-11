@@ -138,6 +138,7 @@ app.MapMeEndpoints();
 app.MapMeStreamEndpoint();
 app.MapMePractitionerProfileEndpoints();
 app.MapOrganizationsEndpoints();
+app.MapLocationsEndpoints();
 app.MapFormsEndpoints();
 app.MapDiagnosesEndpoints();
 app.MapLabsEndpoints();

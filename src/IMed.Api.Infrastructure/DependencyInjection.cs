@@ -16,6 +16,7 @@ using IMed.Api.Application.LabResults;
 using IMed.Api.Application.LabSpecimens;
 using IMed.Api.Application.LabRules;
 using IMed.Api.Application.Labs;
+using IMed.Api.Application.Locations;
 using IMed.Api.Application.Medications;
 using IMed.Api.Application.Notifications;
 using IMed.Api.Application.Organizations;
@@ -168,6 +169,10 @@ public static class DependencyInjection
         // Recupera las muestras que ya pasaron por QC antes de existir la convergencia con
         // `order_intake`: sin esto no aparecen en Resultados/dashboard/TAT.
         services.AddHostedService<CollectionIntakeBackfill>();
+        // Eje de sede (ADR-008): garantiza la sede principal de cada org existente y ancla a ella
+        // los datos operativos anteriores al eje. Va al final: ancla lo que los backfills de
+        // arriba pudieron haber creado en este mismo arranque.
+        services.AddHostedService<LocationBackfill>();
         return services;
     }
 
@@ -224,6 +229,8 @@ public static class DependencyInjection
         services.AddScoped<IJoinRequestsRepository, JoinRequestsRepository>();
         services.AddScoped<IChangeMemberRolePersistence, ChangeMemberRolePersistence>();
         services.AddScoped<ILabCatalogRepository, LabCatalogRepository>();
+        services.AddScoped<ILocationRepository, LocationRepository>();
+        services.AddScoped<ILocationProvisioning, LocationProvisioning>();
         services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();
         services.AddScoped<ILabOperationsRepository, LabOperationsRepository>();
         services.AddScoped<ILabRuleRepository, LabRuleRepository>();
@@ -378,6 +385,13 @@ public static class DependencyInjection
         services.AddScoped<GetTechnicalReceptionHandler>();
         services.AddScoped<ReceiveSpecimenHandler>();
         services.AddScoped<ResolveRequisitionHandler>();
+        services.AddScoped<ResolveActiveLocationHandler>();
+        services.AddScoped<ListLocationsHandler>();
+        services.AddScoped<ListMyLocationsHandler>();
+        services.AddScoped<CreateLocationHandler>();
+        services.AddScoped<UpdateLocationHandler>();
+        services.AddScoped<AssignUserToLocationHandler>();
+        services.AddScoped<UnassignUserFromLocationHandler>();
         services.AddScoped<CheckInOrderHandler>();
         services.AddScoped<ReferOrderExternalHandler>();
         services.AddScoped<ReceiveRequisitionHandler>();

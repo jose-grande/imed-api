@@ -1565,6 +1565,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("encounter_fhir_id");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
@@ -1809,6 +1813,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("checked_in_by");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
                     b.HasKey("OrganizationId", "Requisition");
 
                     b.ToTable("lab_order_checkin", (string)null);
@@ -1875,6 +1883,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsWalkIn")
                         .HasColumnType("boolean")
                         .HasColumnName("is_walk_in");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
 
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
@@ -2116,6 +2128,101 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_specimen_event_intake");
 
                     b.ToTable("specimen_event", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Locations.OrganizationLocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_default");
+
+                    b.Property<string>("LocationFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("location_fhir_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_organization_location_org_default")
+                        .HasFilter("is_default");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_organization_location_org_code");
+
+                    b.ToTable("organization_location", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Locations.UserLocationAssignment", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at");
+
+                    b.Property<Guid?>("AssignedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assigned_by");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_primary");
+
+                    b.HasKey("OrganizationId", "UserId", "LocationId");
+
+                    b.HasIndex("LocationId")
+                        .HasDatabaseName("ix_user_location_location");
+
+                    b.HasIndex("OrganizationId", "UserId")
+                        .HasDatabaseName("ix_user_location_org_user");
+
+                    b.ToTable("user_location", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Outbox.OutboxEvent", b =>

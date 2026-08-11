@@ -33,6 +33,12 @@ public sealed class CollectionPlan
     public Guid Id { get; private set; }
     public Guid OrganizationId { get; private set; }
 
+    /// <summary>
+    /// Sede donde se toma la muestra (ADR-008). Nullable mientras conviva con planes anteriores
+    /// al eje de sede, que el backfill de arranque ancla a la sede principal.
+    /// </summary>
+    public Guid? LocationId { get; private set; }
+
     /// <summary>Número de orden/requisición que el plan deriva (clave funcional).</summary>
     public string Requisition { get; private set; } = string.Empty;
 
@@ -68,6 +74,7 @@ public sealed class CollectionPlan
         string patientFhirId,
         string? encounterFhirId = null,
         Guid? computedBy = null,
+        Guid? locationId = null,
         TimeProvider? timeProvider = null)
     {
         if (string.IsNullOrWhiteSpace(requisition))
@@ -80,6 +87,7 @@ public sealed class CollectionPlan
         {
             Id = Guid.CreateVersion7(now),
             OrganizationId = organizationId,
+            LocationId = locationId,
             Requisition = requisition.Trim(),
             PatientFhirId = patientFhirId,
             EncounterFhirId = string.IsNullOrWhiteSpace(encounterFhirId) ? null : encounterFhirId,

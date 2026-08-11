@@ -6,6 +6,7 @@ using IMed.Api.Domain.Forms;
 using IMed.Api.Domain.Lab;
 using IMed.Api.Domain.Invitations;
 using IMed.Api.Domain.JoinRequests;
+using IMed.Api.Domain.Locations;
 using IMed.Api.Domain.Outbox;
 using IMed.Api.Domain.Practitioners;
 using IMed.Api.Domain.Subscriptions;
@@ -65,10 +66,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<CollectionPlanUnavailableItem> CollectionPlanUnavailableItems => Set<CollectionPlanUnavailableItem>();
     public DbSet<CollectionEvent> CollectionEvents => Set<CollectionEvent>();
 
+    // Eje de sede (ADR-008)
+    public DbSet<OrganizationLocation> OrganizationLocations => Set<OrganizationLocation>();
+    public DbSet<UserLocationAssignment> UserLocations => Set<UserLocationAssignment>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
+        ConfigureLocations(modelBuilder);
         ConfigureOrganizationSubscription(modelBuilder);
         ConfigureUserTierAssignment(modelBuilder);
         ConfigureOutboxEvent(modelBuilder);
@@ -175,6 +181,54 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.NextAttemptAt)
                 .HasDatabaseName("ix_outbox_events_next_attempt")
                 .HasFilter("dispatched_at IS NULL");
+        });
+    }
+
+    /// <summary>
+    /// Eje de sede (ADR-008): la sede es un <c>Location</c> dentro de una organización, no una
+    /// organización hija. El índice único de <c>IsDefault</c> es filtrado — garantiza <b>una</b>
+    /// sede principal por organización sin impedir que las demás existan.
+    /// </summary>
+    private static void ConfigureLocations(ModelBuilder b)
+    {
+        b.Entity<OrganizationLocation>(e =>
+        {
+            e.ToTable("organization_location");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.Code).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.LocationFhirId).HasMaxLength(64);
+            e.Property(x => x.IsDefault).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // (org, code) cubre además el listado por organización, que siempre arranca por org.
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_organization_location_org_code");
+            // Único filtrado: garantiza UNA sede principal por organización sin impedir el resto.
+            // Ojo: EF identifica los índices por conjunto de propiedades, así que no puede haber
+            // otro HasIndex sobre OrganizationId solo — el segundo reconfigura al primero.
+            e.HasIndex(x => x.OrganizationId)
+                .IsUnique()
+                .HasFilter("is_default")
+                .HasDatabaseName("ux_organization_location_org_default");
+        });
+
+        b.Entity<UserLocationAssignment>(e =>
+        {
+            e.ToTable("user_location");
+            e.HasKey(x => new { x.OrganizationId, x.UserId, x.LocationId });
+            e.Property(x => x.IsPrimary).IsRequired();
+            e.Property(x => x.AssignedAt).IsRequired();
+            e.Property(x => x.AssignedBy);
+
+            e.HasIndex(x => new { x.OrganizationId, x.UserId })
+                .HasDatabaseName("ix_user_location_org_user");
+            e.HasIndex(x => x.LocationId)
+                .HasDatabaseName("ix_user_location_location");
         });
     }
 
@@ -853,6 +907,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("collection_plan");
             e.HasKey(x => x.Id);
             e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.LocationId);
             e.Property(x => x.Requisition).HasMaxLength(64).IsRequired();
             e.Property(x => x.EncounterFhirId).HasMaxLength(64);
             e.Property(x => x.PatientFhirId).HasMaxLength(64).IsRequired();
@@ -974,6 +1029,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("order_intake");
             e.HasKey(x => x.Id);
             e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.LocationId);
             e.Property(x => x.ServiceRequestFhirId).HasMaxLength(64).IsRequired();
             e.Property(x => x.SpecimenFhirId).HasMaxLength(64);
             e.Property(x => x.PatientFhirId).HasMaxLength(64).IsRequired();
@@ -1056,6 +1112,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("lab_order_checkin");
             e.HasKey(x => new { x.OrganizationId, x.Requisition });
             e.Property(x => x.Requisition).HasMaxLength(64).IsRequired();
+            e.Property(x => x.LocationId);
             e.Property(x => x.CheckedInAt).IsRequired();
             e.Property(x => x.CheckedInBy).IsRequired();
         });

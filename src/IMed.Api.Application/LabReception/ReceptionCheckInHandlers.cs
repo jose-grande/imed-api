@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Lab;
 
 namespace IMed.Api.Application.LabReception;
@@ -10,7 +11,8 @@ namespace IMed.Api.Application.LabReception;
 /// (no ofertados en la sede). Idempotente.
 /// </summary>
 public sealed class CheckInOrderHandler(
-    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops, TimeProvider timeProvider)
+    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops,
+    ResolveActiveLocationHandler activeLocation, TimeProvider timeProvider)
 {
     private static readonly HashSet<string> ExcludedStatuses =
         new(StringComparer.OrdinalIgnoreCase) { "revoked", "entered-in-error" };
@@ -26,7 +28,10 @@ public sealed class CheckInOrderHandler(
             return null;
         }
 
-        await ops.CheckInOrderAsync(LabOrderCheckIn.Create(orgId, requisition, userId, timeProvider), ct);
+        // La sede del ingreso decide en qué cola de recepción aparece la orden.
+        var locationId = await activeLocation.HandleAsync(orgId, userId, null, ct);
+        await ops.CheckInOrderAsync(
+            LabOrderCheckIn.Create(orgId, requisition, userId, locationId, timeProvider), ct);
 
         var patientId = orders[0].PatientFhirId;
         var encounterId = orders[0].EncounterFhirId;

@@ -13,6 +13,12 @@ public sealed class OrderIntake
     public Guid Id { get; private set; }
     public Guid OrganizationId { get; private set; }
 
+    /// <summary>
+    /// Sede donde se recibió y procesa la muestra (ADR-008). Nullable mientras conviva con datos
+    /// anteriores al eje de sede, que el backfill de arranque ancla a la sede principal.
+    /// </summary>
+    public Guid? LocationId { get; private set; }
+
     /// <summary>Orden FHIR (interna del Encounter o externa creada en recepción).</summary>
     public string ServiceRequestFhirId { get; private set; } = string.Empty;
 
@@ -169,6 +175,20 @@ public sealed class OrderIntake
     /// resultados; las correcciones posteriores reescriben las <c>Observation</c> del mismo
     /// informe y no pasan por acá.
     /// </summary>
+    /// <summary>
+    /// Ancla la orden a la sede donde entró la muestra. Se asigna una vez, en la recepción: mover
+    /// una orden de sede después de recibida rompería la contigüidad del correlativo y la lectura
+    /// del TAT, que se miden por sede.
+    /// </summary>
+    public void AssignLocation(Guid locationId)
+    {
+        if (locationId == Guid.Empty)
+        {
+            throw new ArgumentException("LocationId es obligatorio.", nameof(locationId));
+        }
+        LocationId ??= locationId;
+    }
+
     public void AttachReport(string reportFhirId, TimeProvider? timeProvider = null)
     {
         ReportFhirId = reportFhirId;

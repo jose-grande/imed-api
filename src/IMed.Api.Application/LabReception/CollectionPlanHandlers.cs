@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Lab;
 
@@ -12,7 +13,8 @@ namespace IMed.Api.Application.LabReception;
 /// el workbench (R6-F5) antes de etiquetar (R6-F4).
 /// </summary>
 public sealed class ComputeCollectionPlanHandler(
-    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops, TimeProvider timeProvider)
+    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops,
+    ResolveActiveLocationHandler activeLocation, TimeProvider timeProvider)
 {
     /// <summary>Volumen por defecto por prueba cuando el catálogo no lo define (mL).</summary>
     private const decimal DefaultPerTestMl = 0.5m;
@@ -68,7 +70,11 @@ public sealed class ComputeCollectionPlanHandler(
             .Select(g => g.First())
             .ToList();
 
-        var plan = CollectionPlan.Create(orgId, requisition, patientId ?? string.Empty, encounterId, userId, timeProvider);
+        // La sede queda anclada al calcular el plan: es donde se va a tomar la muestra, y de ahí
+        // salen la cola de toma y la impresora que emite la etiqueta.
+        var locationId = await activeLocation.HandleAsync(orgId, userId, null, ct);
+        var plan = CollectionPlan.Create(
+            orgId, requisition, patientId ?? string.Empty, encounterId, userId, locationId, timeProvider);
         BuildContainers(plan, resolved);
         foreach (var o in unresolved)
         {

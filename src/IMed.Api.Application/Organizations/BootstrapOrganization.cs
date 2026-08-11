@@ -24,6 +24,7 @@ public sealed class BootstrapOrganizationHandler(
     IHapiFhirClient hapiFhir,
     IBootstrapOrganizationPersistence persistence,
     ILabCatalogProvisioning labCatalogProvisioning,
+    ILocationProvisioning locationProvisioning,
     ILogger<BootstrapOrganizationHandler> logger,
     TimeProvider timeProvider)
 {
@@ -98,6 +99,21 @@ public sealed class BootstrapOrganizationHandler(
             logger.LogError(ex,
                 "Aprovisionamiento del catálogo de laboratorio falló para org {OrgId}; " +
                 "el backfill de arranque lo recuperará.", organizationId);
+        }
+
+        // 4.6 Sede principal (ADR-008). Sin sede no se puede operar nada del LIS: las worklists,
+        //     los correlativos y las etiquetas cuelgan de ella. Resiliente igual que el catálogo —
+        //     el LocationBackfill de arranque la crea si esto falla.
+        try
+        {
+            await locationProvisioning.EnsureDefaultLocationAsync(
+                organizationId, command.OrganizationName, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "Aprovisionamiento de la sede principal falló para org {OrgId}; " +
+                "el backfill de arranque la recuperará.", organizationId);
         }
 
         // 5. Hot-path: sincronizar Keycloak. Si falla, el OutboxProcessor lo
