@@ -150,5 +150,101 @@ public sealed class PermissionMatrixTests(ImedApiFixture fixture) : IAsyncLifeti
             "instalaciones existentes, no solo a las nuevas");
     }
 
+    [Fact]
+    public async Task LaPantalla_muestraElOrigenDeCadaConcesion_yPermiteCambiarla()
+    {
+        var (client, orgId) = await AdminOrgAsync();
+
+        var matriz = await (await client.GetAsync("/api/authorization/matrix"))
+            .Content.ReadFromJsonAsync<MatrixProbe>();
+        matriz.Should().NotBeNull();
+        matriz!.Roles.Should().Contain("lab_tech");
+
+        var labRead = matriz.Permissions.Single(p => p.Code == PermissionCatalog.LabRead);
+        labRead.ByRole["lab_tech"].Should().Be("Template", "viene de la plantilla del producto");
+        labRead.ByRole["auxiliar"].Should().Be("None", "nadie se lo concede");
+
+        // Quitar en esta organización algo que la plantilla concede.
+        (await client.PutAsJsonAsync("/api/authorization/matrix", new
+        {
+            roleCode = "lab_tech",
+            permissionCode = PermissionCatalog.LabRead,
+            action = "Deny",
+        })).StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var tras = await (await client.GetAsync("/api/authorization/matrix"))
+            .Content.ReadFromJsonAsync<MatrixProbe>();
+        tras!.Permissions.Single(p => p.Code == PermissionCatalog.LabRead)
+            .ByRole["lab_tech"].Should().Be("Denied");
+
+        // Volver a la plantilla borra la variante, no congela el valor de hoy.
+        (await client.PutAsJsonAsync("/api/authorization/matrix", new
+        {
+            roleCode = "lab_tech",
+            permissionCode = PermissionCatalog.LabRead,
+            action = "Inherit",
+        })).StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var final = await (await client.GetAsync("/api/authorization/matrix"))
+            .Content.ReadFromJsonAsync<MatrixProbe>();
+        final!.Permissions.Single(p => p.Code == PermissionCatalog.LabRead)
+            .ByRole["lab_tech"].Should().Be("Template");
+    }
+
+    [Fact]
+    public async Task NadieSePuedeQuitarLaAdministracionDeLaPolitica()
+    {
+        var (client, _) = await AdminOrgAsync();
+
+        var resp = await client.PutAsJsonAsync("/api/authorization/matrix", new
+        {
+            roleCode = "org_admin",
+            permissionCode = PermissionCatalog.OrgPolicyManage,
+            action = "Deny",
+        });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "la organización quedaría sin nadie que pueda volver a cambiar la política");
+    }
+
+    [Fact]
+    public async Task UnRolSinOrgPolicyManage_noPuedeVerLaMatriz()
+    {
+        var (_, orgId) = await AdminOrgAsync();
+        var tecnicoId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(tecnicoId, "tec", "tec@imed.test");
+        var tecnico = fixture.CreateClientWithToken(fixture.Keycloak.IssueUserToken(
+            tecnicoId, organizationId: orgId.ToString(), realmRoles: ["lab_tech"]));
+
+        (await tecnico.GetAsync("/api/authorization/matrix")).StatusCode
+            .Should().Be(HttpStatusCode.Forbidden,
+                "quien puede cambiar la política puede darse cualquier otro permiso");
+    }
+
+    /// <summary>Organización real con un usuario org_admin sobre ella.</summary>
+    private async Task<(HttpClient Client, Guid OrgId)> AdminOrgAsync()
+    {
+        await Task.Delay(800);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId, "duenio", "duenio@imed.test");
+        var bootstrapClient = fixture.CreateClientWithToken(
+            fixture.Keycloak.IssueUserToken(userId, preferredUsername: "duenio"));
+        var bootstrap = await (await bootstrapClient.PostAsJsonAsync("/api/organizations/bootstrap", new
+        {
+            name = "Clínica Matriz",
+            nationalTaxId = "0801-1990-33333",
+        })).Content.ReadFromJsonAsync<BootstrapProbe>();
+
+        var token = fixture.Keycloak.IssueUserToken(
+            userId, organizationId: bootstrap!.OrganizationId.ToString(), realmRoles: ["org_admin"]);
+        return (fixture.CreateClientWithToken(token), bootstrap.OrganizationId);
+    }
+
     private sealed record BootstrapProbe(Guid OrganizationId);
+
+    private sealed record MatrixProbe(
+        IReadOnlyList<string> Roles, IReadOnlyList<MatrixRowProbe> Permissions);
+
+    private sealed record MatrixRowProbe(
+        string Code, string Module, string Description, IReadOnlyDictionary<string, string> ByRole);
 }

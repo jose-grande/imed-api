@@ -2,6 +2,7 @@ using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Abstractions.Email;
 using IMed.Api.Application.Abstractions.Terminology;
 using IMed.Api.Application.Allergies;
+using IMed.Api.Application.Authorization;
 using IMed.Api.Application.Catalogs;
 using IMed.Api.Application.Diagnoses;
 using IMed.Api.Application.Forms;
@@ -233,6 +234,9 @@ public static class DependencyInjection
         services.AddScoped<ILabCatalogRepository, LabCatalogRepository>();
         services.AddMemoryCache();
         services.AddScoped<IPermissionResolver, PermissionResolver>();
+        services.AddScoped<IPermissionMatrixRepository, PermissionMatrixRepository>();
+        services.AddScoped<GetPermissionMatrixHandler>();
+        services.AddScoped<SetPermissionGrantHandler>();
         services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<ILocationProvisioning, LocationProvisioning>();
         services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();

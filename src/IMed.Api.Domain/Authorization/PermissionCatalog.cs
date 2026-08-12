@@ -37,6 +37,25 @@ public static class PermissionCatalog
     public const string OrgLocationsManage = "org.locations.manage";
     public const string OrgPolicyManage = "org.policy.manage";
 
+    /// <summary>
+    /// Roles del realm, en el orden en que conviene mostrarlos: de más amplio a más acotado.
+    ///
+    /// <para>Vive acá y no se descubre de la base porque los roles los define Keycloak, y una
+    /// lista derivada de las filas existentes ocultaría un rol al que nadie le concedió nada
+    /// todavía — justo el que hay que poder configurar.</para>
+    /// </summary>
+    public static IReadOnlyList<string> Roles =>
+    [
+        "org_admin",
+        "practitioner",
+        "lab_supervisor",
+        "bioanalyst",
+        "pathologist",
+        "lab_tech",
+        "auxiliar",
+        "imed_superadmin",
+    ];
+
     public static IReadOnlyList<(string Code, string Module, string Description)> All =>
     [
         (LabRead, "lab", "Ver el laboratorio: worklists, órdenes, resultados"),
