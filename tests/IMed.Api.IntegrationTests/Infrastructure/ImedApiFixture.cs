@@ -48,18 +48,31 @@ public sealed class ImedApiFixture : IAsyncLifetime
     {
         Keycloak = new KeycloakMockServer(SigningKey);
 
+        // Migrar ANTES de construir el host. Resolver `Factory.Services` arranca los
+        // IHostedService, y varios seeders consultan tablas al arrancar: si la migración
+        // corriera después, un seeder que toca una tabla recién agregada fallaría contra un
+        // esquema viejo. En producción el pipeline migra antes de levantar el proceso; acá se
+        // reproduce ese orden en vez de depender de que ningún seeder mire el esquema nuevo.
+        // Mismas opciones que el registro real: sin la tabla de historial correcta, EF creería
+        // que no hay ninguna migración aplicada e intentaría crear el esquema desde cero.
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql(TestConnectionString, npgsql =>
+            {
+                npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.GetName().Name);
+                npgsql.MigrationsHistoryTable("__ef_migrations_history");
+            })
+            .Options;
+        await using (var migrationDb = new AppDbContext(options))
+        {
+            await migrationDb.Database.MigrateAsync();
+        }
+
         Factory = new ImedApiFactory(
             postgresConnectionString: TestConnectionString,
             keycloakAuthority: Keycloak.Authority,
             keycloakBaseUrl: Keycloak.BaseUrl,
             hapiBaseUrl: Hapi.BaseUrl,
             emailSender: Email);
-
-        // Aplicar migraciones EF a imed_app_test. Idempotente: si ya están al
-        // día, no hace nada. Si hay nuevas, las aplica.
-        using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()

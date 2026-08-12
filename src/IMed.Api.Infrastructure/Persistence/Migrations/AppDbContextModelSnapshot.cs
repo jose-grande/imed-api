@@ -94,6 +94,51 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("app_audit_log", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Authorization.FhirAccessRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PermissionCode")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("permission_code");
+
+                    b.Property<string>("ResourceType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("resource_type");
+
+                    b.Property<string>("Verb")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("verb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceType", "Verb")
+                        .HasDatabaseName("ix_fhir_access_rule_resource_verb");
+
+                    b.HasIndex("OrganizationId", "ResourceType", "Verb", "PermissionCode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_fhir_access_rule");
+
+                    b.ToTable("fhir_access_rule", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Authorization.Permission", b =>
                 {
                     b.Property<string>("Code")

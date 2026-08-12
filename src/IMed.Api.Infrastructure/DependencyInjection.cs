@@ -5,6 +5,7 @@ using IMed.Api.Application.Allergies;
 using IMed.Api.Application.Authorization;
 using IMed.Api.Application.Catalogs;
 using IMed.Api.Application.Diagnoses;
+using IMed.Api.Application.FhirGateway;
 using IMed.Api.Application.Forms;
 using IMed.Api.Application.Identifiers;
 using IMed.Api.Application.Invitations;
@@ -235,6 +236,8 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddScoped<IPermissionResolver, PermissionResolver>();
         services.AddScoped<IPermissionMatrixRepository, PermissionMatrixRepository>();
+        services.AddScoped<IFhirAccessRuleRepository, FhirAccessRuleRepository>();
+        services.AddScoped<FhirAccessEvaluator>();
         services.AddScoped<GetPermissionMatrixHandler>();
         services.AddScoped<SetPermissionGrantHandler>();
         services.AddScoped<ILocationRepository, LocationRepository>();

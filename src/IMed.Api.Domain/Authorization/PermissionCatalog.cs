@@ -31,6 +31,9 @@ public static class PermissionCatalog
     public const string LabResultReadOrdered = "lab.result.read.ordered";
     public const string LabResultReadAny = "lab.result.read.any";
 
+    /// <summary>Crear y modificar datos del expediente: paciente, encuentro, alergias, recetas.</summary>
+    public const string RecordWrite = "record.write";
+
     // --- Administración -----------------------------------------------------
     public const string OrgManage = "org.manage";
     public const string OrgTeamManage = "org.team.manage";
@@ -71,6 +74,7 @@ public static class PermissionCatalog
         (RecordReadEmergency, "record", "Romper el vidrio: acceso de emergencia con justificación"),
         (LabResultReadOrdered, "lab", "Ver resultados de las órdenes que solicitó"),
         (LabResultReadAny, "lab", "Ver cualquier resultado del laboratorio"),
+        (RecordWrite, "record", "Crear y modificar datos del expediente"),
 
         (OrgManage, "org", "Administrar la organización"),
         (OrgTeamManage, "org", "Administrar el equipo y las invitaciones"),
@@ -87,15 +91,17 @@ public static class PermissionCatalog
         // org_admin administra su organización y puede hacer todo lo operativo.
         ("org_admin", LabRead), ("org_admin", LabOperate), ("org_admin", LabValidate), ("org_admin", LabManage),
         ("org_admin", RecordSearchDemographics), ("org_admin", RecordReadAny), ("org_admin", LabResultReadAny),
+        ("org_admin", RecordWrite),
         ("org_admin", OrgManage), ("org_admin", OrgTeamManage), ("org_admin", OrgLocationsManage), ("org_admin", OrgPolicyManage),
 
         // El médico ve el laboratorio y el expediente. En una clínica chica el de turno cubre a
         // todos los pacientes; la contención real es el registro de accesos, no la restricción.
         ("practitioner", LabRead), ("practitioner", RecordSearchDemographics),
         ("practitioner", RecordReadAny), ("practitioner", LabResultReadOrdered),
+        ("practitioner", RecordWrite),
 
         // Recepción necesita encontrar al paciente para agendar, no leer su historia.
-        ("auxiliar", RecordSearchDemographics),
+        ("auxiliar", RecordSearchDemographics), ("auxiliar", RecordWrite),
 
         ("lab_tech", LabRead), ("lab_tech", LabOperate),
         ("lab_tech", RecordSearchDemographics), ("lab_tech", LabResultReadAny),

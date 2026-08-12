@@ -71,6 +71,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<PolicyVersion> PolicyVersions => Set<PolicyVersion>();
+    public DbSet<FhirAccessRule> FhirAccessRules => Set<FhirAccessRule>();
 
     // Eje de sede (ADR-008)
     public DbSet<OrganizationLocation> OrganizationLocations => Set<OrganizationLocation>();
@@ -271,6 +272,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .IsUnique()
                 .HasDatabaseName("ux_role_permission_org_role_perm");
             e.HasIndex(x => x.RoleCode).HasDatabaseName("ix_role_permission_role");
+        });
+
+        b.Entity<FhirAccessRule>(e =>
+        {
+            e.ToTable("fhir_access_rule");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId);
+            e.Property(x => x.ResourceType).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Verb).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.PermissionCode).HasMaxLength(80).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.ResourceType, x.Verb, x.PermissionCode })
+                .IsUnique()
+                .HasDatabaseName("ux_fhir_access_rule");
+            e.HasIndex(x => new { x.ResourceType, x.Verb })
+                .HasDatabaseName("ix_fhir_access_rule_resource_verb");
         });
 
         b.Entity<PolicyVersion>(e =>

@@ -37,14 +37,15 @@ public sealed class PermissionSeeder(
 
         var addedPermissions = await SyncCatalogAsync(db, cancellationToken);
         var addedGrants = await SyncBaseMatrixAsync(db, cancellationToken);
+        var addedRules = await SyncFhirRulesAsync(db, cancellationToken);
 
-        if (addedPermissions > 0 || addedGrants > 0)
+        if (addedPermissions > 0 || addedGrants > 0 || addedRules > 0)
         {
             // Cambió la plantilla global: hay que invalidar la caché de todas las instancias.
             await BumpGlobalVersionAsync(db, cancellationToken);
             logger.LogInformation(
-                "Matriz de permisos: +{Permissions} permiso(s), +{Grants} concesión(es) global(es).",
-                addedPermissions, addedGrants);
+                "Matriz de permisos: +{Permissions} permiso(s), +{Grants} concesión(es), +{Rules} regla(s) FHIR.",
+                addedPermissions, addedGrants, addedRules);
         }
 
         // Guarda de arranque: si la matriz quedó vacía, el problema es ahora y no cuando el
@@ -100,6 +101,34 @@ public sealed class PermissionSeeder(
             return 0;
         }
         db.RolePermissions.AddRange(toAdd);
+        await db.SaveChangesAsync(ct);
+        return toAdd.Count;
+    }
+
+    /// <summary>
+    /// Lista blanca de acceso FHIR (SEC-3). Se reconcilia igual que la matriz: un recurso nuevo
+    /// declarado en el catálogo tiene que llegar a las instalaciones existentes, o la pantalla que
+    /// lo usa se rompe con un 403 sin explicación.
+    /// </summary>
+    private async Task<int> SyncFhirRulesAsync(AppDbContext db, CancellationToken ct)
+    {
+        var existing = await db.FhirAccessRules.AsNoTracking()
+            .Where(x => x.OrganizationId == null)
+            .Select(x => new { x.ResourceType, x.Verb, x.PermissionCode })
+            .ToListAsync(ct);
+        var known = new HashSet<string>(
+            existing.Select(x => $"{x.ResourceType}|{x.Verb}|{x.PermissionCode}"), StringComparer.Ordinal);
+
+        var toAdd = FhirAccessCatalog.BaseRules
+            .Where(r => !known.Contains($"{r.Resource}|{r.Verb}|{r.Permission}"))
+            .Select(r => FhirAccessRule.Create(r.Resource, r.Verb, r.Permission, null, timeProvider))
+            .ToList();
+
+        if (toAdd.Count == 0)
+        {
+            return 0;
+        }
+        db.FhirAccessRules.AddRange(toAdd);
         await db.SaveChangesAsync(ct);
         return toAdd.Count;
     }
