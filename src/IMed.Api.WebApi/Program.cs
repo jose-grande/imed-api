@@ -8,6 +8,7 @@ using IMed.Api.WebApi.Endpoints;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
+using IMed.Api.Infrastructure.Hapi;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,6 +33,20 @@ builder.Services.AddScoped<IRequestLocationContext, RequestLocationContext>();
 // Un argumento inválido es un 400, no un 500. Sin esto, la validación que hacen los handlers
 // con ArgumentException llega como error del servidor en los endpoints que no la atrapan a mano.
 builder.Services.AddProblemDetails();
+
+// Proxy autorizador de /fhir/** (ADR-007, SEC-3). Arranca en modo sombra por configuración.
+builder.Services.Configure<FhirGatewayOptions>(builder.Configuration.GetSection(FhirGatewayOptions.SectionName));
+builder.Services.AddHttpForwarder();
+builder.Services.AddSingleton(new HttpMessageInvoker(new SocketsHttpHandler
+{
+    // El proxy mantiene una sola conexión reusada contra HAPI: sin keep-alive, cada request
+    // pagaría un handshake nuevo y el hop sí se notaría.
+    UseProxy = false,
+    AllowAutoRedirect = false,
+    AutomaticDecompression = System.Net.DecompressionMethods.None,
+    UseCookies = false,
+    ConnectTimeout = TimeSpan.FromSeconds(15),
+}));
 builder.Services.AddExceptionHandler<ArgumentExceptionHandler>();
 
 // CORS para los portales Angular
@@ -168,6 +183,9 @@ app.MapLabWorklistEndpoints();
 app.MapLabResultsEndpoints();
 app.MapLabRulesEndpoints();
 app.MapLabDashboardEndpoints();
+
+// El proxy va último: es un catch-all de /fhir/** y no debe sombrear ninguna ruta propia.
+app.MapFhirProxy();
 
 app.Run();
 
