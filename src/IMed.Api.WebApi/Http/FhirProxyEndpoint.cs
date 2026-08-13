@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.FhirGateway;
@@ -28,8 +30,11 @@ public static class FhirProxyEndpoint
     /// <summary>Categoría del registro de acceso a datos clínicos en <c>app_audit_log</c>.</summary>
     public const string PhiAuditCategory = "phi_access";
 
-    /// <summary>Cuerpo máximo que se lee para evaluar un Bundle. Más que eso no es un uso legítimo.</summary>
-    private const int MaxBodyBytes = 2 * 1024 * 1024;
+    /// <summary>Cuerpo máximo que se lee para evaluar. Más que eso no es un uso legítimo.</summary>
+    private const int MaxBodyChars = 2 * 1024 * 1024;
+
+    /// <summary>Trozo con que se recorre el cuerpo. Sale del pool: este camino ya no es raro.</summary>
+    private const int ReadChunkChars = 8 * 1024;
 
     public static IEndpointRouteBuilder MapFhirProxy(this IEndpointRouteBuilder app)
     {
@@ -74,23 +79,27 @@ public static class FhirProxyEndpoint
             return;
         }
 
-        // El cuerpo solo se lee cuando hace falta abrirlo — un Bundle. Para el resto se reenvía
-        // en streaming sin materializarlo: bufferear cada escritura por si acaso sería pagar
-        // memoria en todos los requests para un caso que es uno solo.
+        // El cuerpo solo se lee cuando alguna regla lo va a abrir —un Bundle, o una Observation
+        // cuya categoría decide si pasa—. Para el resto se reenvía en streaming sin materializarlo:
+        // bufferear cada escritura por si acaso sería pagar memoria en todos los requests.
+        // Quién lo necesita lo decide el evaluador, para que agregar una regla que mire el cuerpo
+        // no dependa de acordarse de tocar también este archivo.
         string? body = null;
-        if (descriptor.IsBundle)
+        FhirAccessDecision? tooLarge = null;
+        if (FhirAccessEvaluator.RequiresBody(descriptor))
         {
-            context.Request.EnableBuffering();
-            using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
-            var buffer = new char[MaxBodyBytes];
-            var read = await reader.ReadBlockAsync(buffer);
-            body = new string(buffer, 0, read);
-            context.Request.Body.Position = 0;
+            body = await ReadBodyAsync(context.Request);
+            if (body is null)
+            {
+                tooLarge = FhirAccessDecision.Deny(
+                    $"El cuerpo supera los {MaxBodyChars} caracteres que se pueden evaluar.",
+                    descriptor.ResourceType);
+            }
         }
 
         var roles = context.User.FindAll("roles").Select(c => c.Value).ToList();
         var permissions = await resolver.ResolveAsync(orgId.Value, roles);
-        var decision = await evaluator.EvaluateAsync(orgId.Value, permissions, descriptor, body);
+        var decision = tooLarge ?? await evaluator.EvaluateAsync(orgId.Value, permissions, descriptor, body);
 
         var mode = gatewayOptions.Value.Mode;
         var blocked = !decision.Allowed && mode == FhirGatewayMode.Enforce;
@@ -135,6 +144,45 @@ public static class FhirProxyEndpoint
         if (error != ForwarderError.None)
         {
             logger.LogError("Fallo al reenviar a HAPI: {Error}", error);
+        }
+    }
+
+    /// <summary>
+    /// Lee el cuerpo para evaluarlo, dejándolo disponible para el reenvío.
+    ///
+    /// <para>Devuelve <c>null</c> si supera el tope: lo que no se puede evaluar no se aprueba, y
+    /// el que decide qué hacer con eso es el llamador.</para>
+    ///
+    /// <para>Se recorre por trozos y con el buffer prestado del pool. Reservar el tope entero por
+    /// request se podía tolerar mientras el único caso era el Bundle de cierre de consulta; ahora
+    /// que cada signo vital pasa por acá, serían megabytes por captura de preclínica.</para>
+    /// </summary>
+    private static async Task<string?> ReadBodyAsync(HttpRequest request)
+    {
+        request.EnableBuffering();
+
+        var buffer = ArrayPool<char>.Shared.Rent(ReadChunkChars);
+        try
+        {
+            using var reader = new StreamReader(request.Body, leaveOpen: true);
+            var builder = new StringBuilder();
+
+            int read;
+            while ((read = await reader.ReadBlockAsync(buffer, request.HttpContext.RequestAborted)) > 0)
+            {
+                builder.Append(buffer, 0, read);
+                if (builder.Length > MaxBodyChars)
+                {
+                    return null;
+                }
+            }
+
+            return builder.ToString();
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(buffer);
+            request.Body.Position = 0;
         }
     }
 

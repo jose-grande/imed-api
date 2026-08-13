@@ -22,12 +22,33 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
     /// <summary>Profundidad máxima de un Bundle. Un Bundle dentro de otro no tiene uso legítimo acá.</summary>
     private const int MaxBundleEntries = 200;
 
-    public async Task<FhirAccessDecision> EvaluateAsync(
+    /// <summary>
+    /// Si la decisión depende del cuerpo del request.
+    ///
+    /// <para>El proxy la consulta para no materializar el cuerpo de todos los requests, y el
+    /// recorrido del Bundle para no copiar el JSON de cada entrada. Vive acá, junto a las reglas
+    /// que lo necesitan, para que agregar una regla que mire el cuerpo no deje al proxy
+    /// entregando <c>null</c> desde otro archivo.</para>
+    /// </summary>
+    public static bool RequiresBody(FhirRequestDescriptor request) =>
+        request.IsBundle
+        || (IsWrite(request.Verb) && request.ResourceType == FhirAccessCatalog.ObservationResource);
+
+    public Task<FhirAccessDecision> EvaluateAsync(
         Guid organizationId,
         EffectivePermissions permissions,
         FhirRequestDescriptor request,
         string? body,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        EvaluateAsync(organizationId, permissions, request, body, depth: 0, ct);
+
+    private async Task<FhirAccessDecision> EvaluateAsync(
+        Guid organizationId,
+        EffectivePermissions permissions,
+        FhirRequestDescriptor request,
+        string? body,
+        int depth,
+        CancellationToken ct)
     {
         // 1. Operaciones: casi ninguna debe estar abierta. $expunge borra sin dejar rastro y
         //    $reindex puede tumbar el servidor bajo carga.
@@ -55,16 +76,34 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
         // 3. Bundle de transacción: se abre y se evalúa cada entrada con estas mismas reglas.
         if (request.IsBundle)
         {
-            return await EvaluateBundleAsync(organizationId, permissions, body, ct);
+            // El anidamiento se corta por profundidad y no por "la entrada no trae cuerpo": ahora
+            // sí lo trae, porque las reglas que miran la categoría lo necesitan.
+            if (depth > 0)
+            {
+                return FhirAccessDecision.Deny("Un Bundle no puede contener otro Bundle.", "Bundle");
+            }
+
+            return await EvaluateBundleAsync(organizationId, permissions, body, depth, ct);
         }
 
         // 4. Recursos con circuito de negocio: lectura sí, escritura jamás por acá.
-        if (IsWrite(request.Verb)
-            && FhirAccessCatalog.WriteProtectedResources.Contains(request.ResourceType))
+        if (IsWrite(request.Verb))
         {
-            return FhirAccessDecision.Deny(
-                $"'{request.ResourceType}' solo se escribe por los endpoints de negocio, que validan estado y rol.",
-                request.ResourceType);
+            if (FhirAccessCatalog.WriteProtectedResources.Contains(request.ResourceType))
+            {
+                return FhirAccessDecision.Deny(
+                    $"'{request.ResourceType}' solo se escribe por los endpoints de negocio, que validan estado y rol.",
+                    request.ResourceType);
+            }
+
+            if (request.ResourceType == FhirAccessCatalog.ObservationResource)
+            {
+                var category = CheckObservationCategory(body);
+                if (!category.Allowed)
+                {
+                    return category;
+                }
+            }
         }
 
         // 5. Acotado de la búsqueda antes de mirar permisos: una consulta mal formada se rechaza
@@ -96,6 +135,79 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
 
     private static bool IsWrite(FhirVerb verb) =>
         verb is FhirVerb.Create or FhirVerb.Update or FhirVerb.Delete;
+
+    /// <summary>
+    /// Deja escribir una <c>Observation</c> según su categoría.
+    ///
+    /// <para>Los signos vitales y la antropometría los captura el personal a mano y no atraviesan
+    /// ningún circuito; el resultado de laboratorio sí, y por eso <c>laboratory</c> no se escribe
+    /// nunca por acá. El motivo largo está en <see cref="FhirAccessCatalog.WriteProtectedObservationCategories"/>.</para>
+    ///
+    /// <para><b>Sin categoría no pasa.</b> El default-deny vale también para el cuerpo: una
+    /// Observation sin declarar qué es podría ser un resultado, y eso alcanza para negarla.</para>
+    /// </summary>
+    private static FhirAccessDecision CheckObservationCategory(string? body)
+    {
+        const string resource = FhirAccessCatalog.ObservationResource;
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return FhirAccessDecision.Deny(
+                "No se pudo leer el cuerpo de la Observation para determinar su categoría.", resource);
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(body);
+        }
+        catch (JsonException)
+        {
+            return FhirAccessDecision.Deny("La Observation no es JSON válido.", resource);
+        }
+
+        using (document)
+        {
+            var declared = false;
+
+            if (document.RootElement.TryGetProperty("category", out var categories)
+                && categories.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var category in categories.EnumerateArray())
+                {
+                    if (!category.TryGetProperty("coding", out var codings)
+                        || codings.ValueKind != JsonValueKind.Array)
+                    {
+                        continue;
+                    }
+
+                    foreach (var coding in codings.EnumerateArray())
+                    {
+                        var code = coding.TryGetProperty("code", out var codeEl) ? codeEl.GetString() : null;
+                        if (string.IsNullOrWhiteSpace(code))
+                        {
+                            continue;
+                        }
+
+                        declared = true;
+                        if (FhirAccessCatalog.WriteProtectedObservationCategories.Contains(code))
+                        {
+                            return FhirAccessDecision.Deny(
+                                $"Una Observation de categoría '{code}' solo se escribe por el circuito de laboratorio, "
+                                + "que valida estado, orden y liberación.",
+                                resource);
+                        }
+                    }
+                }
+            }
+
+            return declared
+                ? FhirAccessDecision.Allow()
+                : FhirAccessDecision.Deny(
+                    "La Observation no declara categoría, y sin categoría no se puede descartar que sea un resultado.",
+                    resource);
+        }
+    }
 
     /// <summary>
     /// Acotado de búsquedas. Es por donde se filtra la información en sistemas de salud: una
@@ -163,17 +275,17 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
     /// la ruta de afuera dejaría pasar exactamente lo que el resto de las reglas prohíbe.
     /// </summary>
     private async Task<FhirAccessDecision> EvaluateBundleAsync(
-        Guid organizationId, EffectivePermissions permissions, string? body, CancellationToken ct)
+        Guid organizationId, EffectivePermissions permissions, string? body, int depth, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body))
         {
             return FhirAccessDecision.Deny("Bundle vacío.", "Bundle");
         }
 
-        JsonElement root;
+        JsonDocument document;
         try
         {
-            root = JsonDocument.Parse(body).RootElement;
+            document = JsonDocument.Parse(body);
         }
         catch (JsonException)
         {
@@ -181,6 +293,9 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
             // no pasa. Dejarlo seguir sería confiar en que el servidor de atrás lo rechace.
             return FhirAccessDecision.Deny("El Bundle no es JSON válido.", "Bundle");
         }
+
+        using var _ = document;
+        var root = document.RootElement;
 
         if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
         {
@@ -200,9 +315,18 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
                 return FhirAccessDecision.Deny("Una entrada del Bundle no declara su request.", "Bundle");
             }
 
-            // Recursión de un solo nivel: un Bundle anidado se rechaza en la llamada de abajo,
-            // que no tiene cuerpo propio que abrir.
-            var decision = await EvaluateAsync(organizationId, permissions, descriptor, null, ct);
+            // El recurso de la entrada es el cuerpo de ese request. Solo se copia cuando alguna
+            // regla lo va a mirar: en un Bundle de 200 entradas, extraer el JSON de todas para
+            // no usarlo sería trabajo puro.
+            string? entryBody = null;
+            if (RequiresBody(descriptor)
+                && entry.TryGetProperty("resource", out var resource)
+                && resource.ValueKind == JsonValueKind.Object)
+            {
+                entryBody = resource.GetRawText();
+            }
+
+            var decision = await EvaluateAsync(organizationId, permissions, descriptor, entryBody, depth + 1, ct);
             if (!decision.Allowed)
             {
                 // Se rechaza el Bundle **entero**. Aplicar la parte autorizada dejaría la
