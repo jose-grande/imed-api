@@ -112,6 +112,95 @@ public sealed class FhirProxyTests(ImedApiFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UnSignoVital_llegaAHapiYQuedaRegistradoComoPermitido()
+    {
+        // Prueba de cableado, no de política: la regla de categoría solo funciona si el proxy
+        // efectivamente lee el cuerpo en un POST de Observation. Si `RequiresBody` dejara de
+        // decir que sí, el evaluador recibiría null y negaría todos los signos vitales — que es
+        // exactamente el modo de falla que esta corrección vino a eliminar.
+        var (client, orgId, _) = await AuthedAsync("auxiliar");
+
+        const string vital = """
+        {"resourceType":"Observation","status":"final",
+         "category":[{"coding":[{"system":"http://terminology.hl7.org/CodeSystem/observation-category","code":"vital-signs"}]}],
+         "code":{"coding":[{"system":"http://loinc.org","code":"29463-7"}]},
+         "subject":{"reference":"Patient/p1"},
+         "valueQuantity":{"value":70,"unit":"kg"}}
+        """;
+
+        var resp = await client.PostAsync("/fhir/Observation",
+            new StringContent(vital, System.Text.Encoding.UTF8, "application/fhir+json"));
+
+        resp.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+
+        using var scope = fixture.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var registro = await db.AppAuditLog.AsNoTracking()
+            .Where(x => x.OrganizationId == orgId && x.Category == FhirProxyEndpoint.PhiAuditCategory)
+            .OrderByDescending(x => x.OccurredAt)
+            .FirstAsync();
+
+        JsonDocument.Parse(registro.Payload).RootElement
+            .GetProperty("allowed").GetBoolean().Should().BeTrue(
+                "el cuerpo tiene que haber llegado al evaluador para que la categoría se pueda mirar");
+    }
+
+    [Fact]
+    public async Task UnResultadoDeLaboratorio_seRegistraComoNegadoAunqueEnSombraPase()
+    {
+        var (client, orgId, _) = await AuthedAsync("lab_supervisor");
+
+        const string resultado = """
+        {"resourceType":"Observation","status":"final",
+         "category":[{"coding":[{"system":"http://terminology.hl7.org/CodeSystem/observation-category","code":"laboratory"}]}],
+         "code":{"coding":[{"system":"http://loinc.org","code":"2345-7"}]},
+         "subject":{"reference":"Patient/p1"},
+         "valueQuantity":{"value":95,"unit":"mg/dL"}}
+        """;
+
+        await client.PostAsync("/fhir/Observation",
+            new StringContent(resultado, System.Text.Encoding.UTF8, "application/fhir+json"));
+
+        using var scope = fixture.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var registro = await db.AppAuditLog.AsNoTracking()
+            .Where(x => x.OrganizationId == orgId && x.Category == FhirProxyEndpoint.PhiAuditCategory)
+            .OrderByDescending(x => x.OccurredAt)
+            .FirstAsync();
+
+        var payload = JsonDocument.Parse(registro.Payload).RootElement;
+        payload.GetProperty("allowed").GetBoolean().Should().BeFalse(
+            "el circuito de laboratorio sigue cerrado desde el lado público");
+        payload.GetProperty("reason").GetString().Should().Contain("circuito de laboratorio");
+    }
+
+    [Fact]
+    public async Task EnModoEnforce_loNoPermitido_seBloqueaCon403()
+    {
+        // La contracara del test de sombra, y la que dice si el proxy sirve para algo. La suite
+        // corre en sombra para que las demás pruebas midan la política y no el bloqueo; esta
+        // levanta un host con `Enforce` para verificar el modo que de verdad se publica.
+        await Task.Delay(500);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId, "tecnico", "tecnico@imed.test");
+        var token = fixture.Keycloak.IssueUserToken(
+            userId, organizationId: Guid.NewGuid().ToString(), realmRoles: ["auxiliar"]);
+
+        using var enforcing = fixture.Factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+                services.Configure<FhirGatewayOptions>(o => o.Mode = FhirGatewayMode.Enforce)));
+
+        using var client = enforcing.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var resp = await client.GetAsync("/fhir/DiagnosticReport/dr-1");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "en Enforce la política bloquea, que es el punto de salir de sombra");
+    }
+
+    [Fact]
     public async Task ElProxyRespondeConServerTiming()
     {
         var (client, _, _) = await AuthedAsync("practitioner");

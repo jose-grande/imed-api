@@ -25,8 +25,8 @@ public sealed class FhirGatewayOptions
     /// que olvide configurar esto no deja a nadie afuera, solo deja de proteger — y eso se ve en
     /// el log, mientras que lo contrario se ve en soporte.
     /// </summary>
-    public FhirGatewayMode Mode { get; init; } = FhirGatewayMode.Shadow;
+    public FhirGatewayMode Mode { get; set; } = FhirGatewayMode.Shadow;
 
     /// <summary>Habilita el proxy. Apagado, `/fhir/**` no se sirve desde el gateway.</summary>
-    public bool Enabled { get; init; } = true;
+    public bool Enabled { get; set; } = true;
 }
