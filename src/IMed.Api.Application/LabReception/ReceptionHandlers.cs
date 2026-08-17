@@ -91,7 +91,7 @@ public sealed class ResolveReceptionOrderHandler(
         {
             return null;
         }
-        var (routing, test) = await LabRouting.ResolveAsync(catalog, orgId, order.LoincCode, ct);
+        var (routing, test) = await LabRouting.ResolveAsync(catalog, orgId, order.CatalogCode, ct);
         var existing = await ops.GetIntakeByServiceRequestAsync(orgId, serviceRequestId, ct);
 
         return new ReceptionOrderView(
@@ -171,7 +171,7 @@ public sealed class ReceiveSpecimenHandler(
             throw new InvalidOperationException("La orden ya fue recibida.");
         }
 
-        var (routing, test) = await LabRouting.ResolveAsync(catalog, cmd.OrganizationId, order.LoincCode, ct);
+        var (routing, test) = await LabRouting.ResolveAsync(catalog, cmd.OrganizationId, order.CatalogCode, ct);
         var priority = LabRouting.ParsePriority(order.Priority);
         var fastingRequired = test?.FastingHours is not null;
 

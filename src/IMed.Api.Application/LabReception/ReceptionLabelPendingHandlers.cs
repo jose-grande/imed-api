@@ -97,7 +97,7 @@ public sealed class GetCollectionQueueHandler(
             {
                 continue;
             }
-            var (_, test) = await LabRouting.ResolveAsync(catalog, orgId, o.LoincCode, ct);
+            var (_, test) = await LabRouting.ResolveAsync(catalog, orgId, o.CatalogCode, ct);
             SpecimenType? st = test?.SpecimenTypeId is Guid sid && specimenTypes.TryGetValue(sid, out var s) ? s : null;
             var mode = st?.CollectionMode ?? CollectionMode.OnSite;
             if (mode != CollectionMode.OnSite)

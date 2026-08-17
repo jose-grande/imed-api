@@ -174,7 +174,7 @@ public sealed class GetLabOrderHandler(IHapiFhirClient hapi, ILabCatalogReposito
         {
             return null;
         }
-        var availability = await LabAvailability.ClassifyAsync(catalog, orgId, snap.LoincCode, ct);
+        var availability = await LabAvailability.ClassifyAsync(catalog, orgId, snap.CatalogCode, ct);
         return LabOrderDto.FromSnapshot(snap) with { Availability = availability };
     }
 }
@@ -206,12 +206,7 @@ internal static class LabOrderListMapper
         var list = new List<LabOrderDto>(rows.Count);
         foreach (var s in rows)
         {
-            // `LoincCode ?? LocalCode`, igual que al crear la orden. Antes bastaba con mirar
-            // `LoincCode` porque el lector metía ahí cualquier coding; ahora que el código del
-            // panel viaja en su propio campo, quedarse solo con LOINC dejaría sin disponibilidad
-            // a todos los paneles propios de la clínica — que son la mayoría.
-            var availability = await LabAvailability.ClassifyAsync(
-                catalog, orgId, s.LoincCode ?? s.LocalCode, ct);
+            var availability = await LabAvailability.ClassifyAsync(catalog, orgId, s.CatalogCode, ct);
             list.Add(LabOrderDto.FromSnapshot(s) with { Availability = availability });
         }
         return list;

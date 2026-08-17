@@ -688,11 +688,21 @@ public sealed class HapiMockServer : IDisposable
     }
 
     /// <summary>Siembra una orden directamente (helper de tests para flujos de recepción por requisición).</summary>
+    /// <summary>
+    /// Siembra una orden. <paramref name="localCode"/> permite sembrarla como la escribe el cliente
+    /// real cuando el examen es un panel propio de la clínica: **solo** código local, sin LOINC.
+    /// Sembrar el código del panel en <paramref name="loinc"/> —que es lo único que se podía hacer
+    /// antes— produce un recurso que ninguna orden real tiene, y hace pasar los caminos que resuelven
+    /// el catálogo por el campo equivocado.
+    /// </summary>
     public string SeedServiceRequest(
-        string patientFhirId, string? loinc, string? codeText, string encounter, string requisition, string status = "active")
+        string patientFhirId, string? loinc, string? codeText, string encounter, string requisition,
+        string status = "active", string? localCode = null, string? localSystem = null)
     {
         var id = $"sr-{Guid.NewGuid():N}";
-        _serviceRequests[id] = new FakeServiceRequest(id, patientFhirId, loinc, codeText, "routine", status, "order", encounter, requisition);
+        _serviceRequests[id] = new FakeServiceRequest(
+            id, patientFhirId, loinc, codeText, "routine", status, "order", encounter, requisition,
+            LocalCode: localCode, LocalSystem: localSystem);
         return id;
     }
 

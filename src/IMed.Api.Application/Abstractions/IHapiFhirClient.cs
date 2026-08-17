@@ -477,7 +477,23 @@ public sealed record LabOrderSnapshot(
     /// Sistema del código local. Va junto al código porque quien reescriba la orden —la
     /// reconciliación, sin cliente que se lo dicte— tiene que poder devolverla tal cual estaba.
     /// </summary>
-    string? LocalSystem = null);
+    string? LocalSystem = null)
+{
+    /// <summary>
+    /// Código con el que se busca esta orden en el catálogo de la clínica.
+    ///
+    /// <para>El catálogo indexa por código local (<c>Code</c> del panel o de la prueba) **y** por
+    /// LOINC, así que la búsqueda necesita uno de los dos. Hoy ningún panel de la clínica tiene
+    /// LOINC —los 42 lo tienen nulo—, de modo que mirar solo <see cref="LoincCode"/> deja fuera del
+    /// catálogo a todos los paneles y el laboratorio termina refiriendo a externo lo que sí hace
+    /// en casa.</para>
+    ///
+    /// <para>Existe como propiedad y no como <c>LoincCode ?? LocalCode</c> repetido en cada sitio
+    /// porque son once, y basta olvidarlo en uno para que esa pantalla vuelva a mentir. Se prefiere
+    /// LOINC cuando está: es el código con el que el catálogo comparte significado con el mundo.</para>
+    /// </summary>
+    public string? CatalogCode => LoincCode ?? LocalCode;
+}
 
 /// <summary>
 /// Datos para crear un <c>Specimen</c> FHIR R5 (recepción, LIS-3).

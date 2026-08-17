@@ -46,7 +46,7 @@ public sealed class GetResultEntrySheetHandler(
 
         // Expandir la orden a sus pruebas efectivas. Un panel rinde N analitos; una prueba
         // suelta rinde una sola. Es exactamente lo que faltaba en la captura.
-        var expanded = await LabRouting.ExpandOrderAsync(catalog, orgId, order.LoincCode, ct);
+        var expanded = await LabRouting.ExpandOrderAsync(catalog, orgId, order.CatalogCode, ct);
 
         var analytes = new List<ResultAnalyteDto>();
         foreach (var (test, routing) in expanded)

@@ -46,7 +46,7 @@ public sealed class CheckInOrderHandler(
         var external = new List<CheckInExam>();
         foreach (var o in orders)
         {
-            var tests = await LabRouting.ExpandOrderAsync(catalog, orgId, o.LoincCode, ct);
+            var tests = await LabRouting.ExpandOrderAsync(catalog, orgId, o.CatalogCode, ct);
             var inHouse = tests.Count > 0 && tests.Any(t => t.Routing == OrderRouting.InHouse);
             var exam = new CheckInExam(o.Id, o.LoincCode, o.CodeText);
             if (inHouse)

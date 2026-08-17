@@ -126,7 +126,7 @@ public sealed class GetLabOrderPdfHandler(
 
     private async Task<string?> AvailabilityLabelAsync(Guid orgId, LabOrderSnapshot order, CancellationToken ct)
     {
-        var code = await LabAvailability.ClassifyAsync(catalog, orgId, order.LoincCode, ct);
+        var code = await LabAvailability.ClassifyAsync(catalog, orgId, order.CatalogCode, ct);
         return code switch
         {
             LabAvailability.InHouse => "Disponible en la clínica",

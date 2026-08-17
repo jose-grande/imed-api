@@ -150,6 +150,42 @@ public sealed class LabOrdersGatewayTests(ImedApiFixture fixture) : IAsyncLifeti
     }
 
     [Fact]
+    public async Task LaOrdenDeUnPanelPropio_seInformaComoRealizableEnLaClinica()
+    {
+        // Camino de lectura por id: clasifica la disponibilidad por su cuenta y era el que
+        // quedaba mirando solo `LoincCode`. Con un panel propio —sin LOINC— reportaba
+        // "send-out" y el médico veía que la clínica no hace un examen que sí hace.
+        await Task.Delay(800);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId);
+        var orgId = Guid.NewGuid();
+        await fixture.ProvisionLabCatalogAsync(orgId);
+        var token = fixture.Keycloak.IssueUserToken(
+            userId, organizationId: orgId.ToString(), realmRoles: ["org_admin"]);
+        var client = fixture.CreateClientWithToken(token);
+
+        var enc = $"enc-{Guid.NewGuid():N}";
+        var create = await client.PostAsJsonAsync("/api/lab-orders", new
+        {
+            patientFhirId = "pat-disp-1",
+            encounterFhirId = enc,
+            status = "active",
+            localCode = "CBC",
+            localSystem = "http://imed.local/panel",
+            codeText = "Hemograma completo",
+            requisition = enc,
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var creada = await create.Content.ReadFromJsonAsync<LabOrderDto>();
+
+        var porId = await (await client.GetAsync($"/api/lab-orders/{creada!.Id}"))
+            .Content.ReadFromJsonAsync<LabOrderDto>();
+
+        porId!.Availability.Should().Be("in-house",
+            "CBC está en el catálogo de la org y sus pruebas están ofertadas");
+    }
+
+    [Fact]
     public async Task ElCorrelativoDeLaTarde_llevaLaFechaDeHoy_noLaDeManana()
     {
         // Prueba de cableado: `ClinicClockTests` ya fija la semántica del reloj; esto verifica que

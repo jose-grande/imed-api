@@ -50,7 +50,7 @@ public sealed class ComputeCollectionPlanHandler(
         {
             patientId ??= o.PatientFhirId;
             encounterId ??= o.EncounterFhirId;
-            var tests = await LabRouting.ExpandOrderAsync(catalog, orgId, o.LoincCode, ct);
+            var tests = await LabRouting.ExpandOrderAsync(catalog, orgId, o.CatalogCode, ct);
             if (tests.Count == 0)
             {
                 unresolved.Add(o);

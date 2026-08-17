@@ -57,7 +57,7 @@ public sealed class ResolveRequisitionHandler(
             var intakeStatus = existing?.Status.ToString();
 
             // Expandir panel → pruebas (o prueba suelta) y agrupar por tipo de muestra.
-            var tests = await LabRouting.ExpandOrderAsync(catalog, orgId, o.LoincCode, ct);
+            var tests = await LabRouting.ExpandOrderAsync(catalog, orgId, o.CatalogCode, ct);
             if (tests.Count == 0)
             {
                 AddOrder("UNKNOWN", null, null, o, "SendOut", null, intakeStatus);
@@ -159,7 +159,7 @@ public sealed class ReceiveRequisitionHandler(
                 {
                     continue;
                 }
-                var (_, test) = await LabRouting.ResolveAsync(catalog, cmd.OrganizationId, ord.LoincCode, ct);
+                var (_, test) = await LabRouting.ResolveAsync(catalog, cmd.OrganizationId, ord.CatalogCode, ct);
                 snaps.Add((ord, test));
             }
             if (snaps.Count == 0)

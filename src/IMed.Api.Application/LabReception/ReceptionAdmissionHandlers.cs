@@ -49,7 +49,7 @@ public sealed class GetAwaitingAdmissionHandler(
                 g = new AwaitingGroupBuilder(o.Requisition, o.PatientFhirId, name, o.EncounterFhirId);
                 groups[key] = g;
             }
-            var availability = await ClassifyAsync(catalog, orgId, o.LoincCode, ct);
+            var availability = await ClassifyAsync(catalog, orgId, o.CatalogCode, ct);
             g.Exams.Add(new AwaitingAdmissionExam(o.Id, o.LoincCode, o.CodeText, availability));
         }
 

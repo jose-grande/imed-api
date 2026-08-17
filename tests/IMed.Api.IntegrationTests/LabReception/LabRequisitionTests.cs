@@ -38,9 +38,14 @@ public sealed class LabRequisitionTests(ImedApiFixture fixture) : IAsyncLifetime
     {
         var client = await AuthedClient();
         var enc = $"enc-{Guid.NewGuid():N}";
-        // CMP está sembrado; se ordena por su código local de panel (matchea por Code,
-        // independiente del backfill de loinc del panel). Sus pruebas son de química → "sangre".
-        var srId = fixture.Hapi.SeedServiceRequest("pat-req-1", "CMP", "Perfil metabolico completo", encounter: enc, requisition: enc);
+        // CMP está sembrado. Se ordena como lo escribe el cliente real: coding local del panel,
+        // sin LOINC —los paneles de la clínica no tienen uno—. Antes esta prueba sembraba `CMP`
+        // bajo el sistema LOINC, que es una forma que ninguna orden real tiene, y por eso no vio
+        // que la recepción buscaba el catálogo por el campo equivocado.
+        // Sus pruebas son de química → "sangre".
+        var srId = fixture.Hapi.SeedServiceRequest(
+            "pat-req-1", loinc: null, "Perfil metabolico completo", encounter: enc, requisition: enc,
+            localCode: "CMP", localSystem: "http://imed.local/panel");
 
         // F2 (rev 31): resolver también filtra por órdenes ingresadas.
         var checkIn = await client.PostAsJsonAsync("/api/lab/reception/check-in", new { requisition = enc });
@@ -81,6 +86,31 @@ public sealed class LabRequisitionTests(ImedApiFixture fixture) : IAsyncLifetime
         results.Should().ContainSingle();
         results![0].Status.Should().Be("Received");
         results[0].AccessionNumber.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task UnPanelPropio_entraALaColaDeLaClinica_noSeRefiereAExterno()
+    {
+        // El síntoma en pantalla era "ningún examen es realizable en esta ubicación" para órdenes
+        // de paneles que la clínica sí procesa. La causa: la orden lleva el código del panel en su
+        // propio coding local, y la recepción buscaba el catálogo por `LoincCode` —nulo en esa
+        // orden—, así que no encontraba nada y refería todo a un laboratorio externo.
+        //
+        // El costo no es cosmético: el check-in marca `Referred` en el intake, o sea que deja
+        // registrado que el paciente se va a hacer los exámenes afuera.
+        var client = await AuthedClient();
+        var enc = $"enc-{Guid.NewGuid():N}";
+        var srId = fixture.Hapi.SeedServiceRequest(
+            "pat-req-3", loinc: null, "Hemograma completo", encounter: enc, requisition: enc,
+            localCode: "CBC", localSystem: "http://imed.local/panel");
+
+        var checkIn = await client.PostAsJsonAsync("/api/lab/reception/check-in", new { requisition = enc });
+        checkIn.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await checkIn.Content.ReadFromJsonAsync<CheckInResult>();
+
+        result!.Queued.Should().Contain(e => e.ServiceRequestId == srId,
+            "CBC está en el catálogo de la org y sus pruebas están ofertadas");
+        result.External.Should().BeEmpty("no hay nada que referir afuera");
     }
 
     [Fact]
