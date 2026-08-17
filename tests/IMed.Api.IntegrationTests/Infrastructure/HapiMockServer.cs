@@ -26,6 +26,7 @@ public sealed class HapiMockServer : IDisposable
     private readonly Dictionary<string, List<FakePractitionerRole>> _rolesByOrg = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakePractitionerRole> _rolesById = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakeServiceRequest> _serviceRequests = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _encounterStates = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakeObservation> _observations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakeDiagnosticReport> _diagnosticReports = new(StringComparer.Ordinal);
     private readonly List<CreatedProvenance> _provenances = new();
@@ -34,6 +35,25 @@ public sealed class HapiMockServer : IDisposable
     public int CreatePractitionerRoleCallCount { get; private set; }
 
     public string BaseUrl => $"{_server.Url}/fhir";
+
+    /// <summary>
+    /// Si la última petición recibida cuyo path contiene <paramref name="pathFragment"/> pidió
+    /// saltarse la caché de búsquedas.
+    ///
+    /// <para>Existe para una sola prueba, pero de las que valen: HAPI reutiliza el resultado de una
+    /// búsqueda idéntica durante 60 segundos, y sin este header el gateway lee datos viejos sin que
+    /// nada falle. Es un modo de falla silencioso, así que se verifica sobre el request real que
+    /// sale del proxy y no sobre la intención del código.</para>
+    /// </summary>
+    public bool LastRequestHadNoCache(string pathFragment)
+    {
+        var entry = _server.LogEntries
+            .LastOrDefault(e => e.RequestMessage.Path.Contains(pathFragment, StringComparison.OrdinalIgnoreCase));
+
+        return entry?.RequestMessage.Headers is { } headers
+            && headers.TryGetValue("Cache-Control", out var values)
+            && values.Any(v => v.Contains("no-cache", StringComparison.OrdinalIgnoreCase));
+    }
 
     public IReadOnlyCollection<string> CreatedPartitions => _createdPartitions;
     public IReadOnlyCollection<CreatedOrganization> Organizations => _organizations;
@@ -58,6 +78,8 @@ public sealed class HapiMockServer : IDisposable
         SetupServiceRequestCreate();
         SetupServiceRequestGet();
         SetupServiceRequestSearch();
+        SetupServiceRequestUpdate();
+        SetupEncounterGet();
         SetupSpecimenCreate();
         SetupProvenanceCreate();
         SetupPatientGet();
@@ -73,6 +95,7 @@ public sealed class HapiMockServer : IDisposable
         _rolesByOrg.Clear();
         _rolesById.Clear();
         _serviceRequests.Clear();
+        _encounterStates.Clear();
         _observations.Clear();
         _diagnosticReports.Clear();
         _provenances.Clear();
@@ -419,14 +442,31 @@ public sealed class HapiMockServer : IDisposable
                 var root = JsonDocument.Parse(req.Body ?? "{}").RootElement;
                 var patientId = ParseReference(root, "subject", "Patient/");
                 string? loinc = null;
+                string? localCode = null;
+                string? localSystem = null;
                 string? codeText = null;
                 if (root.TryGetProperty("code", out var code) && code.TryGetProperty("concept", out var concept))
                 {
+                    // Se guarda cada coding con su sistema, como HAPI. Quedarse con `coding[0]` y
+                    // republicarlo como LOINC era justo el error que se quería poder detectar.
                     if (concept.TryGetProperty("coding", out var coding)
-                        && coding.ValueKind == JsonValueKind.Array && coding.GetArrayLength() > 0
-                        && coding[0].TryGetProperty("code", out var cc))
+                        && coding.ValueKind == JsonValueKind.Array)
                     {
-                        loinc = cc.GetString();
+                        foreach (var c in coding.EnumerateArray())
+                        {
+                            var sys = c.TryGetProperty("system", out var sEl) ? sEl.GetString() : null;
+                            var val = c.TryGetProperty("code", out var cc) ? cc.GetString() : null;
+                            if (string.IsNullOrWhiteSpace(val)) { continue; }
+                            if (string.Equals(sys, "http://loinc.org", StringComparison.OrdinalIgnoreCase))
+                            {
+                                loinc = val;
+                            }
+                            else
+                            {
+                                localCode ??= val;
+                                localSystem ??= sys;
+                            }
+                        }
                     }
                     if (concept.TryGetProperty("text", out var t))
                     {
@@ -441,7 +481,10 @@ public sealed class HapiMockServer : IDisposable
                     ? rqv.GetString() : null;
 
                 var id = $"sr-{Guid.NewGuid():N}";
-                _serviceRequests[id] = new FakeServiceRequest(id, patientId, loinc, codeText, priority, status, intent, encounter, requisition);
+                var authoredOn = root.TryGetProperty("authoredOn", out var ao) ? ao.GetString() : null;
+                _serviceRequests[id] = new FakeServiceRequest(
+                    id, patientId, loinc, codeText, priority, status, intent, encounter, requisition,
+                    localCode, localSystem, authoredOn);
                 return JsonMessage(HttpStatusCode.Created, new { resourceType = "ServiceRequest", id, meta = new { versionId = "1" } });
             }));
     }
@@ -469,14 +512,12 @@ public sealed class HapiMockServer : IDisposable
                     encounter = sr.Encounter is null ? null : new { reference = $"Encounter/{sr.Encounter}" },
                     requisition = sr.Requisition is null ? null : new { system = "http://imed.local/requisition", value = sr.Requisition },
                     priority = sr.Priority,
+                    authoredOn = sr.AuthoredOn,
                     code = new
                     {
                         concept = new
                         {
-                            coding = sr.Loinc is null ? null : new[]
-                            {
-                                new { system = "http://loinc.org", code = sr.Loinc, display = sr.CodeText }
-                            },
+                            coding = CodingsOf(sr),
                             text = sr.CodeText
                         }
                     }
@@ -485,6 +526,122 @@ public sealed class HapiMockServer : IDisposable
     }
 
     /// <summary>Búsqueda de ServiceRequest por encounter/status (recepción por requisición + colas, R1/R3/R5).</summary>
+    /// <summary>
+    /// PUT de una orden: reemplaza la fila conservando el id, como haría HAPI al versionar.
+    /// Es lo que usa la promoción <c>draft → active</c>, del cliente o de la reconciliación.
+    /// </summary>
+    private void SetupServiceRequestUpdate()
+    {
+        _server
+            .Given(Request.Create()
+                .WithPath(new WireMock.Matchers.RegexMatcher("^/fhir/ServiceRequest/[a-zA-Z0-9-]+$"))
+                .UsingPut())
+            .RespondWith(Response.Create().WithCallback(req =>
+            {
+                var id = req.Path.Split('/').Last();
+                if (!_serviceRequests.TryGetValue(id, out var previo))
+                {
+                    return JsonMessage(HttpStatusCode.NotFound, new { error = "not found" });
+                }
+
+                var root = JsonDocument.Parse(req.Body ?? "{}").RootElement;
+                var status = root.TryGetProperty("status", out var st) ? st.GetString() ?? previo.Status : previo.Status;
+                var (loinc, localCode, localSystem, codeText) = ParseLabCoding(root);
+
+                _serviceRequests[id] = previo with
+                {
+                    Status = status,
+                    Loinc = loinc,
+                    LocalCode = localCode,
+                    LocalSystem = localSystem,
+                    CodeText = codeText ?? previo.CodeText,
+                    // Se guarda lo que venga en el cuerpo, como HAPI. El gateway reescribe
+                    // `authoredOn` en cada PUT, así que promover una orden le cambia la fecha de
+                    // emisión — está anotado como pendiente, y el mock tiene que reflejarlo para
+                    // que se pueda ver cuando se arregle.
+                    AuthoredOn = root.TryGetProperty("authoredOn", out var ao) ? ao.GetString() : previo.AuthoredOn,
+                };
+                return JsonMessage(HttpStatusCode.OK, new { resourceType = "ServiceRequest", id, meta = new { versionId = "2" } });
+            }));
+    }
+
+    /// <summary>
+    /// <c>GET /fhir/Encounter/{id}</c>. Devuelve solo el estado, que es lo único que la
+    /// reconciliación necesita para saber si la consulta ya terminó.
+    /// </summary>
+    private void SetupEncounterGet()
+    {
+        _server
+            .Given(Request.Create()
+                .WithPath(new WireMock.Matchers.RegexMatcher("^/fhir/Encounter/[a-zA-Z0-9-]+$"))
+                .UsingGet())
+            .RespondWith(Response.Create().WithCallback(req =>
+            {
+                var id = req.Path.Split('/').Last();
+                return _encounterStates.TryGetValue(id, out var status)
+                    ? JsonMessage(HttpStatusCode.OK, new { resourceType = "Encounter", id, status })
+                    : JsonMessage(HttpStatusCode.NotFound, new { error = "not found" });
+            }));
+    }
+
+    /// <summary>Declara el estado de un Encounter para las pruebas que dependen de él.</summary>
+    public void RegisterEncounter(string encounterFhirId, string status) =>
+        _encounterStates[encounterFhirId] = status;
+
+    /// <summary>Extrae el coding de una orden repartido por sistema, como lo guarda HAPI.</summary>
+    private static (string? Loinc, string? LocalCode, string? LocalSystem, string? CodeText) ParseLabCoding(
+        JsonElement root)
+    {
+        string? loinc = null, localCode = null, localSystem = null, codeText = null;
+        if (!root.TryGetProperty("code", out var code) || !code.TryGetProperty("concept", out var concept))
+        {
+            return (loinc, localCode, localSystem, codeText);
+        }
+
+        if (concept.TryGetProperty("coding", out var coding) && coding.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var c in coding.EnumerateArray())
+            {
+                var sys = c.TryGetProperty("system", out var sEl) ? sEl.GetString() : null;
+                var val = c.TryGetProperty("code", out var cc) ? cc.GetString() : null;
+                if (string.IsNullOrWhiteSpace(val)) { continue; }
+                if (string.Equals(sys, "http://loinc.org", StringComparison.OrdinalIgnoreCase))
+                {
+                    loinc = val;
+                }
+                else
+                {
+                    localCode ??= val;
+                    localSystem ??= sys;
+                }
+            }
+        }
+        if (concept.TryGetProperty("text", out var t))
+        {
+            codeText = t.GetString();
+        }
+        return (loinc, localCode, localSystem, codeText);
+    }
+
+    /// <summary>
+    /// Devuelve el coding tal como se guardó: LOINC si el examen lo tiene, más el código propio
+    /// con su sistema. Es lo que hace HAPI, y lo que permite que una prueba note si el gateway
+    /// republica un código local bajo <c>http://loinc.org</c>.
+    /// </summary>
+    private static object[]? CodingsOf(FakeServiceRequest sr)
+    {
+        var codings = new List<object>();
+        if (sr.Loinc is not null)
+        {
+            codings.Add(new { system = "http://loinc.org", code = sr.Loinc, display = sr.CodeText });
+        }
+        if (sr.LocalCode is not null)
+        {
+            codings.Add(new { system = sr.LocalSystem ?? "http://imed.local/panel", code = sr.LocalCode, display = sr.CodeText });
+        }
+        return codings.Count == 0 ? null : codings.ToArray();
+    }
+
     private void SetupServiceRequestSearch()
     {
         _server
@@ -514,14 +671,12 @@ public sealed class HapiMockServer : IDisposable
                         // que filtran por requisición —cola de pendientes, resolve— la descartaban.
                         requisition = sr.Requisition is null ? null : new { system = "http://imed.local/requisition", value = sr.Requisition },
                         priority = sr.Priority,
+                        authoredOn = sr.AuthoredOn,
                         code = new
                         {
                             concept = new
                             {
-                                coding = sr.Loinc is null ? null : new[]
-                                {
-                                    new { system = "http://loinc.org", code = sr.Loinc, display = sr.CodeText }
-                                },
+                                coding = CodingsOf(sr),
                                 text = sr.CodeText
                             }
                         }
@@ -1000,7 +1155,20 @@ public sealed class HapiMockServer : IDisposable
 
     private sealed record FakeServiceRequest(
         string Id, string PatientFhirId, string? Loinc, string? CodeText, string? Priority, string Status, string Intent,
-        string? Encounter = null, string? Requisition = null);
+        string? Encounter = null, string? Requisition = null,
+        /// <summary>
+        /// Código propio de la clínica, con su sistema. El mock guardaba solo <c>coding[0]</c> y al
+        /// leer emitía <c>http://loinc.org</c> fijo — o sea que reproducía el mismo error que el
+        /// cliente real tenía, y por eso ninguna prueba podía verlo. Un doble que miente sobre la
+        /// forma del recurso no sirve para probar la lectura de esa forma.
+        /// </summary>
+        string? LocalCode = null, string? LocalSystem = null,
+        /// <summary>
+        /// El gateway siempre lo escribe (<c>BuildLabOrderPayload</c>), así que una orden real
+        /// nunca llega sin él. El mock lo omitía, y con eso cualquier regla que dependa de la edad
+        /// de la orden —como el margen de gracia de la reconciliación— quedaba sin poder probarse.
+        /// </summary>
+        string? AuthoredOn = null);
 
     private sealed record FakeObservation(
         string Id, string PatientFhirId, string? Loinc, string? CodeText, double? ValueNumeric, string? Unit,

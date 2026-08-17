@@ -33,6 +33,7 @@ using IMed.Api.Infrastructure.Hapi;
 using IMed.Api.Infrastructure.Identifiers;
 using IMed.Api.Infrastructure.Keycloak;
 using IMed.Api.Infrastructure.Notifications;
+using IMed.Api.Infrastructure.Lab;
 using IMed.Api.Infrastructure.Outbox;
 using IMed.Api.Infrastructure.Pdf;
 using IMed.Api.Infrastructure.Persistence;
@@ -191,6 +192,8 @@ public static class DependencyInjection
     private static IServiceCollection AddOutbox(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<OutboxProcessorOptions>(configuration.GetSection(OutboxProcessorOptions.SectionName));
+        services.Configure<LabOrderReconciliationOptions>(
+            configuration.GetSection(LabOrderReconciliationOptions.SectionName));
 
         // Dispatchers: uno por OutboxEvent.Type. Registrar nuevos acá.
         services.AddScoped<IOutboxDispatcher, OrganizationBootstrappedDispatcher>();
@@ -200,6 +203,11 @@ public static class DependencyInjection
         services.AddScoped<IOutboxDispatcher, TeamRoleChangedDispatcher>();
 
         services.AddHostedService<OutboxProcessor>();
+
+        // Red de seguridad de las órdenes de laboratorio. La promoción `draft → active` la hace el
+        // navegador después del cierre, fuera de la transacción: si se pierde, la orden nunca llega
+        // al laboratorio y nadie se entera. Esto la repara sin importar la causa.
+        services.AddHostedService<LabOrderReconciliation>();
         return services;
     }
 

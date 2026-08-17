@@ -65,9 +65,11 @@ public sealed record LabOrderDto(
     // F1: disponibilidad en la clínica — "in-house" | "send-out" | "partial" | null (desconocida).
     string? Availability = null)
 {
+    // `LocalCode` salía en null y el código del panel se perdía en el viaje de ida: el cliente
+    // recibía solo `loincCode` y devolvía ese valor como LOINC en el guardado siguiente.
     public static LabOrderDto FromSnapshot(LabOrderSnapshot s) => new(
         s.Id, s.PatientFhirId, s.EncounterFhirId, s.RequesterPractitionerId, s.Status, s.Intent,
-        s.LoincCode, null, s.CodeText, s.CodeDisplay, s.Priority, s.OccurrenceDateTime,
+        s.LoincCode, s.LocalCode, s.CodeText, s.CodeDisplay, s.Priority, s.OccurrenceDateTime,
         s.ReasonText, s.Note, s.Requisition, s.AuthoredOn);
 }
 
@@ -201,7 +203,12 @@ internal static class LabOrderListMapper
         var list = new List<LabOrderDto>(rows.Count);
         foreach (var s in rows)
         {
-            var availability = await LabAvailability.ClassifyAsync(catalog, orgId, s.LoincCode, ct);
+            // `LoincCode ?? LocalCode`, igual que al crear la orden. Antes bastaba con mirar
+            // `LoincCode` porque el lector metía ahí cualquier coding; ahora que el código del
+            // panel viaja en su propio campo, quedarse solo con LOINC dejaría sin disponibilidad
+            // a todos los paneles propios de la clínica — que son la mayoría.
+            var availability = await LabAvailability.ClassifyAsync(
+                catalog, orgId, s.LoincCode ?? s.LocalCode, ct);
             list.Add(LabOrderDto.FromSnapshot(s) with { Availability = availability });
         }
         return list;

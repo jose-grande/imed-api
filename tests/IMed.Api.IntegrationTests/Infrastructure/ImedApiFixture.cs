@@ -175,6 +175,10 @@ public sealed class ImedApiFactory : WebApplicationFactory<Program>
         // proxy ni la prueba. Un test que depende de una config ambiente no dice lo que dice.
         SetEnv("FhirGateway__Mode", "Shadow");
         SetEnv("FhirGateway__IntentMode", "Shadow");
+        // El reconciliador de órdenes se apaga como worker: sus pruebas lo invocan a mano para no
+        // depender del temporizador, y dejarlo barriendo en segundo plano haría que promoviera
+        // órdenes de otras pruebas a destiempo.
+        SetEnv("LabOrderReconciliation__Enabled", "false");
         SetEnv("Logging__LogLevel__Default", "Warning");
         SetEnv("Logging__LogLevel__IMed.Api", "Debug");
 

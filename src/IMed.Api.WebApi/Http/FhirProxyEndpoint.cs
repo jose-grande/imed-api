@@ -6,6 +6,7 @@ using System.Text.Json;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.FhirGateway;
 using IMed.Api.Domain.Auditing;
+using IMed.Api.Domain.Authorization;
 using IMed.Api.Infrastructure.Hapi;
 using IMed.Api.Infrastructure.Persistence;
 using Microsoft.Extensions.Options;
@@ -148,6 +149,22 @@ public static class FhirProxyEndpoint
             // El cliente no puede traer `_elements` propio: no está declarado en ningún intent, así
             // que una consulta que lo mande ni siquiera llega hasta acá.
             context.Request.QueryString = context.Request.QueryString.Add("_elements", elements);
+        }
+
+        // HAPI reutiliza el resultado de una búsqueda idéntica durante 60 segundos
+        // (`reuse_cached_search_results_millis`, su default). En un expediente clínico eso es un
+        // problema de seguridad y no de rendimiento: el médico agrega una alergia, la pantalla
+        // vuelve a buscar dentro del minuto y recibe la lista vieja — sin error, sin señal.
+        //
+        // Se descubrió porque las órdenes de laboratorio quedaban en `draft`: al cerrar la consulta
+        // se buscan para promoverlas, y HAPI contestaba con el resultado que había cacheado cuando
+        // la pantalla se abrió y todavía no había órdenes. Cerrar rápido fallaba siempre, tardar
+        // más de un minuto funcionaba, y por eso parecía intermitente.
+        //
+        // Solo aplica a búsquedas: la lectura por id no pasa por esa caché.
+        if (descriptor.Verb == FhirVerb.Search)
+        {
+            context.Request.Headers.CacheControl = "no-cache";
         }
 
         // Server-Timing desde el día uno: sin medir, la discusión sobre el costo del hop es una

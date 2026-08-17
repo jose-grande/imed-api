@@ -241,6 +241,28 @@ public interface IHapiFhirClient
         CancellationToken cancellationToken = default);
 
     /// <summary>Órdenes de laboratorio activas de la partición (cola de recepción pendiente, R1-F5).</summary>
+    /// <summary>
+    /// Órdenes de laboratorio en <c>draft</c> de una organización.
+    ///
+    /// <para>La usa la reconciliación: una orden en borrador cuyo encuentro ya se cerró es una
+    /// orden que el médico pidió y que el laboratorio nunca va a ver.</para>
+    /// </summary>
+    Task<IReadOnlyList<LabOrderSnapshot>> SearchDraftLabOrdersAsync(
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Estado de un <c>Encounter</c>, o null si no existe.
+    ///
+    /// <para>Se devuelve el string crudo y no un enum: lo único que se decide con esto es si la
+    /// consulta ya terminó, y encerrar el vocabulario de FHIR en un enum propio obliga a tocar
+    /// código cada vez que aparece un estado nuevo que no nos importa.</para>
+    /// </summary>
+    Task<string?> GetEncounterStatusAsync(
+        string encounterFhirId,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<LabOrderSnapshot>> SearchActiveLabOrdersAsync(
         string partitionName,
         CancellationToken cancellationToken = default);
@@ -434,7 +456,22 @@ public sealed record LabOrderSnapshot(
     string? RequesterPractitionerId,
     DateTimeOffset? AuthoredOn,
     // requisition.value — agrupa las órdenes de una misma "orden de laboratorio".
-    string? Requisition = null);
+    string? Requisition = null,
+    /// <summary>
+    /// Código del panel propio de la clínica, cuando la orden trae uno.
+    ///
+    /// <para>Va aparte de <see cref="LoincCode"/> a propósito. Las órdenes llevan coding dual
+    /// —LOINC si el examen lo tiene, más el código local del panel— y leer ambos como si fueran
+    /// LOINC hace que el siguiente guardado escriba <c>CBC</c> bajo <c>http://loinc.org</c>. Un
+    /// código local publicado como si fuera un estándar internacional es un dato falso en el
+    /// expediente, y de los que rompen la interoperabilidad justo cuando se la necesita.</para>
+    /// </summary>
+    string? LocalCode = null,
+    /// <summary>
+    /// Sistema del código local. Va junto al código porque quien reescriba la orden —la
+    /// reconciliación, sin cliente que se lo dicte— tiene que poder devolverla tal cual estaba.
+    /// </summary>
+    string? LocalSystem = null);
 
 /// <summary>
 /// Datos para crear un <c>Specimen</c> FHIR R5 (recepción, LIS-3).

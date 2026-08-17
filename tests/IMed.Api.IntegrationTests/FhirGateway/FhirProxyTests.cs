@@ -344,6 +344,25 @@ public sealed class FhirProxyTests(ImedApiFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LasBusquedasLleganAHapiPidiendoNoUsarCache()
+    {
+        // HAPI reutiliza el resultado de una búsqueda idéntica durante 60 segundos. En un
+        // expediente clínico eso no es una optimización sino un riesgo: el patrón normal de la
+        // aplicación es escribir y volver a leer enseguida, y sin este header la segunda lectura
+        // devuelve el conjunto anterior —sin error y sin señal—.
+        //
+        // Costó un bug real: las órdenes de laboratorio quedaban en `draft` porque el cierre de
+        // consulta las buscaba para promoverlas y recibía el resultado cacheado de cuando la
+        // pantalla se abrió y todavía no había ninguna.
+        var (client, _, _) = await AuthedAsync("practitioner");
+
+        await client.GetAsync("/fhir/Patient?name=walter");
+
+        fixture.Hapi.LastRequestHadNoCache("/fhir/Patient").Should().BeTrue(
+            "sin esto el gateway lee datos clínicos viejos y nada falla");
+    }
+
+    [Fact]
     public async Task ElProxyRespondeConServerTiming()
     {
         var (client, _, _) = await AuthedAsync("practitioner");

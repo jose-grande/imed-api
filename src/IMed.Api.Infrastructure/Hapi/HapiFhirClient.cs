@@ -2104,6 +2104,50 @@ public sealed class HapiFhirClient(
         return await SearchLabOrdersAsync(url, partitionName, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<LabOrderSnapshot>> SearchDraftLabOrdersAsync(
+        string partitionName,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureBearerAsync(cancellationToken);
+
+        var url = $"ServiceRequest?category={Uri.EscapeDataString(SnomedSystem + "|" + LabCategoryCode)}"
+                  + "&status=draft"
+                  + "&_sort=authored"
+                  + "&_count=200";
+        return await SearchLabOrdersAsync(url, partitionName, cancellationToken);
+    }
+
+    public async Task<string?> GetEncounterStatusAsync(
+        string encounterFhirId,
+        string partitionName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(encounterFhirId))
+        {
+            throw new ArgumentException("encounterFhirId es obligatorio.", nameof(encounterFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Get, $"Encounter/{Uri.EscapeDataString(encounterFhirId)}?_elements=status");
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        resp.EnsureSuccessStatusCode();
+
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return doc.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String
+            ? st.GetString()
+            : null;
+    }
+
     private async Task<IReadOnlyList<LabOrderSnapshot>> SearchLabOrdersAsync(
         string url, string partitionName, CancellationToken cancellationToken)
     {
@@ -2112,6 +2156,18 @@ public sealed class HapiFhirClient(
         {
             httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
         }
+
+        // HAPI reutiliza el resultado de una búsqueda idéntica durante 60 segundos
+        // (`reuse_cached_search_results_millis`, su default). Estas búsquedas son
+        // lectura-después-de-escritura y con esa caché devuelven un conjunto viejo.
+        //
+        // El síntoma real: al cerrar la consulta se buscan las órdenes del encuentro para
+        // promoverlas de `draft` a `active`. La pantalla ya había hecho esa misma búsqueda al
+        // abrirse —cuando todavía no había órdenes—, así que HAPI contestaba con aquel resultado
+        // vacío y no había nada que promover. La orden quedaba en `draft`, el laboratorio nunca la
+        // recibía, y el médico leía "Consulta cerrada". Cerrar rápido fallaba siempre; tardar más
+        // de un minuto funcionaba, que es lo que lo hacía parecer intermitente.
+        httpRequest.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
 
         using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
         if (!resp.IsSuccessStatusCode)
@@ -3279,6 +3335,8 @@ public sealed class HapiFhirClient(
         }
 
         string? loincCode = null;
+        string? localCode = null;
+        string? localSystem = null;
         string? codeDisplay = null;
         string? codeText = null;
         if (doc.TryGetProperty("code", out var codeEl))
@@ -3300,17 +3358,38 @@ public sealed class HapiFhirClient(
             if (conceptEl is { } concept)
             {
                 if (concept.TryGetProperty("coding", out var codingEl)
-                    && codingEl.ValueKind == JsonValueKind.Array
-                    && codingEl.GetArrayLength() > 0)
+                    && codingEl.ValueKind == JsonValueKind.Array)
                 {
-                    var first = codingEl[0];
-                    if (first.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String)
+                    // Se reparte por `system`, no por posición. Las órdenes llevan coding dual
+                    // —LOINC si el examen lo tiene, más el código local del panel—, y tomar
+                    // `coding[0]` como LOINC hacía que un panel sin LOINC volviera etiquetado como
+                    // estándar: el guardado siguiente escribía `CBC` bajo `http://loinc.org`.
+                    foreach (var coding in codingEl.EnumerateArray())
                     {
-                        loincCode = c.GetString();
-                    }
-                    if (first.TryGetProperty("display", out var d) && d.ValueKind == JsonValueKind.String)
-                    {
-                        codeDisplay = d.GetString();
+                        var system = coding.TryGetProperty("system", out var sysEl)
+                            && sysEl.ValueKind == JsonValueKind.String ? sysEl.GetString() : null;
+                        var value = coding.TryGetProperty("code", out var c)
+                            && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+                        if (string.IsNullOrWhiteSpace(value))
+                        {
+                            continue;
+                        }
+
+                        var display = coding.TryGetProperty("display", out var d)
+                            && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
+
+                        if (string.Equals(system, LoincSystem, StringComparison.OrdinalIgnoreCase))
+                        {
+                            loincCode = value;
+                            codeDisplay ??= display;
+                        }
+                        else
+                        {
+                            // Cualquier sistema que no sea LOINC es código propio de la clínica.
+                            localCode ??= value;
+                            localSystem ??= system;
+                            codeDisplay ??= display;
+                        }
                     }
                 }
                 if (concept.TryGetProperty("text", out var txtEl) && txtEl.ValueKind == JsonValueKind.String)
@@ -3392,7 +3471,9 @@ public sealed class HapiFhirClient(
             Note: note,
             RequesterPractitionerId: requesterPractitionerId,
             AuthoredOn: authoredOn,
-            Requisition: requisition);
+            Requisition: requisition,
+            LocalCode: localCode,
+            LocalSystem: localSystem);
     }
 
     /// <summary>
