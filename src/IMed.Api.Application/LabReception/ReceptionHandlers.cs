@@ -10,17 +10,21 @@ namespace IMed.Api.Application.LabReception;
 internal static class LabRouting
 {
     /// <summary>
-    /// Resuelve el enrutamiento de una orden por su LOINC: in-house si la prueba
-    /// está en el catálogo de la sede y ofrecida; send-out en caso contrario.
+    /// Resuelve el enrutamiento de una orden por su código —LOINC o el propio de la clínica—:
+    /// in-house si la prueba está en el catálogo de la sede y ofrecida; send-out en caso contrario.
+    ///
+    /// <para>Acepta las dos formas porque la orden trae la que tenga: mirar solo LOINC deja fuera
+    /// del catálogo a cualquier prueba que no lo tenga, y "fuera del catálogo" acá significa
+    /// mandar al paciente a un laboratorio externo.</para>
     /// </summary>
     public static async Task<(OrderRouting Routing, LabTestDefinition? Test)> ResolveAsync(
-        ILabCatalogRepository catalog, Guid orgId, string? loincCode, CancellationToken ct)
+        ILabCatalogRepository catalog, Guid orgId, string? codeOrLoinc, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(loincCode))
+        if (string.IsNullOrWhiteSpace(codeOrLoinc))
         {
             return (OrderRouting.SendOut, null);
         }
-        var test = await catalog.GetTestByLoincAsync(orgId, loincCode, ct);
+        var test = await catalog.GetTestByCodeOrLoincAsync(orgId, codeOrLoinc, ct);
         if (test is null || !test.Active)
         {
             return (OrderRouting.SendOut, null);

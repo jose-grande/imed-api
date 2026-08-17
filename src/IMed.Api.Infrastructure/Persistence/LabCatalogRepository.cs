@@ -66,6 +66,25 @@ public sealed class LabCatalogRepository(AppDbContext db, TimeProvider timeProvi
         return rows.FirstOrDefault();
     }
 
+    public async Task<LabTestDefinition?> GetTestByCodeOrLoincAsync(
+        Guid? organizationId, string codeOrLoinc, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(codeOrLoinc))
+        {
+            return null;
+        }
+        var code = codeOrLoinc.Trim();
+        var rows = await db.LabTests.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && (x.LoincCode == code || x.Code == code))
+            .ToListAsync(cancellationToken);
+
+        // LOINC primero, y explícito: el código local de una prueba puede coincidir con el LOINC de
+        // otra, y sin este orden la que gane dependería del orden en que Postgres devuelva las filas
+        // —o sea, del plan de ejecución—. Un enrutamiento que cambia solo porque cambió el plan es
+        // de los que no se reproducen cuando alguien los reporta.
+        return rows.FirstOrDefault(x => x.LoincCode == code) ?? rows.FirstOrDefault();
+    }
+
     public Task<bool> TestCodeExistsAsync(Guid? organizationId, string code, CancellationToken cancellationToken = default)
     {
         var c = code.Trim();

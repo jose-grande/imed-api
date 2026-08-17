@@ -91,6 +91,26 @@ public sealed class LabReceptionTests(ImedApiFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UnaPruebaSuelta_seResuelvePorElCodigoDeLaClinica_noSoloPorLoinc()
+    {
+        // Los paneles resolvían por código local y las pruebas sueltas no. La asimetría queda
+        // tapada mientras toda prueba del catálogo tenga LOINC —hoy lo tienen las 222 sembradas—,
+        // así que la prueba ordena por el código propio de la clínica, que es la forma que sí
+        // distingue los dos caminos. Cuando entre un catálogo con pruebas sin LOINC, esa orden
+        // habría terminado referida a un laboratorio externo.
+        var client = await AuthedClient();
+        var enc = $"enc-{Guid.NewGuid():N}";
+        var srId = fixture.Hapi.SeedServiceRequest(
+            "pat-suelta-1", loinc: null, "Glucosa", encounter: enc, requisition: enc,
+            localCode: "GLU", localSystem: "http://imed.local/test");
+
+        var view = await (await client.GetAsync($"/api/lab/reception/order/{srId}"))
+            .Content.ReadFromJsonAsync<ReceptionOrderView>();
+
+        view!.Routing.Should().Be("InHouse", "GLU es el código de una prueba que la clínica sí hace");
+    }
+
+    [Fact]
     public async Task SendOut_noGeneraEspecimen()
     {
         var client = await AuthedClient();

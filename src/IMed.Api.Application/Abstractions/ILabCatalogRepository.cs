@@ -14,8 +14,22 @@ public interface ILabCatalogRepository
         Guid? organizationId, string? term, string? department, bool activeOnly, int limit,
         CancellationToken cancellationToken = default);
     Task<LabTestDefinition?> GetTestByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    /// <summary>Resuelve una prueba por código LOINC (override de org sobre global). Usada por el enrutamiento (LIS-3).</summary>
+    /// <summary>
+    /// Resuelve una prueba por código LOINC estricto. Para resolver una **orden** usá
+    /// <see cref="GetTestByCodeOrLoincAsync"/>: la orden puede traer solo el código de la clínica.
+    /// Esta queda para lo que sí es LOINC de verdad — el código de una <c>Observation</c>.
+    /// </summary>
     Task<LabTestDefinition?> GetTestByLoincAsync(Guid? organizationId, string loincCode, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Prueba cuyo <c>Code</c> o <c>LoincCode</c> coincide — la simétrica de
+    /// <see cref="GetPanelByCodeOrLoincAsync"/> para pruebas sueltas.
+    ///
+    /// <para>Existe porque los paneles se resolvían por código local y las pruebas no, y esa
+    /// asimetría es invisible mientras toda prueba tenga LOINC. Cuando entre un catálogo con
+    /// pruebas sin LOINC —el del cliente, por ejemplo— una orden de prueba suelta se habría ido
+    /// a "no está en el catálogo de la sede", que es como se veía el mismo defecto en paneles.</para>
+    /// </summary>
+    Task<LabTestDefinition?> GetTestByCodeOrLoincAsync(Guid? organizationId, string codeOrLoinc, CancellationToken cancellationToken = default);
     Task<bool> TestCodeExistsAsync(Guid? organizationId, string code, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LabTestDefinition>> GetTestsByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default);
     Task AddTestAsync(LabTestDefinition test, CancellationToken cancellationToken = default);
