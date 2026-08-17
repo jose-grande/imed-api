@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using FluentAssertions;
 using IMed.Api.Application.LabOrders;
 using IMed.Api.IntegrationTests.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace IMed.Api.IntegrationTests.LabOrders;
@@ -146,6 +147,45 @@ public sealed class LabOrdersGatewayTests(ImedApiFixture fixture) : IAsyncLifeti
 
         despues.Status.Should().Be("active");
         despues.AuthoredOn.Should().Be(emitida, "la orden se emitió cuando se emitió, no cuando se promovió");
+    }
+
+    [Fact]
+    public async Task ElCorrelativoDeLaTarde_llevaLaFechaDeHoy_noLaDeManana()
+    {
+        // Prueba de cableado: `ClinicClockTests` ya fija la semántica del reloj; esto verifica que
+        // el handler lo use de verdad. Sin ella, inyectar el reloj y seguir calculando con `UtcNow`
+        // compilaría igual.
+        //
+        // 2026-08-17T02:00Z son las 20:00 del 16 en Tegucigalpa.
+        await Task.Delay(500);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId);
+        var token = fixture.Keycloak.IssueUserToken(
+            userId, organizationId: Guid.NewGuid().ToString(), realmRoles: ["org_admin"]);
+
+        using var host = fixture.Factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+                services.AddSingleton<TimeProvider>(
+                    new RelojFijo(new DateTimeOffset(2026, 8, 17, 2, 0, 0, TimeSpan.Zero)))));
+
+        using var client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var resp = await client.PostAsJsonAsync("/api/lab-orders/allocate-number", new { });
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var numero = (await resp.Content.ReadFromJsonAsync<AllocatedNumber>())!.Requisition;
+
+        numero.Should().StartWith("ORD-20260816-",
+            "a las 20:00 del 16 en Honduras todavía es el 16, y ese número va en el papel del paciente");
+    }
+
+    private sealed record AllocatedNumber(string Requisition);
+
+    private sealed class RelojFijo(DateTimeOffset instante) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => instante;
     }
 
     [Fact]

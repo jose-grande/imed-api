@@ -126,6 +126,7 @@ public sealed class ReceiveRequisitionHandler(
     IUserPractitionerAssignmentRepository assignments,
     ILocationRepository locations,
     ResolveActiveLocationHandler activeLocation,
+    IClinicClock clock,
     TimeProvider timeProvider,
     ILogger<ReceiveRequisitionHandler> logger)
 {
@@ -198,7 +199,8 @@ public sealed class ReceiveRequisitionHandler(
 
             // Recepción: una muestra compartida por todas las órdenes del grupo (N:M).
             var now = timeProvider.GetUtcNow();
-            var day = DateOnly.FromDateTime(now.UtcDateTime);
+            // Día de la clínica para el correlativo; `now` sigue en UTC para el registro.
+            var day = clock.Today();
             var seq = await ops.NextAccessionSeqAsync(cmd.OrganizationId, locationId, day, ct);
             var accession = LabAccession.Build(cmd.OrganizationId, locationCode, day, seq);
 

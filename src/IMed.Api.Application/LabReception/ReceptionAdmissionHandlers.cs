@@ -94,7 +94,7 @@ public sealed class GetAwaitingAdmissionHandler(
 /// </summary>
 public sealed class CreateExternalOrderMultiHandler(
     IHapiFhirClient hapi, ILabOperationsRepository ops,
-    ResolveActiveLocationHandler activeLocation, TimeProvider timeProvider)
+    ResolveActiveLocationHandler activeLocation, IClinicClock clock)
 {
     public async Task<CreatedExternalOrderMulti> HandleAsync(CreateExternalOrderMultiCommand cmd, CancellationToken ct = default)
     {
@@ -118,7 +118,10 @@ public sealed class CreateExternalOrderMultiHandler(
             ?? await hapi.CreateExternalPractitionerAsync(
                 new ExternalPractitionerRequest(partition, cmd.RequesterName, cmd.RequesterIdentifier), ct);
 
-        var day = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        // El correlativo lleva la fecha adentro y se reinicia cada día: tiene que ser el día de la
+        // clínica. Con UTC, una admisión de la tarde salía con la fecha de mañana y el contador
+        // arrancado de nuevo.
+        var day = clock.Today();
         var locationId = await activeLocation.HandleAsync(cmd.OrganizationId, null, null, ct);
         var seq = await ops.NextOrderSeqAsync(cmd.OrganizationId, locationId, day, ct);
         var requisition = $"ORD-{day:yyyyMMdd}-{seq:D4}";

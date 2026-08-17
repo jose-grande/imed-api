@@ -14,6 +14,7 @@ public sealed class GenerateLabelsHandler(
     ILabOperationsRepository ops,
     ILocationRepository locations,
     ResolveActiveLocationHandler activeLocation,
+    IClinicClock clock,
     TimeProvider timeProvider)
 {
     public async Task<CollectionPlanDto?> HandleAsync(Guid orgId, string requisition, Guid? userId, CancellationToken ct = default)
@@ -25,7 +26,8 @@ public sealed class GenerateLabelsHandler(
         }
 
         var now = timeProvider.GetUtcNow();
-        var day = DateOnly.FromDateTime(now.UtcDateTime);
+        // El día del correlativo es el de la clínica; la marca de tiempo del evento sigue en UTC.
+        var day = clock.Today();
         var events = new List<CollectionEvent>();
 
         // El correlativo es por sede. La del plan manda —es donde se va a tomar la muestra—; si

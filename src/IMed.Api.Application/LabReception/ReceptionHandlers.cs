@@ -155,6 +155,7 @@ public sealed class ReceiveSpecimenHandler(
     IUserPractitionerAssignmentRepository assignments,
     ILocationRepository locations,
     ResolveActiveLocationHandler activeLocation,
+    IClinicClock clock,
     TimeProvider timeProvider,
     ILogger<ReceiveSpecimenHandler> logger)
 {
@@ -200,7 +201,9 @@ public sealed class ReceiveSpecimenHandler(
 
         // Recepción in-house: accession + Specimen + intake + evento + provenance.
         var now = timeProvider.GetUtcNow();
-        var day = DateOnly.FromDateTime(now.UtcDateTime);
+        // El número de accesión lleva la fecha adentro y su contador se reinicia cada día: va con
+        // el día de la clínica. `now` sigue siendo UTC para las marcas de tiempo del registro.
+        var day = clock.Today();
         var locationId = await activeLocation.HandleAsync(cmd.OrganizationId, cmd.UserId, null, ct);
         var locationCode = (await locations.GetAsync(cmd.OrganizationId, locationId, ct))?.Code;
         var seq = await ops.NextAccessionSeqAsync(cmd.OrganizationId, locationId, day, ct);
