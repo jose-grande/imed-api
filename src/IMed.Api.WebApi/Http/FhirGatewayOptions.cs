@@ -27,6 +27,20 @@ public sealed class FhirGatewayOptions
     /// </summary>
     public FhirGatewayMode Mode { get; set; } = FhirGatewayMode.Shadow;
 
+    /// <summary>
+    /// Modo de la clasificación por forma de consulta (SEC-4), independiente del anterior.
+    ///
+    /// <para><b>Por qué es un modo aparte.</b> El proxy ya está en <c>Enforce</c> y verificado con
+    /// tres pasadas de uso real. La clasificación por forma es nueva y toca <b>todas</b> las
+    /// lecturas, no un recurso: cualquier forma de consulta que el catálogo no haya previsto se
+    /// convertiría en un 403 en pantalla. Con un solo modo, ponerla en sombra habría obligado a
+    /// bajar también lo ya ganado.</para>
+    ///
+    /// <para>En sombra tampoco se aplica la proyección de identificación: sombra tiene que
+    /// significar "no cambia el comportamiento", y recortar campos lo cambia.</para>
+    /// </summary>
+    public FhirGatewayMode IntentMode { get; set; } = FhirGatewayMode.Shadow;
+
     /// <summary>Habilita el proxy. Apagado, `/fhir/**` no se sirve desde el gateway.</summary>
     public bool Enabled { get; set; } = true;
 }

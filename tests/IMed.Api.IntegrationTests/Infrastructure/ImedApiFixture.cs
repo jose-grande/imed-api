@@ -174,6 +174,7 @@ public sealed class ImedApiFactory : WebApplicationFactory<Program>
         // pasó a `Enforce`, la prueba del modo sombra empezó a fallar sin que nadie tocara ni el
         // proxy ni la prueba. Un test que depende de una config ambiente no dice lo que dice.
         SetEnv("FhirGateway__Mode", "Shadow");
+        SetEnv("FhirGateway__IntentMode", "Shadow");
         SetEnv("Logging__LogLevel__Default", "Warning");
         SetEnv("Logging__LogLevel__IMed.Api", "Debug");
 

@@ -54,6 +54,7 @@ public sealed class TestSigningKey : IDisposable
         Guid keycloakUserId,
         string? organizationId = null,
         string? subscriptionTier = null,
+        string? practitionerId = null,
         string clientId = "imed-clinical-web",
         string preferredUsername = "test.user",
         IEnumerable<string>? realmRoles = null,
@@ -92,6 +93,10 @@ public sealed class TestSigningKey : IDisposable
         if (!string.IsNullOrWhiteSpace(subscriptionTier))
         {
             claims.Add(new("subscription_tier", subscriptionTier));
+        }
+        if (!string.IsNullOrWhiteSpace(practitionerId))
+        {
+            claims.Add(new("practitioner_id", practitionerId));
         }
 
         var descriptor = new SecurityTokenDescriptor

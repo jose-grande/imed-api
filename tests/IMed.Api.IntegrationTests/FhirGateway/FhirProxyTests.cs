@@ -200,6 +200,149 @@ public sealed class FhirProxyTests(ImedApiFixture fixture) : IAsyncLifetime
             "en Enforce la política bloquea, que es el punto de salir de sombra");
     }
 
+    // ============================================================ SEC-4: la forma
+
+    private async Task<JsonElement> LastPhiPayloadAsync(Guid orgId)
+    {
+        using var scope = fixture.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var registro = await db.AppAuditLog.AsNoTracking()
+            .Where(x => x.OrganizationId == orgId && x.Category == FhirProxyEndpoint.PhiAuditCategory)
+            .OrderByDescending(x => x.OccurredAt)
+            .FirstAsync();
+
+        return JsonDocument.Parse(registro.Payload).RootElement;
+    }
+
+    [Fact]
+    public async Task LaBitacoraRegistraLaFormaReconocida()
+    {
+        var (client, orgId, _) = await AuthedAsync("practitioner");
+
+        await client.GetAsync("/fhir/Patient?name=walter");
+
+        var payload = await LastPhiPayloadAsync(orgId);
+        payload.GetProperty("intent").GetString().Should().Be("patient.find",
+            "sin el nombre de la forma, la bitácora dice que hubo una búsqueda de pacientes y no "
+            + "si fue para encontrar a alguien o para bajarse el padrón");
+    }
+
+    [Fact]
+    public async Task ElClaimDelPractitioner_llegaAlEvaluador()
+    {
+        // Prueba de cableado, no de política. Si el nombre del claim estuviera mal escrito, la
+        // agenda de todos los médicos se clasificaría como `agenda.all` sin que nada fallara: la
+        // auditoría quedaría mal y el permiso exigido sería más amplio de lo debido. En sombra eso
+        // es invisible.
+        await Task.Delay(400);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId, "medico", "medico@imed.test");
+        var orgId = Guid.NewGuid();
+        var token = fixture.Keycloak.IssueUserToken(
+            userId, organizationId: orgId.ToString(), practitionerId: "1902",
+            realmRoles: ["practitioner"]);
+        using var client = fixture.CreateClientWithToken(token);
+
+        await client.GetAsync("/fhir/Appointment?actor=Practitioner/1902&_count=100");
+
+        var payload = await LastPhiPayloadAsync(orgId);
+        payload.GetProperty("intent").GetString().Should().Be("agenda.mine");
+    }
+
+    [Fact]
+    public async Task LaBitacoraRegistraLasEntradasDelBundle()
+    {
+        var (client, orgId, _) = await AuthedAsync("org_admin");
+
+        const string bundle = """
+        {"resourceType":"Bundle","type":"transaction","entry":[
+          {"request":{"method":"POST","url":"Condition"}},
+          {"request":{"method":"PUT","url":"Appointment/appt-1"}}
+        ]}
+        """;
+
+        await client.PostAsync("/fhir",
+            new StringContent(bundle, System.Text.Encoding.UTF8, "application/fhir+json"));
+
+        var payload = await LastPhiPayloadAsync(orgId);
+        var entries = payload.GetProperty("entries").EnumerateArray()
+            .Select(e => e.GetString()).ToList();
+
+        entries.Should().HaveCount(2, "antes de esto el registro decía 'Create:Bundle' y nada más");
+        entries.Should().Contain(e => e!.Contains("Condition"));
+    }
+
+    [Fact]
+    public async Task LaFormaEnSombra_noBloquea_mientrasLaListaBlancaSiBloquea()
+    {
+        // La prueba que sostiene el diseño de dos modos. Con el proxy en Enforce y la clasificación
+        // en sombra: lo que niega la lista blanca devuelve 403, y lo que niega la forma pasa y
+        // queda anotado. Sin la distinción de etapa habría que elegir entre bloquear las dos cosas
+        // o ninguna.
+        await Task.Delay(500);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId, "admin", "admin@imed.test");
+        var orgId = Guid.NewGuid();
+        var token = fixture.Keycloak.IssueUserToken(
+            userId, organizationId: orgId.ToString(), realmRoles: ["org_admin"]);
+
+        using var host = fixture.Factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.Configure<FhirGatewayOptions>(o =>
+            {
+                o.Mode = FhirGatewayMode.Enforce;
+                o.IntentMode = FhirGatewayMode.Shadow;
+            })));
+
+        using var client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        // Sin forma declarada: `Schedule` está en la lista blanca de SEC-3, así que solo lo frena
+        // la puerta 7 — que está en sombra.
+        var forma = await client.GetAsync("/fhir/Schedule?date=ge2026-01-01");
+        forma.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
+            "la clasificación por forma todavía observa, no bloquea");
+
+        var payload = await LastPhiPayloadAsync(orgId);
+        payload.GetProperty("allowed").GetBoolean().Should().BeFalse();
+        payload.GetProperty("stage").GetString().Should().Be("Intent");
+
+        // Fuera de la lista blanca: lo frena la puerta 6, que sí bloquea.
+        var listaBlanca = await client.GetAsync("/fhir/Media/m-1");
+        listaBlanca.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "poner SEC-4 en sombra no puede aflojar lo que SEC-3 ya bloqueaba");
+    }
+
+    [Fact]
+    public async Task EnEnforce_laProyeccionRecortaLaConsultaSaliente()
+    {
+        await Task.Delay(500);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId, "recepcion", "recepcion@imed.test");
+        var orgId = Guid.NewGuid();
+        var token = fixture.Keycloak.IssueUserToken(
+            userId, organizationId: orgId.ToString(), realmRoles: ["auxiliar"]);
+
+        using var host = fixture.Factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.Configure<FhirGatewayOptions>(o =>
+            {
+                o.Mode = FhirGatewayMode.Enforce;
+                o.IntentMode = FhirGatewayMode.Enforce;
+            })));
+
+        using var client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        (await client.GetAsync("/fhir/Patient?name=walter")).StatusCode
+            .Should().NotBe(HttpStatusCode.Forbidden, "recepción tiene que poder encontrar al paciente");
+
+        // Y el padrón entero, no.
+        (await client.GetAsync("/fhir/Patient?_count=50&_offset=0")).StatusCode
+            .Should().Be(HttpStatusCode.Forbidden,
+                "buscar obliga a saber a quién buscás; enumerar no");
+    }
+
     [Fact]
     public async Task ElProxyRespondeConServerTiming()
     {

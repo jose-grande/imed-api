@@ -99,9 +99,22 @@ public static class FhirProxyEndpoint
 
         var roles = context.User.FindAll("roles").Select(c => c.Value).ToList();
         var permissions = await resolver.ResolveAsync(orgId.Value, roles);
-        var decision = tooLarge ?? await evaluator.EvaluateAsync(orgId.Value, permissions, descriptor, body);
 
-        var mode = gatewayOptions.Value.Mode;
+        // El Practitioner del llamante sale del token y no de la base. El claim lo poblamos
+        // nosotros por el outbox contra la admin API de Keycloak, y viaja firmado: no es un dato
+        // que el cliente pueda inventar. Vacío —perfil sin completar— hace que los intents que
+        // exigen "tu propio profesional" no encajen, y la consulta cae al general, que pide
+        // lectura amplia. Es el lado correcto para equivocarse.
+        var caller = new FhirCallerContext(
+            orgId.Value,
+            ParseSub(context.User),
+            permissions,
+            context.User.FindFirstValue("practitioner_id") is { Length: > 0 } p ? p : null);
+
+        var decision = tooLarge ?? await evaluator.EvaluateAsync(caller, descriptor, body);
+
+        var options = gatewayOptions.Value;
+        var mode = decision.Stage == FhirDecisionStage.Intent ? options.IntentMode : options.Mode;
         var blocked = !decision.Allowed && mode == FhirGatewayMode.Enforce;
 
         await AuditAsync(db, context, orgId.Value, descriptor, decision, mode, timeProvider);
@@ -121,6 +134,20 @@ public static class FhirProxyEndpoint
                 await context.Response.WriteAsJsonAsync(Problem(decision.Reason ?? "Acceso no permitido."));
                 return;
             }
+        }
+
+        // Recorte de identificación. Se aplica reescribiendo la consulta saliente y no filtrando la
+        // respuesta: filtrar obligaría a bufferear todo lo que HAPI devuelve, y el reenvío dejaría
+        // de ser streaming para todos los requests por proteger uno.
+        //
+        // Solo en Enforce. En sombra la clasificación mira y anota; si además recortara campos,
+        // "no cambia el comportamiento" dejaría de ser cierto y el modo no serviría para lo que
+        // sirve.
+        if (decision.Projection is { } elements && options.IntentMode == FhirGatewayMode.Enforce)
+        {
+            // El cliente no puede traer `_elements` propio: no está declarado en ningún intent, así
+            // que una consulta que lo mande ni siquiera llega hasta acá.
+            context.Request.QueryString = context.Request.QueryString.Add("_elements", elements);
         }
 
         // Server-Timing desde el día uno: sin medir, la discusión sobre el costo del hop es una
@@ -215,6 +242,16 @@ public static class FhirProxyEndpoint
                 allowed = decision.Allowed,
                 reason = decision.Reason,
                 mode = mode.ToString(),
+                // Qué puerta decidió. Sin esto no se puede separar en la bitácora lo que negó la
+                // lista blanca —que bloquea— de lo que negó la clasificación por forma, que
+                // todavía está en sombra.
+                stage = decision.Stage.ToString(),
+                // El nombre de la forma reconocida. Es lo que vuelve consultable la pregunta de
+                // ADR-007: `agenda.mine` y `patient.appointments` son la misma búsqueda de citas
+                // para el verbo, y la diferencia entre ver la agenda propia y la de otro.
+                intent = decision.Intent,
+                // Las entradas del Bundle. Sin esto el registro dice `Create:Bundle` y nada más.
+                entries = decision.BundleEntries,
                 path = context.Request.Path.Value,
                 query = context.Request.QueryString.Value,
             });

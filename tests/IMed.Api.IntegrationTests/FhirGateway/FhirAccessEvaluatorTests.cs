@@ -35,12 +35,25 @@ public sealed class FhirAccessEvaluatorTests(ImedApiFixture fixture) : IAsyncLif
     }
 
     private async Task<FhirAccessDecision> DecideAsync(
-        string method, string url, string? body = null, params string[] roles)
+        string method, string url, string? body = null, params string[] roles) =>
+        await EvaluateAsync(method, url, body, practitionerId: null, roles);
+
+    /// <summary>
+    /// Como <see cref="DecideAsync"/> pero declarando qué <c>Practitioner</c> es el llamante. Es lo
+    /// único que distingue "mi agenda" de "la agenda de otro", y viene del token.
+    /// </summary>
+    private async Task<FhirAccessDecision> DecideAsMineAsync(
+        string method, string url, string practitionerId, params string[] roles) =>
+        await EvaluateAsync(method, url, null, practitionerId, roles);
+
+    private async Task<FhirAccessDecision> EvaluateAsync(
+        string method, string url, string? body, string? practitionerId, string[] roles)
     {
         var (evaluator, permissions) = await ArrangeAsync(roles);
         var descriptor = FhirRequestParser.Parse(method, url);
         descriptor.Should().NotBeNull($"la ruta '{url}' debe poder describirse");
-        return await evaluator.EvaluateAsync(Org, permissions, descriptor!, body);
+        var caller = new FhirCallerContext(Org, Guid.NewGuid(), permissions, practitionerId);
+        return await evaluator.EvaluateAsync(caller, descriptor!, body);
     }
 
     // ---------------------------------------------------------------- básicos
@@ -259,9 +272,24 @@ public sealed class FhirAccessEvaluatorTests(ImedApiFixture fixture) : IAsyncLif
     [Fact]
     public async Task UnIncludeDeclarado_pasa()
     {
+        // El include viaja sobre una búsqueda acotada. La versión sin filtro de esta misma consulta
+        // se niega, y no por el include: ver `UnaBusquedaDeEncuentrosSinFiltro_seNiega`.
+        var decision = await DecideAsync(
+            "GET", "Encounter?subject=Patient/p1&_include=Encounter:patient", null, "org_admin");
+        decision.Allowed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UnaBusquedaDeEncuentrosSinFiltro_seNiega()
+    {
+        // Enumerar los encuentros de la organización no es una forma declarada, y con un
+        // `_include` encima devuelve además todos los pacientes. SEC-3 la dejaba pasar porque
+        // miraba el include y no la consulta entera; es justo el hueco que el intent cierra.
         var decision = await DecideAsync(
             "GET", "Encounter?_include=Encounter:patient", null, "org_admin");
-        decision.Allowed.Should().BeTrue();
+
+        decision.Allowed.Should().BeFalse();
+        decision.Stage.Should().Be(FhirDecisionStage.Intent);
     }
 
     [Fact]
@@ -395,5 +423,185 @@ public sealed class FhirAccessEvaluatorTests(ImedApiFixture fixture) : IAsyncLif
 
         descriptor.Should().NotBeNull();
         descriptor!.IsBundle.Should().BeTrue();
+    }
+
+    // ============================================================ SEC-4: la forma
+    //
+    // Las formas de acá salieron de la bitácora de `phi_access`, no de la imaginación: son las
+    // consultas que la aplicación mandó de verdad. Cuando una prueba dice "recepción busca por
+    // nombre", la querystring es la que quedó registrada.
+
+    private const string MyPractitioner = "1902";
+
+    [Fact]
+    public async Task RecepcionBuscaPorNombre_pasaYRecibeSoloIdentificacion()
+    {
+        var decision = await DecideAsync(
+            "GET", "Patient?name=walter&_sort=-_lastUpdated", null, "auxiliar");
+
+        decision.Allowed.Should().BeTrue("agendar exige poder encontrar a la persona");
+        decision.Intent.Should().Be("patient.find");
+        decision.Projection.Should().NotBeNull("quien solo busca por identificación no recibe el recurso entero");
+    }
+
+    [Fact]
+    public async Task RecepcionNoPuedeEnumerarElPadron()
+    {
+        // La consulta exacta que la pantalla de Pacientes manda al abrirse. La diferencia con la
+        // anterior no son los campos que devuelve sino que no nombra a nadie: buscar obliga a saber
+        // a quién buscás, enumerar no.
+        var decision = await DecideAsync(
+            "GET", "Patient?_count=50&_offset=0&_sort=-_lastUpdated", null, "auxiliar");
+
+        decision.Allowed.Should().BeFalse();
+        decision.Stage.Should().Be(FhirDecisionStage.Intent);
+        decision.Reason.Should().Contain(PermissionCatalog.RecordReadAny);
+    }
+
+    [Fact]
+    public async Task ElAdministradorSiPuedeEnumerarElPadron()
+    {
+        var decision = await DecideAsync(
+            "GET", "Patient?_count=50&_offset=0&_sort=-_lastUpdated", null, "org_admin");
+
+        decision.Allowed.Should().BeTrue();
+        decision.Intent.Should().Be("patient.census");
+    }
+
+    [Fact]
+    public async Task AQuienVeCualquierExpediente_noSeLeRecorta()
+    {
+        var decision = await DecideAsync("GET", "Patient?name=walter", null, "org_admin");
+
+        decision.Allowed.Should().BeTrue();
+        decision.Projection.Should().BeNull(
+            "recortarle el paciente a quien ya puede abrirlo entero no protege nada y rompe la pantalla");
+    }
+
+    [Fact]
+    public async Task UnParametroNoDeclarado_noEncajaConNingunaForma()
+    {
+        // `gender` no está declarado en ninguna forma de búsqueda de Patient. SEC-3 lo dejaba pasar
+        // —solo miraba `_include` y el tope de `_count`—, y por ahí viajaba cualquier filtro.
+        var decision = await DecideAsync("GET", "Patient?name=ana&gender=female", null, "org_admin");
+
+        decision.Allowed.Should().BeFalse();
+        decision.Stage.Should().Be(FhirDecisionStage.Intent);
+        decision.Reason.Should().Contain("gender");
+    }
+
+    [Fact]
+    public async Task LosSignosVitalesDeUnPaciente_pasan()
+    {
+        var decision = await DecideAsync(
+            "GET", "Observation?subject=Patient/p1&category=vital-signs&_sort=-date&_count=50",
+            null, "practitioner");
+
+        decision.Allowed.Should().BeTrue();
+        decision.Intent.Should().Be("patient.vitals");
+    }
+
+    [Fact]
+    public async Task ResultadosDeLaboratorioDisfrazadosDeSignosVitales_seNiegan()
+    {
+        // Misma forma de consulta, otra categoría. Sin acotar el valor, exigir que `category`
+        // viniera habría dejado leer resultados por la puerta de los signos vitales — y el médico
+        // que solo tiene `lab.result.read.ordered` pasaría a ver los de cualquiera.
+        var decision = await DecideAsync(
+            "GET", "Observation?subject=Patient/p1&category=laboratory", null, "practitioner");
+
+        decision.Allowed.Should().BeFalse();
+        decision.Stage.Should().Be(FhirDecisionStage.Intent);
+    }
+
+    [Fact]
+    public async Task LaAgendaPropia_seReconoceComoTal()
+    {
+        var decision = await DecideAsMineAsync(
+            "GET",
+            $"Appointment?_sort=-date&_count=100&actor=Practitioner/{MyPractitioner}&status=booked,arrived",
+            MyPractitioner, "practitioner");
+
+        decision.Allowed.Should().BeTrue();
+        decision.Intent.Should().Be("agenda.mine",
+            "el filtro nombra al propio profesional del token, que es lo único que se puede "
+            + "afirmar sobre pertenencia sin preguntarle a HAPI");
+    }
+
+    [Fact]
+    public async Task LaAgendaDeOtro_seRegistraComoAccesoAmplio()
+    {
+        // Pasa —el médico tiene lectura amplia— pero no como `agenda.mine`. La diferencia es toda
+        // la auditoría: es lo que permite listar quién miró agendas ajenas en un período.
+        var decision = await DecideAsMineAsync(
+            "GET", "Appointment?actor=Practitioner/9999&_count=100", MyPractitioner, "practitioner");
+
+        decision.Allowed.Should().BeTrue();
+        decision.Intent.Should().Be("agenda.all");
+    }
+
+    [Fact]
+    public async Task SinPractitionerEnElToken_laAgendaPropiaNoSeReconoce()
+    {
+        // Perfil sin completar. No encaja `agenda.mine`, cae a la forma amplia, y quien no tenga
+        // lectura amplia se queda afuera. Es el lado correcto para equivocarse.
+        var decision = await DecideAsync(
+            $"GET", $"Appointment?actor=Practitioner/{MyPractitioner}&_count=100", null, "auxiliar");
+
+        decision.Allowed.Should().BeFalse();
+        decision.Stage.Should().Be(FhirDecisionStage.Intent);
+    }
+
+    [Fact]
+    public async Task LaCoberturaEntreMetodos_evitaRomperLaAgenda()
+    {
+        // `agenda.mine` exige `record.read.own`, que nadie tiene en la matriz base. Sin la relación
+        // "any cubre own", el primer médico que abriera su agenda comería un 403.
+        var (_, permissions) = await ArrangeAsync("practitioner");
+
+        permissions.Has(PermissionCatalog.RecordReadOwn).Should().BeFalse("nadie lo tiene concedido");
+        FhirAccessMethods.Satisfies(permissions.Has, PermissionCatalog.RecordReadOwn)
+            .Should().BeTrue("pero `record.read.any` lo cubre");
+    }
+
+    [Fact]
+    public async Task UnaFormaSinDeclarar_seNiegaEnLaEtapaDeForma_yNoEnLaListaBlanca()
+    {
+        // `Schedule` está en la lista blanca de SEC-3 con permiso de búsqueda, así que la puerta 6
+        // lo deja pasar. No tiene forma declarada, así que la 7 lo frena. La distinción de etapa es
+        // lo que permite tener SEC-3 bloqueando y SEC-4 en sombra al mismo tiempo.
+        var decision = await DecideAsync("GET", "Schedule?date=ge2026-01-01", null, "org_admin");
+
+        decision.Allowed.Should().BeFalse();
+        decision.Stage.Should().Be(FhirDecisionStage.Intent);
+    }
+
+    [Fact]
+    public async Task LoQueNiegaLaListaBlanca_sigueSiendoEtapaBase()
+    {
+        var decision = await DecideAsync("GET", "Media/123", null, "org_admin");
+
+        decision.Allowed.Should().BeFalse();
+        decision.Stage.Should().Be(FhirDecisionStage.Base,
+            "si esto se marcara como forma, quedaría en sombra y dejaría de bloquear");
+    }
+
+    [Fact]
+    public async Task ElBundle_dejaTrazaDeSusEntradas()
+    {
+        // El hallazgo de la tercera pasada: la bitácora registraba `Create:Bundle` y nada más, así
+        // que "¿quién escribió este diagnóstico?" se contestaba con "alguien mandó un Bundle".
+        const string body = """
+        {"resourceType":"Bundle","type":"transaction","entry":[
+          {"request":{"method":"PUT","url":"QuestionnaireResponse/qr-1"}},
+          {"request":{"method":"POST","url":"Condition"}}
+        ]}
+        """;
+
+        var decision = await DecideAsync("POST", "", body, "org_admin");
+
+        decision.Allowed.Should().BeTrue();
+        decision.BundleEntries.Should().NotBeNull().And.HaveCount(2);
+        decision.BundleEntries!.Should().Contain(e => e.Contains("Condition") && e.Contains("condition.record"));
     }
 }
