@@ -41,6 +41,7 @@ using IMed.Api.Infrastructure.Persistence.Seeding;
 using IMed.Api.Infrastructure.Terminology;
 using IMed.Api.Infrastructure.Terminology.Importers;
 using IMed.Api.Infrastructure.Terminology.Repositories;
+using IMed.Api.Infrastructure.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,6 +56,11 @@ public static class DependencyInjection
         // TimeProvider.System es la implementación default en .NET 8+; registrarla
         // explícitamente permite inyectarla y sustituirla por fakes en tests.
         services.TryAddSingleton<TimeProvider>(_ => TimeProvider.System);
+
+        // Calendario de la clínica: los correlativos legibles llevan la fecha adentro y se
+        // reinician cada día, así que tienen que usar el día local y no el de UTC.
+        services.Configure<ClinicClockOptions>(configuration.GetSection(ClinicClockOptions.SectionName));
+        services.TryAddSingleton<IClinicClock, ClinicClock>();
 
         services.AddDatabase(configuration);
         services.AddKeycloakAdmin(configuration);

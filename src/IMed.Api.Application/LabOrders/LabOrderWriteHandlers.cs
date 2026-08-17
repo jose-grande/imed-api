@@ -150,11 +150,14 @@ public sealed class UpsertLabOrderHandler(IHapiFhirClient hapi, ILabCatalogRepos
 /// encuentro; el valor se usa como <c>requisition</c> de todos sus exámenes.
 /// </summary>
 public sealed class AllocateOrderNumberHandler(
-    ILabOperationsRepository ops, ResolveActiveLocationHandler activeLocation, TimeProvider timeProvider)
+    ILabOperationsRepository ops, ResolveActiveLocationHandler activeLocation, IClinicClock clock)
 {
     public async Task<string> HandleAsync(Guid orgId, Guid? userId = null, CancellationToken ct = default)
     {
-        var day = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        // El día es el de la clínica, no el de UTC. Con `UtcNow`, en Honduras el correlativo
+        // cambiaba de fecha —y reiniciaba el contador— a las 18:00: una orden de las 20:00 del 16
+        // salía como `ORD-20260817-0001`. Esa fecha viaja en el papel que se lleva el paciente.
+        var day = clock.Today();
         // El correlativo de orden es por sede (ADR-008).
         var locationId = await activeLocation.HandleAsync(orgId, userId, null, ct);
         var seq = await ops.NextOrderSeqAsync(orgId, locationId, day, ct);
