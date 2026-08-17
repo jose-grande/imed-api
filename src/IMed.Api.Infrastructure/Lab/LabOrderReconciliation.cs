@@ -201,7 +201,9 @@ public sealed class LabOrderReconciliation(
             Note: order.Note,
             Requisition: order.Requisition,
             LocalCode: order.LocalCode,
-            LocalSystem: order.LocalSystem);
+            LocalSystem: order.LocalSystem,
+            // Se pasa explícita porque acá se conoce: ahorra el viaje que el cliente sí necesita.
+            AuthoredOn: order.AuthoredOn);
 
         await hapi.UpdateLabOrderAsync(order.Id, request, ct);
 

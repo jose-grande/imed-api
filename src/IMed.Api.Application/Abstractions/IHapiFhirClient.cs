@@ -438,7 +438,13 @@ public sealed record UpsertLabOrderRequest(
     // R3/LIS-RD-02: requisición de la visita; dual coding del orderable (panel local + LOINC).
     string? Requisition = null,
     string? LocalCode = null,
-    string? LocalSystem = null);
+    string? LocalSystem = null,
+    /// <summary>
+    /// Cuándo se emitió la orden. Null al crear —se sella en ese momento— y al actualizar significa
+    /// "conservá el que ya tiene": el cliente que promueve <c>draft → active</c> no lo conoce, y
+    /// perderlo convertía la fecha de emisión en la fecha del último cambio.
+    /// </summary>
+    DateTimeOffset? AuthoredOn = null);
 
 public sealed record LabOrderSnapshot(
     string Id,

@@ -103,6 +103,52 @@ public sealed class LabOrdersGatewayTests(ImedApiFixture fixture) : IAsyncLifeti
     }
 
     [Fact]
+    public async Task PromoverUnaOrden_noLeCambiaLaFechaDeEmision()
+    {
+        // `authoredOn` se fijaba en `UtcNow` también al actualizar, así que promover la orden de
+        // `draft` a `active` le corría la fecha de emisión a la hora de la promoción. Cualquier
+        // medición de tiempo de respuesta del laboratorio arranca el reloj ahí: con la fecha
+        // pisada, el tiempo que la orden esperó antes de emitirse desaparece de los números.
+        var client = await AuthedClient();
+        var enc = $"enc-{Guid.NewGuid():N}";
+
+        var create = await client.PostAsJsonAsync("/api/lab-orders", new
+        {
+            patientFhirId = "pat-fecha-1",
+            encounterFhirId = enc,
+            status = "draft",
+            localCode = "CBC",
+            localSystem = "http://imed.local/panel",
+            codeText = "Hemograma completo",
+            requisition = enc,
+        });
+        var creada = await create.Content.ReadFromJsonAsync<LabOrderDto>();
+        var emitida = (await (await client.GetAsync($"/api/lab-orders/{creada!.Id}"))
+            .Content.ReadFromJsonAsync<LabOrderDto>())!.AuthoredOn;
+
+        emitida.Should().NotBeNull("el gateway sella la fecha al crear");
+
+        // Promoción: el cliente manda el recurso sin `authoredOn`, igual que al cerrar la consulta.
+        var promote = await client.PutAsJsonAsync($"/api/lab-orders/{creada.Id}", new
+        {
+            patientFhirId = "pat-fecha-1",
+            encounterFhirId = enc,
+            status = "active",
+            localCode = "CBC",
+            localSystem = "http://imed.local/panel",
+            codeText = "Hemograma completo",
+            requisition = enc,
+        });
+        promote.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var despues = (await (await client.GetAsync($"/api/lab-orders/{creada.Id}"))
+            .Content.ReadFromJsonAsync<LabOrderDto>())!;
+
+        despues.Status.Should().Be("active");
+        despues.AuthoredOn.Should().Be(emitida, "la orden se emitió cuando se emitió, no cuando se promovió");
+    }
+
+    [Fact]
     public async Task SinAuth_retorna401()
     {
         await Task.Delay(300);

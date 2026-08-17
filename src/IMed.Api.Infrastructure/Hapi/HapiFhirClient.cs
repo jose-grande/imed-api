@@ -1981,6 +1981,16 @@ public sealed class HapiFhirClient(
         ArgumentNullException.ThrowIfNull(request);
         await EnsureBearerAsync(cancellationToken);
 
+        // Si el llamador no trae la fecha de emisión, se lee la que ya tiene. Un PUT en FHIR
+        // reemplaza el recurso entero, así que omitirla la borraría y ponerla en `ahora` la
+        // falsearía. El costo es un GET en una operación que ocurre una vez por orden —promoverla
+        // o anularla—, y a cambio ningún llamador puede perderla por olvido.
+        if (request.AuthoredOn is null)
+        {
+            var actual = await GetLabOrderAsync(serviceRequestFhirId, request.PartitionName, cancellationToken);
+            request = request with { AuthoredOn = actual?.AuthoredOn };
+        }
+
         var payload = BuildLabOrderPayload(request, idForPut: serviceRequestFhirId);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Put, $"ServiceRequest/{serviceRequestFhirId}")
         {
@@ -3186,7 +3196,10 @@ public sealed class HapiFhirClient(
             ["status"] = req.Status,
             ["intent"] = req.Intent,
             ["subject"] = new { reference = $"Patient/{req.PatientFhirId}" },
-            ["authoredOn"] = DateTimeOffset.UtcNow.ToString("o"),
+            // Se sella al crear y se conserva al actualizar. Fijarlo siempre en `UtcNow` hacía que
+            // promover la orden le corriera la fecha de emisión a la hora de la promoción, y con
+            // eso cualquier medición de tiempo de respuesta del laboratorio arranca el reloj tarde.
+            ["authoredOn"] = (req.AuthoredOn ?? DateTimeOffset.UtcNow).ToString("o"),
             ["category"] = new object[]
             {
                 new
