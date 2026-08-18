@@ -34,6 +34,48 @@ internal static class LabRouting
         return (offered ? OrderRouting.InHouse : OrderRouting.SendOut, test);
     }
 
+    /// <summary>
+    /// Resuelve una **orden** —prueba suelta o panel— a lo que la recepción necesita saber de ella.
+    ///
+    /// <para><see cref="ResolveAsync"/> resuelve *una prueba*, y para una orden-panel no encuentra
+    /// ninguna: devuelve send-out y sin datos. Eso hacía que la recepción refiriera a externo un
+    /// panel que la clínica sí hace, y —más grave— que no viera el ayuno que exige alguna de sus
+    /// pruebas.</para>
+    /// </summary>
+    public static async Task<OrderResolution> ResolveOrderAsync(
+        ILabCatalogRepository catalog, Guid orgId, string? codeOrLoinc, CancellationToken ct)
+    {
+        var expanded = await ExpandOrderAsync(catalog, orgId, codeOrLoinc, ct);
+        if (expanded.Count == 0)
+        {
+            return new OrderResolution(OrderRouting.SendOut, null, null, null, null);
+        }
+
+        var tests = expanded.Select(e => e.Test).ToList();
+        var routing = expanded.Any(e => e.Routing == OrderRouting.InHouse)
+            ? OrderRouting.InHouse
+            : OrderRouting.SendOut;
+
+        // El ayuno más estricto manda: si una sola prueba del panel exige 8 h, el paciente tiene
+        // que venir con 8 h. Con el panel sin resolver esto quedaba en null y la precondición
+        // no se preguntaba — se recibía la muestra igual.
+        var fasting = tests.Max(t => t.FastingHours);
+
+        // Tipo de muestra y tipo de colección, solo si todas las pruebas coinciden: un panel de
+        // sangre y orina no tiene "el tipo", y estos caminos crean una sola muestra. Elegir uno
+        // sería inventar; en null, la pantalla lo pide en vez de darlo por sabido.
+        var specimenTypes = tests.Select(t => t.SpecimenTypeId).Distinct().ToList();
+        var collectionTypes = tests.Select(t => t.CollectionType)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        return new OrderResolution(
+            routing,
+            fasting,
+            collectionTypes.Count == 1 ? collectionTypes[0] : null,
+            specimenTypes.Count == 1 ? specimenTypes[0] : null,
+            tests.Count == 1 ? tests[0] : null);
+    }
+
     public static LabRequestPriority ParsePriority(string? priority) =>
         Enum.TryParse<LabRequestPriority>(priority, ignoreCase: true, out var p) ? p : LabRequestPriority.Routine;
 
@@ -82,6 +124,18 @@ internal static class LabRouting
     }
 }
 
+/// <summary>
+/// Lo que la recepción necesita de una orden, sea prueba suelta o panel.
+/// <c>SingleTest</c> es la prueba solo cuando la orden es de una sola; para un panel es null
+/// a propósito, porque ninguna de sus pruebas lo representa.
+/// </summary>
+internal sealed record OrderResolution(
+    OrderRouting Routing,
+    int? FastingHours,
+    string? CollectionType,
+    Guid? SpecimenTypeId,
+    LabTestDefinition? SingleTest);
+
 // ---------------------------------------------------------------------------
 
 public sealed class ResolveReceptionOrderHandler(
@@ -95,7 +149,7 @@ public sealed class ResolveReceptionOrderHandler(
         {
             return null;
         }
-        var (routing, test) = await LabRouting.ResolveAsync(catalog, orgId, order.CatalogCode, ct);
+        var resolution = await LabRouting.ResolveOrderAsync(catalog, orgId, order.CatalogCode, ct);
         var existing = await ops.GetIntakeByServiceRequestAsync(orgId, serviceRequestId, ct);
 
         return new ReceptionOrderView(
@@ -103,8 +157,8 @@ public sealed class ResolveReceptionOrderHandler(
             PatientFhirId: order.PatientFhirId,
             LoincCode: order.LoincCode,
             CodeText: order.CodeText,
-            Routing: routing.ToString(),
-            FastingHours: test?.FastingHours,
+            Routing: resolution.Routing.ToString(),
+            FastingHours: resolution.FastingHours,
             AlreadyReceived: existing?.Status == OrderIntakeStatus.Received,
             IntakeStatus: existing?.Status.ToString());
     }
@@ -175,12 +229,12 @@ public sealed class ReceiveSpecimenHandler(
             throw new InvalidOperationException("La orden ya fue recibida.");
         }
 
-        var (routing, test) = await LabRouting.ResolveAsync(catalog, cmd.OrganizationId, order.CatalogCode, ct);
+        var resolution = await LabRouting.ResolveOrderAsync(catalog, cmd.OrganizationId, order.CatalogCode, ct);
         var priority = LabRouting.ParsePriority(order.Priority);
-        var fastingRequired = test?.FastingHours is not null;
+        var fastingRequired = resolution.FastingHours is not null;
 
         // Send-out: no entra a la worklist; se registra el intake como referido.
-        if (routing == OrderRouting.SendOut)
+        if (resolution.Routing == OrderRouting.SendOut)
         {
             var sendOut = OrderIntake.Create(
                 cmd.OrganizationId, cmd.ServiceRequestId, order.PatientFhirId, OrderRouting.SendOut,
@@ -198,7 +252,7 @@ public sealed class ReceiveSpecimenHandler(
                 cmd.OrganizationId, cmd.ServiceRequestId, order.PatientFhirId, OrderRouting.InHouse,
                 priority, fastingRequired: true, cmd.ScheduledFor, cmd.IsWalkIn, timeProvider);
             blocked.DescribeExam(order.LoincCode, order.CodeText, timeProvider);
-            blocked.MarkBlocked($"Precondición no cumplida: requiere ayuno de {test!.FastingHours}h.", cmd.UserId, timeProvider);
+            blocked.MarkBlocked($"Precondición no cumplida: requiere ayuno de {resolution.FastingHours}h.", cmd.UserId, timeProvider);
             await ops.AddIntakeAsync(blocked, ct);
             return new ReceiveResult(blocked.Id, blocked.Status.ToString(), "InHouse", null, null, blocked.BlockReason);
         }
@@ -218,11 +272,11 @@ public sealed class ReceiveSpecimenHandler(
             PatientFhirId: order.PatientFhirId,
             ServiceRequestFhirId: cmd.ServiceRequestId,
             Status: "available",
-            TypeText: cmd.TypeText ?? test?.CollectionType,
+            TypeText: cmd.TypeText ?? resolution.CollectionType,
             AccessionNumber: accession,
             ReceivedTime: now.ToString("o"),
             CollectedDateTime: cmd.CollectedDateTime,
-            FastingHours: test?.FastingHours,
+            FastingHours: resolution.FastingHours,
             Note: cmd.Note), ct);
 
         var intake = OrderIntake.Create(

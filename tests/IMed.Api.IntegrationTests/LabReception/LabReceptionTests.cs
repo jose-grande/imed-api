@@ -111,6 +111,34 @@ public sealed class LabReceptionTests(ImedApiFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UnPanelPropio_seRecibeEnLaClinica_yExigeSuAyuno()
+    {
+        // Resolver una orden devolvía "la prueba" de la orden, y un panel no tiene una: caía en
+        // send-out —referir a externo un panel que la clínica sí hace— y, peor, se quedaba sin
+        // horas de ayuno, así que la precondición no se preguntaba y la muestra se recibía igual.
+        // Una glucosa tomada sin ayuno no se detecta después: el resultado sale, y sale mal.
+        // LIPID a propósito: es código de panel y **no** de prueba. `GLU_FAST` sirve para las dos
+        // cosas, así que una orden con ese código resuelve como prueba suelta y tapa el caso.
+        var client = await AuthedClient();
+        var enc = $"enc-{Guid.NewGuid():N}";
+        var srId = fixture.Hapi.SeedServiceRequest(
+            "pat-panel-ayuno", loinc: null, "Perfil lipídico", encounter: enc, requisition: enc,
+            localCode: "LIPID", localSystem: "http://imed.local/panel");
+
+        var view = await (await client.GetAsync($"/api/lab/reception/order/{srId}"))
+            .Content.ReadFromJsonAsync<ReceptionOrderView>();
+
+        view!.Routing.Should().Be("InHouse", "el panel está en el catálogo de la sede");
+        view.FastingHours.Should().Be(12, "manda el ayuno más estricto de las pruebas del panel");
+
+        var result = await (await client.PostAsJsonAsync("/api/lab/reception/receive", ReceiveBody(srId, fastingSatisfied: false)))
+            .Content.ReadFromJsonAsync<ReceiveResult>();
+
+        result!.Status.Should().Be("Blocked");
+        result.SpecimenFhirId.Should().BeNull("sin ayuno no se toma la muestra");
+    }
+
+    [Fact]
     public async Task SendOut_noGeneraEspecimen()
     {
         var client = await AuthedClient();

@@ -97,8 +97,8 @@ public sealed class GetCollectionQueueHandler(
             {
                 continue;
             }
-            var (_, test) = await LabRouting.ResolveAsync(catalog, orgId, o.CatalogCode, ct);
-            SpecimenType? st = test?.SpecimenTypeId is Guid sid && specimenTypes.TryGetValue(sid, out var s) ? s : null;
+            var resolution = await LabRouting.ResolveOrderAsync(catalog, orgId, o.CatalogCode, ct);
+            SpecimenType? st = resolution.SpecimenTypeId is Guid sid && specimenTypes.TryGetValue(sid, out var s) ? s : null;
             var mode = st?.CollectionMode ?? CollectionMode.OnSite;
             if (mode != CollectionMode.OnSite)
             {
@@ -107,7 +107,7 @@ public sealed class GetCollectionQueueHandler(
             items.Add(new CollectionQueueItem(
                 o.Id, o.PatientFhirId, o.EncounterFhirId, o.LoincCode, o.CodeText,
                 st?.Code ?? "UNKNOWN", st?.Name ?? "Sin clasificar",
-                st?.DefaultMethod, st?.DefaultBodySite, test?.FastingHours, o.Priority));
+                st?.DefaultMethod, st?.DefaultBodySite, resolution.FastingHours, o.Priority));
         }
         return items;
     }

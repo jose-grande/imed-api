@@ -151,7 +151,7 @@ public sealed class ReceiveRequisitionHandler(
             }
 
             // Snapshots de las órdenes del grupo (paciente, prioridad, prueba/ayuno).
-            var snaps = new List<(LabOrderSnapshot Order, LabTestDefinition? Test)>();
+            var snaps = new List<(LabOrderSnapshot Order, OrderResolution Resolution)>();
             foreach (var srId in group.ServiceRequestIds)
             {
                 var ord = await hapi.GetLabOrderAsync(srId, partition, ct);
@@ -159,8 +159,8 @@ public sealed class ReceiveRequisitionHandler(
                 {
                     continue;
                 }
-                var (_, test) = await LabRouting.ResolveAsync(catalog, cmd.OrganizationId, ord.CatalogCode, ct);
-                snaps.Add((ord, test));
+                var resolution = await LabRouting.ResolveOrderAsync(catalog, cmd.OrganizationId, ord.CatalogCode, ct);
+                snaps.Add((ord, resolution));
             }
             if (snaps.Count == 0)
             {
@@ -171,9 +171,9 @@ public sealed class ReceiveRequisitionHandler(
             if (group.Reject)
             {
                 var reason = string.IsNullOrWhiteSpace(group.RejectReason) ? "Muestra rechazada en recepción." : group.RejectReason!;
-                foreach (var (ord, test) in snaps)
+                foreach (var (ord, resolution) in snaps)
                 {
-                    var intake = NewIntake(cmd, ord, test, group);
+                    var intake = NewIntake(cmd, ord, resolution, group);
                     intake.MarkRejected(reason, cmd.UserId, timeProvider);
                     await ops.AddIntakeAsync(intake, ct);
                     await ops.AddSpecimenEventAsync(
@@ -184,12 +184,12 @@ public sealed class ReceiveRequisitionHandler(
             }
 
             // Precondición de ayuno no cumplida → bloquear el grupo (sin crear muestra).
-            var fastingRequired = snaps.Any(s => s.Test?.FastingHours is not null);
+            var fastingRequired = snaps.Any(s => s.Resolution.FastingHours is not null);
             if (fastingRequired && group.FastingSatisfied == false)
             {
-                foreach (var (ord, test) in snaps)
+                foreach (var (ord, resolution) in snaps)
                 {
-                    var intake = NewIntake(cmd, ord, test, group);
+                    var intake = NewIntake(cmd, ord, resolution, group);
                     intake.MarkBlocked("Precondición no cumplida: requiere ayuno.", cmd.UserId, timeProvider);
                     await ops.AddIntakeAsync(intake, ct);
                 }
@@ -206,7 +206,7 @@ public sealed class ReceiveRequisitionHandler(
 
             var srIds = snaps.Select(s => s.Order.Id).ToList();
             var maxFasting = snaps
-                .Select(s => s.Test?.FastingHours)
+                .Select(s => s.Resolution.FastingHours)
                 .Where(h => h is not null)
                 .Select(h => h!.Value)
                 .DefaultIfEmpty(0)
@@ -228,9 +228,9 @@ public sealed class ReceiveRequisitionHandler(
                 CollectionMethod: group.CollectionMethod,
                 CollectionBodySite: group.CollectionBodySite), ct);
 
-            foreach (var (ord, test) in snaps)
+            foreach (var (ord, resolution) in snaps)
             {
-                var intake = NewIntake(cmd, ord, test, group);
+                var intake = NewIntake(cmd, ord, resolution, group);
                 intake.MarkReceived(specimenId, accession, cmd.UserId, group.FastingSatisfied, timeProvider);
                 await ops.AddIntakeAsync(intake, ct);
                 await ops.AddSpecimenEventAsync(
@@ -244,11 +244,11 @@ public sealed class ReceiveRequisitionHandler(
         return results;
     }
 
-    private OrderIntake NewIntake(ReceiveRequisitionCommand cmd, LabOrderSnapshot ord, LabTestDefinition? test, ReceiveGroup group)
+    private OrderIntake NewIntake(ReceiveRequisitionCommand cmd, LabOrderSnapshot ord, OrderResolution resolution, ReceiveGroup group)
     {
         var intake = OrderIntake.Create(
             cmd.OrganizationId, ord.Id, ord.PatientFhirId, OrderRouting.InHouse,
-            LabRouting.ParsePriority(ord.Priority), test?.FastingHours is not null, timeProvider: timeProvider);
+            LabRouting.ParsePriority(ord.Priority), resolution.FastingHours is not null, timeProvider: timeProvider);
         intake.Classify(cmd.Requisition, group.SpecimenTypeCode, group.TubeCode, timeProvider);
         intake.DescribeExam(ord.LoincCode, ord.CodeText, timeProvider);
         return intake;
