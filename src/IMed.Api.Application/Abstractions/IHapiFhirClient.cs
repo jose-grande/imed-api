@@ -172,6 +172,16 @@ public interface IHapiFhirClient
         string partitionName,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lista los MedicationRequests que comparten un <c>groupIdentifier</c> — es
+    /// decir, todos los medicamentos de una misma "receta" (multi-medicamento).
+    /// Usado por el renderer PDF de receta agrupada.
+    /// </summary>
+    Task<IReadOnlyList<MedicationRequestSnapshot>> SearchMedicationRequestsByGroupAsync(
+        string groupIdentifierValue,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
     // ──────────────── ServiceRequest / Lab Orders (Épica L) ────────────────
 
     /// <summary>
@@ -205,6 +215,16 @@ public interface IHapiFhirClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Lista las órdenes de laboratorio que comparten un <c>requisition</c> — es
+    /// decir, todos los exámenes/paneles de una misma "orden de laboratorio".
+    /// Usado por el renderer PDF de orden agrupada.
+    /// </summary>
+    Task<IReadOnlyList<LabOrderSnapshot>> SearchLabOrdersByRequisitionAsync(
+        string requisitionValue,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Lista órdenes de laboratorio <c>active</c>/<c>completed</c> de un Patient
     /// (historia). La tab "Laboratorio" del patient-detail consume esto.
     /// </summary>
@@ -212,6 +232,131 @@ public interface IHapiFhirClient
         string patientFhirId,
         string partitionName,
         CancellationToken cancellationToken = default);
+
+    // ---- LIS-3: muestras, cadena de custodia, solicitante externo ----
+
+    /// <summary>Crea un <c>Specimen</c> FHIR R5 (recepción de muestra, LIS-3). Devuelve el id.</summary>
+    Task<string> CreateSpecimenAsync(
+        UpsertSpecimenRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Órdenes de laboratorio activas de la partición (cola de recepción pendiente, R1-F5).</summary>
+    /// <summary>
+    /// Órdenes de laboratorio en <c>draft</c> de una organización.
+    ///
+    /// <para>La usa la reconciliación: una orden en borrador cuyo encuentro ya se cerró es una
+    /// orden que el médico pidió y que el laboratorio nunca va a ver.</para>
+    /// </summary>
+    Task<IReadOnlyList<LabOrderSnapshot>> SearchDraftLabOrdersAsync(
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Estado de un <c>Encounter</c>, o null si no existe.
+    ///
+    /// <para>Se devuelve el string crudo y no un enum: lo único que se decide con esto es si la
+    /// consulta ya terminó, y encerrar el vocabulario de FHIR en un enum propio obliga a tocar
+    /// código cada vez que aparece un estado nuevo que no nos importa.</para>
+    /// </summary>
+    Task<string?> GetEncounterStatusAsync(
+        string encounterFhirId,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<LabOrderSnapshot>> SearchActiveLabOrdersAsync(
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lee un Specimen por id. Null si no existe.</summary>
+    Task<SpecimenSnapshot?> GetSpecimenAsync(
+        string specimenFhirId,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Muestras de un paciente (historia/trazabilidad).</summary>
+    Task<IReadOnlyList<SpecimenSnapshot>> SearchSpecimensByPatientAsync(
+        string patientFhirId,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Crea un <c>Provenance</c> FHIR R5 (cadena de custodia / firma). Devuelve el id.</summary>
+    Task<string> CreateProvenanceAsync(
+        CreateProvenanceRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Crea un <c>Practitioner</c> "ligero" para un médico solicitante externo
+    /// (LIS-DEC-10) — sin usuario KC. Devuelve el id.
+    /// </summary>
+    Task<string> CreateExternalPractitionerAsync(
+        ExternalPractitionerRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Busca un Practitioner externo por nombre (dedupe). Null si no existe.</summary>
+    Task<string?> FindExternalPractitionerByNameAsync(
+        string fullName,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
+    // ---- LIS-4: resultados ----
+
+    /// <summary>Crea un <c>Observation</c> FHIR R5 (resultado de laboratorio). Devuelve el id.</summary>
+    Task<string> CreateObservationAsync(
+        UpsertObservationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reemplaza un <c>Observation</c> existente (corrección de resultado, LIS-4b). HAPI versiona
+    /// el recurso, así que el valor anterior queda accesible en <c>_history</c> y la corrección
+    /// es auditable sin necesidad de una tabla propia.
+    /// </summary>
+    Task UpdateObservationAsync(
+        string observationFhirId,
+        UpsertObservationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Crea un <c>DiagnosticReport</c> FHIR R5 (informe que agrupa Observations). Devuelve el id.</summary>
+    Task<string> CreateDiagnosticReportAsync(
+        UpsertDiagnosticReportRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<DiagnosticReportSnapshot?> GetDiagnosticReportAsync(
+        string diagnosticReportFhirId, string partitionName, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<DiagnosticReportSnapshot>> SearchDiagnosticReportsByPatientAsync(
+        string patientFhirId, string partitionName, CancellationToken cancellationToken = default);
+
+    Task<ObservationSnapshot?> GetObservationAsync(
+        string observationFhirId, string partitionName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Valor numérico más reciente de un paciente para un LOINC (para delta check, LIS-5).
+    /// Null si no hay histórico numérico.
+    /// </summary>
+    Task<decimal?> GetLatestNumericObservationAsync(
+        string patientFhirId, string loincCode, string partitionName, CancellationToken cancellationToken = default);
+
+    // ---- LIS-6: validación / liberación ----
+
+    /// <summary>
+    /// Escribe el <c>conclusion</c> de un <c>DiagnosticReport</c> vía JSON Patch. Lo usa el
+    /// comentario del validador al liberar: va en el informe para que viaje con el resultado
+    /// e salga impreso, en vez de quedar en una tabla interna que nadie consulta.
+    /// </summary>
+    Task PatchDiagnosticReportConclusionAsync(
+        string reportFhirId, string conclusion, string partitionName, CancellationToken cancellationToken = default);
+
+    /// <summary>Actualiza el <c>status</c> de un recurso vía JSON Patch (LIS-6).</summary>
+    Task PatchResourceStatusAsync(
+        string resourceType, string resourceFhirId, string status, string partitionName, CancellationToken cancellationToken = default);
+
+    /// <summary>Informes en estado <c>preliminary</c> de la partición (pendientes de validación).</summary>
+    Task<IReadOnlyList<DiagnosticReportSnapshot>> SearchPreliminaryReportsAsync(
+        string partitionName, CancellationToken cancellationToken = default);
+
+    /// <summary>Histórico numérico de un paciente para un LOINC (tendencia, LIS-6). Más reciente primero.</summary>
+    Task<IReadOnlyList<ObservationHistoryPoint>> GetObservationHistoryAsync(
+        string patientFhirId, string loincCode, string partitionName, int count, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -257,7 +402,12 @@ public sealed record MedicationRequestSnapshot(
     string? DispenseUnit,
     string? Note,
     string? RequesterPractitionerId,
-    DateTimeOffset? AuthoredOn);
+    DateTimeOffset? AuthoredOn,
+    // groupIdentifier.value — agrupa los medicamentos de una misma receta.
+    string? GroupIdentifierValue = null,
+    // dosageInstruction[0].patientInstruction — indicaciones POR medicamento
+    // (las indicaciones generales de la receta van en Note).
+    string? PatientInstruction = null);
 
 /// <summary>
 /// Datos para crear/reemplazar un ServiceRequest FHIR R5 con category=laboratory
@@ -284,7 +434,17 @@ public sealed record UpsertLabOrderRequest(
     string? Priority,
     string? OccurrenceDateTime,
     string? ReasonText,
-    string? Note);
+    string? Note,
+    // R3/LIS-RD-02: requisición de la visita; dual coding del orderable (panel local + LOINC).
+    string? Requisition = null,
+    string? LocalCode = null,
+    string? LocalSystem = null,
+    /// <summary>
+    /// Cuándo se emitió la orden. Null al crear —se sella en ese momento— y al actualizar significa
+    /// "conservá el que ya tiene": el cliente que promueve <c>draft → active</c> no lo conoce, y
+    /// perderlo convertía la fecha de emisión en la fecha del último cambio.
+    /// </summary>
+    DateTimeOffset? AuthoredOn = null);
 
 public sealed record LabOrderSnapshot(
     string Id,
@@ -300,7 +460,174 @@ public sealed record LabOrderSnapshot(
     string? ReasonText,
     string? Note,
     string? RequesterPractitionerId,
-    DateTimeOffset? AuthoredOn);
+    DateTimeOffset? AuthoredOn,
+    // requisition.value — agrupa las órdenes de una misma "orden de laboratorio".
+    string? Requisition = null,
+    /// <summary>
+    /// Código del panel propio de la clínica, cuando la orden trae uno.
+    ///
+    /// <para>Va aparte de <see cref="LoincCode"/> a propósito. Las órdenes llevan coding dual
+    /// —LOINC si el examen lo tiene, más el código local del panel— y leer ambos como si fueran
+    /// LOINC hace que el siguiente guardado escriba <c>CBC</c> bajo <c>http://loinc.org</c>. Un
+    /// código local publicado como si fuera un estándar internacional es un dato falso en el
+    /// expediente, y de los que rompen la interoperabilidad justo cuando se la necesita.</para>
+    /// </summary>
+    string? LocalCode = null,
+    /// <summary>
+    /// Sistema del código local. Va junto al código porque quien reescriba la orden —la
+    /// reconciliación, sin cliente que se lo dicte— tiene que poder devolverla tal cual estaba.
+    /// </summary>
+    string? LocalSystem = null)
+{
+    /// <summary>
+    /// Código con el que se busca esta orden en el catálogo de la clínica.
+    ///
+    /// <para>El catálogo indexa por código local (<c>Code</c> del panel o de la prueba) **y** por
+    /// LOINC, así que la búsqueda necesita uno de los dos. Hoy ningún panel de la clínica tiene
+    /// LOINC —los 42 lo tienen nulo—, de modo que mirar solo <see cref="LoincCode"/> deja fuera del
+    /// catálogo a todos los paneles y el laboratorio termina refiriendo a externo lo que sí hace
+    /// en casa.</para>
+    ///
+    /// <para>Existe como propiedad y no como <c>LoincCode ?? LocalCode</c> repetido en cada sitio
+    /// porque son once, y basta olvidarlo en uno para que esa pantalla vuelva a mentir. Se prefiere
+    /// LOINC cuando está: es el código con el que el catálogo comparte significado con el mundo.</para>
+    /// </summary>
+    public string? CatalogCode => LoincCode ?? LocalCode;
+}
+
+/// <summary>
+/// Datos para crear un <c>Specimen</c> FHIR R5 (recepción, LIS-3).
+/// <c>AccessionNumber</c> va en <c>Specimen.accessionIdentifier</c>;
+/// <c>FastingHours</c> (si aplica) en <c>collection.fastingStatusDuration</c>.
+/// </summary>
+public sealed record UpsertSpecimenRequest(
+    string PartitionName,
+    string PatientFhirId,
+    string ServiceRequestFhirId,
+    string Status,
+    string? TypeText,
+    string AccessionNumber,
+    string ReceivedTime,
+    string? CollectedDateTime,
+    int? FastingHours,
+    string? Note,
+    // Órdenes adicionales que cubre la misma muestra (N:M, LIS-RD-03). Emite Specimen.request[].
+    IReadOnlyList<string>? AdditionalServiceRequestFhirIds = null,
+    // Detalles de colección on-site (R1-F7, LIS-RD-27): Specimen.collection.collector/method/bodySite.
+    string? CollectorPractitionerId = null,
+    string? CollectionMethod = null,
+    string? CollectionBodySite = null,
+    // Muestra padre (R5: alícuota, LIS-RD-20). Emite Specimen.parent.
+    string? ParentSpecimenFhirId = null);
+
+public sealed record SpecimenSnapshot(
+    string Id,
+    string PatientFhirId,
+    string Status,
+    string? TypeText,
+    string? AccessionNumber,
+    string? ReceivedTime,
+    string? CollectedDateTime,
+    string? ServiceRequestFhirId,
+    string? Note);
+
+/// <summary>
+/// Datos para crear un <c>Provenance</c> FHIR R5 (cadena de custodia / firma).
+/// <c>TargetReference</c> ej. "Specimen/123"; <c>AgentWhoReference</c> ej.
+/// "Practitioner/..." u "Organization/...". <c>Recorded</c> ISO 8601.
+/// </summary>
+public sealed record CreateProvenanceRequest(
+    string PartitionName,
+    string TargetReference,
+    string ActivityCode,
+    string ActivityDisplay,
+    string AgentWhoReference,
+    string Recorded);
+
+/// <summary>Datos del médico solicitante externo (Practitioner ligero, LIS-DEC-10).</summary>
+public sealed record ExternalPractitionerRequest(
+    string PartitionName,
+    string FullName,
+    string? Identifier);
+
+/// <summary>
+/// Datos para crear un <c>Observation</c> FHIR R5 (resultado, LIS-4). Valor
+/// numérico (<c>ValueNumeric</c>+<c>ValueUnit</c>) o textual (<c>ValueString</c>).
+/// <c>InterpretationCode</c> = flag N/H/L/HH/LL (calculado server-side).
+/// </summary>
+public sealed record UpsertObservationRequest(
+    string PartitionName,
+    string PatientFhirId,
+    string Status,
+    string? LoincCode,
+    string CodeText,
+    decimal? ValueNumeric,
+    string? ValueUnit,
+    string? ValueString,
+    string? InterpretationCode,
+    decimal? ReferenceLow,
+    decimal? ReferenceHigh,
+    string? SpecimenFhirId,
+    string EffectiveDateTime,
+    string? PerformerReference,
+    // R2 (conformidad R5): trazabilidad y agrupación de panel.
+    string? ServiceRequestFhirId = null,        // Observation.basedOn
+    string? AppliesToSex = null,                 // referenceRange.appliesTo (población)
+    int? AppliesToAgeMin = null,                 // referenceRange.age.low (años)
+    int? AppliesToAgeMax = null,                 // referenceRange.age.high (años)
+    IReadOnlyList<string>? HasMemberObservationIds = null, // Observation panel → componentes
+    string? TriggeredByObservationId = null,     // reflejo (R5 triggeredBy)
+    string? TriggeredByType = null);
+
+public sealed record DiagnosticReportSnapshot(
+    string Id,
+    string PatientFhirId,
+    string Status,
+    string? LoincCode,
+    string? CodeText,
+    string? Issued,
+    string? Conclusion,
+    string? PerformerDisplay,
+    string? SpecimenFhirId,
+    string? ServiceRequestFhirId,
+    IReadOnlyList<string> ResultObservationIds);
+
+public sealed record ObservationHistoryPoint(decimal Value, string? Date, string? FlagCode);
+
+public sealed record ObservationSnapshot(
+    string Id,
+    string PatientFhirId,
+    string Status,
+    string? LoincCode,
+    string? CodeText,
+    decimal? ValueNumeric,
+    string? ValueUnit,
+    string? ValueString,
+    string? FlagCode,
+    decimal? ReferenceLow,
+    decimal? ReferenceHigh,
+    string? EffectiveDateTime,
+    // Vínculos que hay que preservar al reescribir la Observation (corrección, LIS-4b):
+    // un PUT reemplaza el recurso entero, y perderlos desconectaría el resultado de su
+    // orden, su muestra y quien lo ejecutó.
+    string? ServiceRequestFhirId = null,
+    string? SpecimenFhirId = null,
+    string? PerformerReference = null);
+
+/// <summary>Datos para crear un <c>DiagnosticReport</c> FHIR R5 (informe, LIS-4).</summary>
+public sealed record UpsertDiagnosticReportRequest(
+    string PartitionName,
+    string PatientFhirId,
+    string ServiceRequestFhirId,
+    string Status,
+    string? LoincCode,
+    string CodeText,
+    IReadOnlyList<string> ResultObservationIds,
+    string? SpecimenFhirId,
+    string? PerformerReference,
+    string? PerformerDisplay,
+    string? Conclusion,
+    string EffectiveDateTime);
 
 /// <summary>
 /// Datos para crear un AllergyIntolerance FHIR R5. <c>Code</c> es SNOMED CT

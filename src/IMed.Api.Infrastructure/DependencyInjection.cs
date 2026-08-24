@@ -2,14 +2,23 @@ using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Abstractions.Email;
 using IMed.Api.Application.Abstractions.Terminology;
 using IMed.Api.Application.Allergies;
+using IMed.Api.Application.Authorization;
 using IMed.Api.Application.Catalogs;
 using IMed.Api.Application.Diagnoses;
+using IMed.Api.Application.FhirGateway;
 using IMed.Api.Application.Forms;
 using IMed.Api.Application.Identifiers;
 using IMed.Api.Application.Invitations;
 using IMed.Api.Application.JoinRequests;
+using IMed.Api.Application.LabCatalog;
+using IMed.Api.Application.LabDashboard;
 using IMed.Api.Application.LabOrders;
+using IMed.Api.Application.LabReception;
+using IMed.Api.Application.LabResults;
+using IMed.Api.Application.LabSpecimens;
+using IMed.Api.Application.LabRules;
 using IMed.Api.Application.Labs;
+using IMed.Api.Application.Locations;
 using IMed.Api.Application.Medications;
 using IMed.Api.Application.Notifications;
 using IMed.Api.Application.Organizations;
@@ -24,6 +33,7 @@ using IMed.Api.Infrastructure.Hapi;
 using IMed.Api.Infrastructure.Identifiers;
 using IMed.Api.Infrastructure.Keycloak;
 using IMed.Api.Infrastructure.Notifications;
+using IMed.Api.Infrastructure.Lab;
 using IMed.Api.Infrastructure.Outbox;
 using IMed.Api.Infrastructure.Pdf;
 using IMed.Api.Infrastructure.Persistence;
@@ -31,6 +41,7 @@ using IMed.Api.Infrastructure.Persistence.Seeding;
 using IMed.Api.Infrastructure.Terminology;
 using IMed.Api.Infrastructure.Terminology.Importers;
 using IMed.Api.Infrastructure.Terminology.Repositories;
+using IMed.Api.Infrastructure.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,6 +56,11 @@ public static class DependencyInjection
         // TimeProvider.System es la implementación default en .NET 8+; registrarla
         // explícitamente permite inyectarla y sustituirla por fakes en tests.
         services.TryAddSingleton<TimeProvider>(_ => TimeProvider.System);
+
+        // Calendario de la clínica: los correlativos legibles llevan la fecha adentro y se
+        // reinician cada día, así que tienen que usar el día local y no el de UTC.
+        services.Configure<ClinicClockOptions>(configuration.GetSection(ClinicClockOptions.SectionName));
+        services.TryAddSingleton<IClinicClock, ClinicClock>();
 
         services.AddDatabase(configuration);
         services.AddKeycloakAdmin(configuration);
@@ -118,6 +134,8 @@ public static class DependencyInjection
         // se inicializa lazy en el ctor — seguro como singleton.
         services.AddSingleton<IPrescriptionPdfRenderer, PrescriptionPdfRenderer>();
         services.AddSingleton<ILabOrderPdfRenderer, LabOrderPdfRenderer>();
+        services.AddSingleton<ILabReportPdfRenderer, LabReportPdfRenderer>();
+        services.AddSingleton<ISpecimenLabelPdfRenderer, SpecimenLabelPdfRenderer>();
         return services;
     }
 
@@ -146,12 +164,26 @@ public static class DependencyInjection
     {
         // Seeders idempotentes que corren al startup. Si la BD ya tiene los datos,
         // no-op (lo verifican antes de insertar).
+        // La matriz de permisos va primero: sin ella no hay autorización que evaluar.
+        services.AddHostedService<PermissionSeeder>();
         services.AddHostedService<SpecialtySeeder>();
         services.AddHostedService<AllergySeeder>();
         services.AddHostedService<MedicationSeeder>();
         services.AddHostedService<FormDefinitionsSeeder>();
         services.AddHostedService<Icd11Seeder>();
         services.AddHostedService<LoincSeeder>();
+        services.AddHostedService<LabCatalogSeeder>();
+        services.AddHostedService<LabRuleSeeder>();
+        // DESPUÉS de los seeders de globales: clona el catálogo a las orgs preexistentes
+        // (copy-on-create, rev 53). Depende del orden de registro (seeders son IHostedService secuenciales).
+        services.AddHostedService<LabCatalogProvisioningBackfill>();
+        // Recupera las muestras que ya pasaron por QC antes de existir la convergencia con
+        // `order_intake`: sin esto no aparecen en Resultados/dashboard/TAT.
+        services.AddHostedService<CollectionIntakeBackfill>();
+        // Eje de sede (ADR-008): garantiza la sede principal de cada org existente y ancla a ella
+        // los datos operativos anteriores al eje. Va al final: ancla lo que los backfills de
+        // arriba pudieron haber creado en este mismo arranque.
+        services.AddHostedService<LocationBackfill>();
         return services;
     }
 
@@ -166,6 +198,8 @@ public static class DependencyInjection
     private static IServiceCollection AddOutbox(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<OutboxProcessorOptions>(configuration.GetSection(OutboxProcessorOptions.SectionName));
+        services.Configure<LabOrderReconciliationOptions>(
+            configuration.GetSection(LabOrderReconciliationOptions.SectionName));
 
         // Dispatchers: uno por OutboxEvent.Type. Registrar nuevos acá.
         services.AddScoped<IOutboxDispatcher, OrganizationBootstrappedDispatcher>();
@@ -175,6 +209,11 @@ public static class DependencyInjection
         services.AddScoped<IOutboxDispatcher, TeamRoleChangedDispatcher>();
 
         services.AddHostedService<OutboxProcessor>();
+
+        // Red de seguridad de las órdenes de laboratorio. La promoción `draft → active` la hace el
+        // navegador después del cierre, fuera de la transacción: si se pierde, la orden nunca llega
+        // al laboratorio y nadie se entera. Esto la repara sin importar la causa.
+        services.AddHostedService<LabOrderReconciliation>();
         return services;
     }
 
@@ -207,6 +246,19 @@ public static class DependencyInjection
         services.AddScoped<IInvitationLazyProvisionPersistence, InvitationLazyProvisionPersistence>();
         services.AddScoped<IJoinRequestsRepository, JoinRequestsRepository>();
         services.AddScoped<IChangeMemberRolePersistence, ChangeMemberRolePersistence>();
+        services.AddScoped<ILabCatalogRepository, LabCatalogRepository>();
+        services.AddMemoryCache();
+        services.AddScoped<IPermissionResolver, PermissionResolver>();
+        services.AddScoped<IPermissionMatrixRepository, PermissionMatrixRepository>();
+        services.AddScoped<IFhirAccessRuleRepository, FhirAccessRuleRepository>();
+        services.AddScoped<FhirAccessEvaluator>();
+        services.AddScoped<GetPermissionMatrixHandler>();
+        services.AddScoped<SetPermissionGrantHandler>();
+        services.AddScoped<ILocationRepository, LocationRepository>();
+        services.AddScoped<ILocationProvisioning, LocationProvisioning>();
+        services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();
+        services.AddScoped<ILabOperationsRepository, LabOperationsRepository>();
+        services.AddScoped<ILabRuleRepository, LabRuleRepository>();
 
         return services;
     }
@@ -316,6 +368,104 @@ public static class DependencyInjection
 
         // Lab orders PDF (Épica L5)
         services.AddScoped<GetLabOrderPdfHandler>();
+
+        // Lab orders gateway del médico (LIS-RD-09): create/update/get/list por imed-api
+        services.AddScoped<UpsertLabOrderHandler>();
+        services.AddScoped<AllocateOrderNumberHandler>();
+        services.AddScoped<GetLabOrderHandler>();
+        services.AddScoped<ListLabOrdersByEncounterHandler>();
+        services.AddScoped<ListLabOrdersByPatientHandler>();
+
+        // Lab catalog (Épica LIS-1)
+        services.AddScoped<SearchLabTestsHandler>();
+        services.AddScoped<GetLabTestByIdHandler>();
+        services.AddScoped<CreateLabTestHandler>();
+        services.AddScoped<UpdateLabTestHandler>();
+        services.AddScoped<SetLabTestActiveHandler>();
+        services.AddScoped<ListLabPanelsHandler>();
+        services.AddScoped<GetLabPanelDetailHandler>();
+        services.AddScoped<CreateLabPanelHandler>();
+        services.AddScoped<CreatePanelVersionHandler>();
+        services.AddScoped<ListReferenceRangesHandler>();
+        services.AddScoped<CreateReferenceRangeHandler>();
+        services.AddScoped<UpdateReferenceRangeHandler>();
+        services.AddScoped<DeleteReferenceRangeHandler>();
+        services.AddScoped<SetOfferingHandler>();
+        services.AddScoped<ListLabelFormatsHandler>();
+        services.AddScoped<CreateLabelFormatHandler>();
+        services.AddScoped<UpdateLabelFormatHandler>();
+        services.AddScoped<ListLabelFormatAssignmentsHandler>();
+        services.AddScoped<SetLabelFormatAssignmentHandler>();
+        services.AddScoped<ListDerivedCalculationsHandler>();
+        services.AddScoped<ListTatTargetsHandler>();
+        services.AddScoped<ListSpecimenTypesHandler>();
+        services.AddScoped<ListTubeTypesHandler>();
+        services.AddScoped<ListSpecimenRejectionReasonsHandler>();
+
+        // Lab reception (Épica LIS-3)
+        services.AddScoped<ResolveReceptionOrderHandler>();
+        services.AddScoped<CreateExternalOrderHandler>();
+        services.AddScoped<GetAwaitingAdmissionHandler>();
+        services.AddScoped<CreateExternalOrderMultiHandler>();
+        services.AddScoped<GetTechnicalReceptionHandler>();
+        services.AddScoped<ReceiveSpecimenHandler>();
+        services.AddScoped<ResolveRequisitionHandler>();
+        services.AddScoped<ResolveActiveLocationHandler>();
+        services.AddScoped<ListLocationsHandler>();
+        services.AddScoped<ListMyLocationsHandler>();
+        services.AddScoped<CreateLocationHandler>();
+        services.AddScoped<UpdateLocationHandler>();
+        services.AddScoped<AssignUserToLocationHandler>();
+        services.AddScoped<UnassignUserFromLocationHandler>();
+        services.AddScoped<CheckInOrderHandler>();
+        services.AddScoped<ReferOrderExternalHandler>();
+        services.AddScoped<ReceiveRequisitionHandler>();
+        services.AddScoped<GetPendingOrdersHandler>();
+        services.AddScoped<GetSpecimenLabelHandler>();
+        services.AddScoped<GetCollectionQueueHandler>();
+        services.AddScoped<GetWorklistHandler>();
+
+        // Plan de colección (Épica R6-F2)
+        // Puente ciclo de muestra (R6) ↔ flujo operativo (`order_intake`): lo usan el QC y el backfill.
+        services.AddScoped<CollectionIntakeConvergence>();
+        services.AddScoped<ComputeCollectionPlanHandler>();
+        services.AddScoped<GetCollectionPlanHandler>();
+
+        // Ciclo de vida de muestra: etiquetas + estados + timeline (Épica R6-F3/F4)
+        services.AddScoped<GenerateLabelsHandler>();
+        services.AddScoped<PrintSpecimenLabelsHandler>();
+        services.AddScoped<AdvanceContainerHandler>();
+        services.AddScoped<GetContainerTimelineHandler>();
+
+        // Identificación positiva + QC preanalítico (Épica R6-F6)
+        services.AddScoped<VerifyIdentityHandler>();
+        services.AddScoped<QualityControlHandler>();
+
+        // Lab specimen ops (R5: alícuotas / almacenamiento / estabilidad)
+        services.AddScoped<CreateAliquotHandler>();
+        services.AddScoped<RecordStorageHandler>();
+        services.AddScoped<CheckStabilityHandler>();
+
+        // Lab results (Épica LIS-4)
+        services.AddScoped<EnterResultsHandler>();
+        services.AddScoped<GetResultEntrySheetHandler>();
+        services.AddScoped<CorrectResultHandler>();
+        services.AddScoped<GetResultsByPatientHandler>();
+        services.AddScoped<GetResultDetailHandler>();
+        services.AddScoped<GetPendingValidationHandler>();
+        services.AddScoped<GetReportHistoryHandler>();
+        services.AddScoped<ReleaseReportHandler>();
+        services.AddScoped<RejectReportHandler>();
+        services.AddScoped<GetLabReportPdfHandler>();
+        services.AddScoped<GetValidationRejectionReasonsHandler>();
+
+        // Lab rules engine (Épica LIS-5)
+        services.AddScoped<IResultEvaluationService, ResultEvaluationService>();
+        services.AddScoped<ListLabRulesHandler>();
+        services.AddScoped<CreateLabRuleHandler>();
+
+        // Lab dashboard (Épica LIS-8)
+        services.AddScoped<GetLabDashboardHandler>();
 
         return services;
     }

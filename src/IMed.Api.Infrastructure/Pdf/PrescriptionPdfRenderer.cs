@@ -63,6 +63,7 @@ public sealed class PrescriptionPdfRenderer : IPrescriptionPdfRenderer
         RenderHeader(section, model);
         RenderPatientBlock(section, model);
         RenderMedicationsList(section, model);
+        RenderGeneralIndications(section, model);
         RenderSignature(section, model);
         RenderFooter(section, model);
 
@@ -211,6 +212,17 @@ public sealed class PrescriptionPdfRenderer : IPrescriptionPdfRenderer
 
             index++;
         }
+    }
+
+    private static void RenderGeneralIndications(Section section, PrescriptionPdfModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.GeneralIndications))
+        {
+            return;
+        }
+
+        AddStyledParagraph(section, "INDICACIONES GENERALES", "SectionTitle");
+        AddStyledParagraph(section, model.GeneralIndications!, "RxBody");
     }
 
     private static Paragraph AddStyledParagraph(Section section, string text, string styleName)

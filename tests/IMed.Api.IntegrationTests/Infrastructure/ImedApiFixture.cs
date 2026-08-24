@@ -1,3 +1,4 @@
+using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Abstractions.Email;
 using IMed.Api.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
@@ -47,18 +48,31 @@ public sealed class ImedApiFixture : IAsyncLifetime
     {
         Keycloak = new KeycloakMockServer(SigningKey);
 
+        // Migrar ANTES de construir el host. Resolver `Factory.Services` arranca los
+        // IHostedService, y varios seeders consultan tablas al arrancar: si la migración
+        // corriera después, un seeder que toca una tabla recién agregada fallaría contra un
+        // esquema viejo. En producción el pipeline migra antes de levantar el proceso; acá se
+        // reproduce ese orden en vez de depender de que ningún seeder mire el esquema nuevo.
+        // Mismas opciones que el registro real: sin la tabla de historial correcta, EF creería
+        // que no hay ninguna migración aplicada e intentaría crear el esquema desde cero.
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql(TestConnectionString, npgsql =>
+            {
+                npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.GetName().Name);
+                npgsql.MigrationsHistoryTable("__ef_migrations_history");
+            })
+            .Options;
+        await using (var migrationDb = new AppDbContext(options))
+        {
+            await migrationDb.Database.MigrateAsync();
+        }
+
         Factory = new ImedApiFactory(
             postgresConnectionString: TestConnectionString,
             keycloakAuthority: Keycloak.Authority,
             keycloakBaseUrl: Keycloak.BaseUrl,
             hapiBaseUrl: Hapi.BaseUrl,
             emailSender: Email);
-
-        // Aplicar migraciones EF a imed_app_test. Idempotente: si ya están al
-        // día, no hace nada. Si hay nuevas, las aplica.
-        using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()
@@ -90,6 +104,19 @@ public sealed class ImedApiFixture : IAsyncLifetime
                            organization_subscriptions
             RESTART IDENTITY CASCADE;
             """);
+    }
+
+    /// <summary>
+    /// Aprovisiona el catálogo de laboratorio de una org (copy-on-create, rev 53):
+    /// clona las plantillas globales del seed a filas propias de la org. En prod lo
+    /// hace el bootstrap; los tests que usan tokens con org ad-hoc lo llaman para que
+    /// las lecturas estrictas por org vean el catálogo. Idempotente.
+    /// </summary>
+    public async Task ProvisionLabCatalogAsync(Guid organizationId)
+    {
+        using var scope = Factory.Services.CreateScope();
+        var provisioning = scope.ServiceProvider.GetRequiredService<ILabCatalogProvisioning>();
+        await provisioning.ProvisionOrganizationAsync(organizationId);
     }
 }
 
@@ -143,6 +170,15 @@ public sealed class ImedApiFactory : WebApplicationFactory<Program>
         SetEnv("Outbox__BackoffBaseSeconds", "1");
         SetEnv("Outbox__BackoffMaxSeconds", "10");
         SetEnv("Outbox__MaxAttempts", "5");
+        // El modo del proxy FHIR se fija acá y no se hereda del appsettings: cuando el entorno
+        // pasó a `Enforce`, la prueba del modo sombra empezó a fallar sin que nadie tocara ni el
+        // proxy ni la prueba. Un test que depende de una config ambiente no dice lo que dice.
+        SetEnv("FhirGateway__Mode", "Shadow");
+        SetEnv("FhirGateway__IntentMode", "Shadow");
+        // El reconciliador de órdenes se apaga como worker: sus pruebas lo invocan a mano para no
+        // depender del temporizador, y dejarlo barriendo en segundo plano haría que promoviera
+        // órdenes de otras pruebas a destiempo.
+        SetEnv("LabOrderReconciliation__Enabled", "false");
         SetEnv("Logging__LogLevel__Default", "Warning");
         SetEnv("Logging__LogLevel__IMed.Api", "Debug");
 

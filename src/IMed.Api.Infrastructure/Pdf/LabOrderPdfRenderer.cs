@@ -56,7 +56,7 @@ public sealed class LabOrderPdfRenderer : ILabOrderPdfRenderer
         section.PageSetup.RightMargin = Unit.FromCentimeter(2.2);
 
         RenderHeader(section, model);
-        RenderTitleBadge(section);
+        RenderTitleBadge(section, model);
         RenderPatientBlock(section, model);
         RenderOrderBlock(section, model);
         RenderSignature(section, model);
@@ -137,9 +137,74 @@ public sealed class LabOrderPdfRenderer : ILabOrderPdfRenderer
         hr.Format.Borders.Bottom.Color = new Color(180, 180, 180);
     }
 
-    private static void RenderTitleBadge(Section section)
+    private static void RenderTitleBadge(Section section, LabOrderPdfModel model)
     {
         AddStyledParagraph(section, "ORDEN DE LABORATORIO", "DocTitle");
+        if (!string.IsNullOrWhiteSpace(model.OrderNumber))
+        {
+            var num = section.AddParagraph();
+            num.AddFormattedText($"N.º de orden: {model.OrderNumber}", TextFormat.Bold);
+            RenderBarcode(section, model.OrderNumber!);
+        }
+    }
+
+    /// <summary>
+    /// Renderiza el número de orden como código de barras Code128 (F3): ZXing
+    /// genera el patrón de módulos y lo dibujamos como una fila de celdas
+    /// negras/blancas (sin dependencia de imágenes). Defensivo: cualquier fallo
+    /// se ignora — el barcode nunca rompe la generación del PDF.
+    /// </summary>
+    private static void RenderBarcode(Section section, string content)
+    {
+        try
+        {
+            var modules = new ZXing.OneD.Code128Writer().encode(content);
+            if (modules is null || modules.Length == 0)
+            {
+                return;
+            }
+
+            const int quiet = 10;              // zona muda (módulos) a cada lado
+            const double moduleWidthPt = 0.9;  // ancho de 1 módulo en puntos (~0.32 mm)
+
+            // Agrupar módulos consecutivos del mismo color en "runs" (menos columnas).
+            var runs = new List<(int Width, bool Black)> { (quiet, false) };
+            var i = 0;
+            while (i < modules.Length)
+            {
+                var val = modules[i];
+                var len = 1;
+                while (i + len < modules.Length && modules[i + len] == val)
+                {
+                    len++;
+                }
+                runs.Add((len, val));
+                i += len;
+            }
+            runs.Add((quiet, false));
+
+            var table = section.AddTable();
+            table.Borders.Width = 0;
+            table.Format.SpaceBefore = Unit.FromPoint(4);
+            foreach (var r in runs)
+            {
+                table.AddColumn(Unit.FromPoint(r.Width * moduleWidthPt));
+            }
+            var row = table.AddRow();
+            row.Height = Unit.FromCentimeter(1.0);
+            row.HeightRule = MigraDocCore.DocumentObjectModel.Tables.RowHeightRule.Exactly;
+            for (var c = 0; c < runs.Count; c++)
+            {
+                if (runs[c].Black)
+                {
+                    row.Cells[c].Shading.Color = Colors.Black;
+                }
+            }
+        }
+        catch
+        {
+            // El barcode es decorativo respecto al número impreso; nunca rompe el PDF.
+        }
     }
 
     private static void RenderPatientBlock(Section section, LabOrderPdfModel model)
@@ -172,39 +237,63 @@ public sealed class LabOrderPdfRenderer : ILabOrderPdfRenderer
 
     private static void RenderOrderBlock(Section section, LabOrderPdfModel model)
     {
-        AddStyledParagraph(section, "EXAMEN SOLICITADO", "SectionTitle");
+        AddStyledParagraph(
+            section,
+            model.Items.Count > 1 ? "EXÁMENES SOLICITADOS" : "EXAMEN SOLICITADO",
+            "SectionTitle");
 
-        var examLine = section.AddParagraph();
-        examLine.Style = "Exam";
-        examLine.AddText(model.Order.ExamLabel);
-        if (!string.IsNullOrWhiteSpace(model.Order.LoincCode))
+        if (model.Items.Count == 0)
         {
-            AddStyledParagraph(section, $"LOINC {model.Order.LoincCode}", "Subtle");
-        }
-
-        var sub = new List<string>();
-        if (!string.IsNullOrWhiteSpace(model.Order.PriorityLabel))
-        {
-            sub.Add($"Prioridad: {model.Order.PriorityLabel}");
-        }
-        if (!string.IsNullOrWhiteSpace(model.Order.OccurrenceLabel))
-        {
-            sub.Add($"Fecha sugerida: {model.Order.OccurrenceLabel}");
-        }
-        if (sub.Count > 0)
-        {
-            AddStyledParagraph(section, string.Join("   ·   ", sub), "Subtle");
+            AddStyledParagraph(section, "Sin exámenes.", "Subtle");
+            return;
         }
 
-        if (!string.IsNullOrWhiteSpace(model.Order.Reason))
+        var index = 1;
+        foreach (var item in model.Items)
         {
-            AddStyledParagraph(section, "MOTIVO CLÍNICO", "SectionTitle");
-            section.AddParagraph(model.Order.Reason!);
-        }
-        if (!string.IsNullOrWhiteSpace(model.Order.Notes))
-        {
-            AddStyledParagraph(section, "INDICACIONES AL LABORATORIO", "SectionTitle");
-            section.AddParagraph(model.Order.Notes!);
+            var examLine = section.AddParagraph();
+            examLine.Style = "Exam";
+            examLine.AddText(model.Items.Count > 1 ? $"{index}.  {item.ExamLabel}" : item.ExamLabel);
+            if (!string.IsNullOrWhiteSpace(item.LoincCode))
+            {
+                AddStyledParagraph(section, $"LOINC {item.LoincCode}", "Subtle");
+            }
+
+            var sub = new List<string>();
+            if (!string.IsNullOrWhiteSpace(item.PriorityLabel))
+            {
+                sub.Add($"Prioridad: {item.PriorityLabel}");
+            }
+            if (!string.IsNullOrWhiteSpace(item.OccurrenceLabel))
+            {
+                sub.Add($"Fecha sugerida: {item.OccurrenceLabel}");
+            }
+            if (sub.Count > 0)
+            {
+                AddStyledParagraph(section, string.Join("   ·   ", sub), "Subtle");
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.AvailabilityLabel))
+            {
+                var av = section.AddParagraph();
+                av.AddFormattedText("Disponibilidad: ", TextFormat.Italic);
+                av.AddText(item.AvailabilityLabel!);
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Reason))
+            {
+                var r = section.AddParagraph();
+                r.AddFormattedText("Motivo: ", TextFormat.Italic);
+                r.AddText(item.Reason!);
+            }
+            if (!string.IsNullOrWhiteSpace(item.Notes))
+            {
+                var n = section.AddParagraph();
+                n.AddFormattedText("Indicaciones al laboratorio: ", TextFormat.Italic);
+                n.AddText(item.Notes!);
+            }
+
+            index++;
         }
     }
 
