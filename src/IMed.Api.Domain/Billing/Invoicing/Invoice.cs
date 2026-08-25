@@ -123,6 +123,32 @@ public sealed class Invoice
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 
+    /// <summary>
+    /// Aplica un cobro al saldo. El estado se deduce del saldo y no se pasa desde afuera: una
+    /// factura marcada "pagada" con saldo pendiente es un descuadre que aparece al cierre del mes.
+    /// </summary>
+    public void ApplyPayment(decimal amount, TimeProvider? timeProvider = null)
+    {
+        if (amount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount), "El cobro tiene que ser positivo.");
+        }
+        if (Status is InvoiceStatus.Voided or InvoiceStatus.Draft)
+        {
+            throw new InvalidOperationException(
+                $"Una factura en estado '{Status}' no recibe cobros.");
+        }
+        if (amount > Balance)
+        {
+            throw new InvalidOperationException(
+                $"El cobro de {amount:N2} supera el saldo de {Balance:N2}.");
+        }
+
+        Balance = Math.Round(Balance - amount, 2, MidpointRounding.AwayFromZero);
+        Status = Balance == 0 ? InvoiceStatus.Paid : InvoiceStatus.PartiallyPaid;
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
     public void Void(TimeProvider? timeProvider = null)
     {
         if (Status == InvoiceStatus.Voided)

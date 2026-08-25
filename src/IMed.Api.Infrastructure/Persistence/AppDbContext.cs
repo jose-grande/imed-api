@@ -3,6 +3,7 @@ using IMed.Api.Domain.Auditing;
 using IMed.Api.Domain.Authorization;
 using IMed.Api.Domain.Billing;
 using IMed.Api.Domain.Billing.Accounts;
+using IMed.Api.Domain.Billing.Cash;
 using IMed.Api.Domain.Billing.Catalog;
 using IMed.Api.Domain.Billing.Fiscal;
 using IMed.Api.Domain.Billing.Invoicing;
@@ -96,6 +97,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
     public DbSet<FiscalDocument> FiscalDocuments => Set<FiscalDocument>();
+    public DbSet<CashSession> CashSessions => Set<CashSession>();
+    public DbSet<CashMovement> CashMovements => Set<CashMovement>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<PaymentAllocation> PaymentAllocations => Set<PaymentAllocation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +113,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureBillingCatalog(modelBuilder);
         ConfigureBillingAccounts(modelBuilder);
         ConfigureInvoicing(modelBuilder);
+        ConfigureCash(modelBuilder);
         ConfigureOrganizationSubscription(modelBuilder);
         ConfigureUserTierAssignment(modelBuilder);
         ConfigureOutboxEvent(modelBuilder);
@@ -326,6 +332,97 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // se filtra en memoria porque solaparse es legítimo al reemplazar un tope.
             e.HasIndex(x => new { x.OrganizationId, x.UserId, x.Kind })
                 .HasDatabaseName("ix_user_authorization_limit_org_user_kind");
+        });
+    }
+
+    /// <summary>
+    /// Caja: turno, cobro y arqueo (FSF §7.2, épica FAC-6).
+    /// </summary>
+    private static void ConfigureCash(ModelBuilder b)
+    {
+        b.Entity<CashSession>(e =>
+        {
+            e.ToTable("cash_session");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.CashPointId).IsRequired();
+            e.Property(x => x.CashierUserId).IsRequired();
+            e.Property(x => x.OpeningAmount).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.OpenedAt).IsRequired();
+            e.Property(x => x.ClosedAt);
+            e.Property(x => x.CountedAmount).HasPrecision(19, 4);
+            e.Property(x => x.ExpectedAmount).HasPrecision(19, 4);
+            e.Property(x => x.Difference).HasPrecision(19, 4);
+            e.Property(x => x.DifferenceNote).HasMaxLength(500);
+            e.Property(x => x.DifferenceAuthorizedBy);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.PreviousSessionId);
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // Una caja tiene a lo sumo un turno abierto. Dos turnos simultáneos sobre la misma
+            // gaveta hacen que el arqueo de cada uno reclame el efectivo del otro.
+            e.HasIndex(x => new { x.OrganizationId, x.CashPointId })
+                .IsUnique()
+                .HasFilter("status = 'Open'")
+                .HasDatabaseName("ux_cash_session_open_per_point");
+
+            e.HasIndex(x => new { x.OrganizationId, x.CashierUserId, x.Status })
+                .HasDatabaseName("ix_cash_session_org_cashier_status");
+        });
+
+        b.Entity<CashMovement>(e =>
+        {
+            e.ToTable("cash_movement");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.CashSessionId).IsRequired();
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Amount).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            e.Property(x => x.PerformedBy).IsRequired();
+            e.Property(x => x.AuthorizedBy);
+            e.Property(x => x.OccurredAt).IsRequired();
+
+            e.HasIndex(x => x.CashSessionId).HasDatabaseName("ix_cash_movement_session");
+        });
+
+        b.Entity<Payment>(e =>
+        {
+            e.ToTable("billing_payment");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.PartyId).IsRequired();
+            e.Property(x => x.CashSessionId).IsRequired();
+            e.Property(x => x.Method).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Amount).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.Reference).HasMaxLength(64);
+            e.Property(x => x.ReceivedBy).IsRequired();
+            e.Property(x => x.ReceivedAt).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.ReversalReason).HasMaxLength(500);
+
+            e.HasMany(x => x.Allocations)
+                .WithOne()
+                .HasForeignKey(a => a.PaymentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(x => x.Allocations).UsePropertyAccessMode(PropertyAccessMode.Field);
+
+            // El arqueo suma los pagos de un turno: sin este índice, cerrar caja barre la tabla.
+            e.HasIndex(x => new { x.CashSessionId, x.Status })
+                .HasDatabaseName("ix_payment_session_status");
+        });
+
+        b.Entity<PaymentAllocation>(e =>
+        {
+            e.ToTable("billing_payment_allocation");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.PaymentId).IsRequired();
+            e.Property(x => x.InvoiceId).IsRequired();
+            e.Property(x => x.Amount).HasPrecision(19, 4).IsRequired();
+
+            e.HasIndex(x => x.InvoiceId).HasDatabaseName("ix_payment_allocation_invoice");
         });
     }
 

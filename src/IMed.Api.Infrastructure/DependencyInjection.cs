@@ -275,6 +275,7 @@ public static class DependencyInjection
         services.AddScoped<IPartyRepository, PartyRepository>();
         services.AddScoped<IAuthorizationLimitRepository, AuthorizationLimitRepository>();
         services.AddScoped<IInvoiceRepository, InvoiceRepository>();
+        services.AddScoped<ICashRepository, CashRepository>();
         services.AddSingleton<IFiscalAdapter, HondurasSarAdapter>();
         services.AddSingleton<IFiscalAdapterResolver, FiscalAdapterResolver>();
         services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();
@@ -473,6 +474,16 @@ public static class DependencyInjection
         services.AddScoped<ListAccountInvoicesHandler>();
         services.AddScoped<VoidInvoiceHandler>();
         services.AddScoped<GetInvoicePdfHandler>();
+
+        // Caja: turno, cobro y arqueo (FAC-6).
+        services.AddScoped<CashExpectationCalculator>();
+        services.AddScoped<OpenCashSessionHandler>();
+        services.AddScoped<CloseCashSessionHandler>();
+        services.AddScoped<HandoverCashSessionHandler>();
+        services.AddScoped<RegisterCashMovementHandler>();
+        services.AddScoped<GetOpenSessionHandler>();
+        services.AddScoped<ReceivePaymentHandler>();
+        services.AddScoped<ListSessionPaymentsHandler>();
         services.AddScoped<CheckInOrderHandler>();
         services.AddScoped<ReferOrderExternalHandler>();
         services.AddScoped<ReceiveRequisitionHandler>();

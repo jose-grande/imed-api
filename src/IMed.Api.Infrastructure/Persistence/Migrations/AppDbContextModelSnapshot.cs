@@ -440,6 +440,243 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("billing_charge", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.CashMovement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("amount");
+
+                    b.Property<Guid?>("AuthorizedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("authorized_by");
+
+                    b.Property<Guid>("CashSessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cash_session_id");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("PerformedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("performed_by");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CashSessionId")
+                        .HasDatabaseName("ix_cash_movement_session");
+
+                    b.ToTable("cash_movement", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.CashSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CashPointId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cash_point_id");
+
+                    b.Property<Guid>("CashierUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cashier_user_id");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at");
+
+                    b.Property<decimal?>("CountedAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("counted_amount");
+
+                    b.Property<decimal?>("Difference")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("difference");
+
+                    b.Property<Guid?>("DifferenceAuthorizedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("difference_authorized_by");
+
+                    b.Property<string>("DifferenceNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("difference_note");
+
+                    b.Property<decimal?>("ExpectedAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("expected_amount");
+
+                    b.Property<DateTimeOffset>("OpenedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("opened_at");
+
+                    b.Property<decimal>("OpeningAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("opening_amount");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid?>("PreviousSessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("previous_session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "CashPointId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_cash_session_open_per_point")
+                        .HasFilter("status = 'Open'");
+
+                    b.HasIndex("OrganizationId", "CashierUserId", "Status")
+                        .HasDatabaseName("ix_cash_session_org_cashier_status");
+
+                    b.ToTable("cash_session", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.Payment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("amount");
+
+                    b.Property<Guid>("CashSessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cash_session_id");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("method");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("PartyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("party_id");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received_at");
+
+                    b.Property<Guid>("ReceivedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("received_by");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("reference");
+
+                    b.Property<string>("ReversalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reversal_reason");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CashSessionId", "Status")
+                        .HasDatabaseName("ix_payment_session_status");
+
+                    b.ToTable("billing_payment", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.PaymentAllocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("amount");
+
+                    b.Property<Guid>("InvoiceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("invoice_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("PaymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("payment_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("ix_payment_allocation_invoice");
+
+                    b.HasIndex("PaymentId");
+
+                    b.ToTable("billing_payment_allocation", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Billing.Catalog.BillableItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3799,6 +4036,15 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("user_tier_assignments", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.PaymentAllocation", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Billing.Cash.Payment", null)
+                        .WithMany("Allocations")
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Billing.Invoicing.InvoiceLine", b =>
                 {
                     b.HasOne("IMed.Api.Domain.Billing.Invoicing.Invoice", null)
@@ -3851,6 +4097,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CollectionPlanId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.Payment", b =>
+                {
+                    b.Navigation("Allocations");
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Billing.Invoicing.Invoice", b =>
