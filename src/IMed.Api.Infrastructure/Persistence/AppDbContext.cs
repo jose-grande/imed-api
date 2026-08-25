@@ -5,6 +5,7 @@ using IMed.Api.Domain.Billing;
 using IMed.Api.Domain.Billing.Accounts;
 using IMed.Api.Domain.Billing.Catalog;
 using IMed.Api.Domain.Billing.Fiscal;
+using IMed.Api.Domain.Billing.Invoicing;
 using IMed.Api.Domain.Catalogs;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Forms;
@@ -92,6 +93,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
     public DbSet<BillingAccount> BillingAccounts => Set<BillingAccount>();
     public DbSet<BillingCharge> BillingCharges => Set<BillingCharge>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
+    public DbSet<FiscalDocument> FiscalDocuments => Set<FiscalDocument>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -103,6 +107,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureFiscalEngine(modelBuilder);
         ConfigureBillingCatalog(modelBuilder);
         ConfigureBillingAccounts(modelBuilder);
+        ConfigureInvoicing(modelBuilder);
         ConfigureOrganizationSubscription(modelBuilder);
         ConfigureUserTierAssignment(modelBuilder);
         ConfigureOutboxEvent(modelBuilder);
@@ -325,6 +330,130 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     }
 
     /// <summary>
+    /// Factura comercial y documento fiscal (FSF §5.2 y §7, épica FAC-5). Van en tablas separadas
+    /// porque un mismo episodio puede producir dos documentos fiscales con distinto comprador, y
+    /// una proforma es factura comercial sin documento fiscal.
+    /// </summary>
+    private static void ConfigureInvoicing(ModelBuilder b)
+    {
+        b.Entity<Invoice>(e =>
+        {
+            e.ToTable("billing_invoice");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.AccountId).IsRequired();
+            e.Property(x => x.BillToPartyId).IsRequired();
+            e.Property(x => x.BillToKind).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.IssueDate).IsRequired();
+            e.Property(x => x.DueDate);
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.Subtotal).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.DiscountTotal).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.TaxTotal).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.GrandTotal).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.Balance).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.FiscalDocumentId);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasMany(x => x.Lines)
+                .WithOne()
+                .HasForeignKey(l => l.InvoiceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);
+
+            e.HasIndex(x => new { x.OrganizationId, x.AccountId })
+                .HasDatabaseName("ix_invoice_org_account");
+            e.HasIndex(x => new { x.OrganizationId, x.Status })
+                .HasDatabaseName("ix_invoice_org_status");
+        });
+
+        b.Entity<InvoiceLine>(e =>
+        {
+            e.ToTable("billing_invoice_line");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.InvoiceId).IsRequired();
+            e.Property(x => x.ChargeId).IsRequired();
+            e.Property(x => x.LineNumber).IsRequired();
+            e.Property(x => x.DescriptionSnapshot).HasMaxLength(300).IsRequired();
+            e.Property(x => x.TaxCodeSnapshot).HasMaxLength(32).IsRequired();
+            e.Property(x => x.TaxTreatment).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.TaxRate).HasPrecision(7, 4).IsRequired();
+            e.Property(x => x.Quantity).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.UnitPrice).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.DiscountAmount).HasPrecision(19, 4).IsRequired();
+
+            // Un cargo no puede salir en dos facturas: sería cobrarle dos veces al paciente por
+            // el mismo acto, con dos documentos legales que lo respaldan.
+            e.HasIndex(x => new { x.OrganizationId, x.ChargeId })
+                .IsUnique()
+                .HasDatabaseName("ux_invoice_line_org_charge");
+        });
+
+        b.Entity<FiscalDocument>(e =>
+        {
+            e.ToTable("fiscal_document");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.LocationId).IsRequired();
+            e.Property(x => x.FiscalAuthorizationId).IsRequired();
+            e.Property(x => x.DocumentTypeId).IsRequired();
+            e.Property(x => x.InvoiceId).IsRequired();
+
+            e.Property(x => x.EstablishmentCode).HasMaxLength(3).IsRequired();
+            e.Property(x => x.EmissionPointCode).HasMaxLength(3).IsRequired();
+            e.Property(x => x.DocumentTypeCode).HasMaxLength(2).IsRequired();
+            e.Property(x => x.Sequence).IsRequired();
+            e.Property(x => x.FullNumber).HasMaxLength(32).IsRequired();
+            e.Property(x => x.IssuedAt).IsRequired();
+
+            e.Property(x => x.IssuerTaxId).HasMaxLength(32);
+            e.Property(x => x.BuyerPartyId);
+            e.Property(x => x.BuyerTaxId).HasMaxLength(32);
+            e.Property(x => x.BuyerName).HasMaxLength(300).IsRequired();
+
+            e.Property(x => x.SubtotalExempt).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.SubtotalExonerated).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.SubtotalTaxed15).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.SubtotalTaxed18).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.DiscountTotal).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.TaxTotal).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.GrandTotal).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.AmountInWords).HasMaxLength(500);
+
+            e.Property(x => x.CaiSnapshot).HasMaxLength(64).IsRequired();
+            e.Property(x => x.RangeSnapshot).HasMaxLength(64).IsRequired();
+            e.Property(x => x.LimitDateSnapshot).IsRequired();
+
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.VoidedAt);
+            e.Property(x => x.VoidReason).HasMaxLength(500);
+            e.Property(x => x.ReplacesDocumentId);
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            // 🔴 Un número fiscal se emite UNA vez. Si dos documentos comparten los cuatro
+            // segmentos, la clínica tiene dos facturas legales con el mismo número: incumplimiento,
+            // no bug cosmético. La reserva atómica de FAC-2 lo impide aguas arriba; esto lo hace
+            // imposible aguas abajo, que es donde la base puede garantizarlo.
+            e.HasIndex(x => new { x.OrganizationId, x.EstablishmentCode, x.EmissionPointCode, x.DocumentTypeCode, x.Sequence })
+                .IsUnique()
+                .HasDatabaseName("ux_fiscal_document_number");
+
+            // Una factura tiene a lo sumo un documento fiscal. Sin esto, un reintento de emisión
+            // podría timbrarla dos veces consumiendo dos correlativos.
+            e.HasIndex(x => x.InvoiceId)
+                .IsUnique()
+                .HasDatabaseName("ux_fiscal_document_invoice");
+
+            // Búsqueda del cajero: el paciente vuelve con el papel en la mano.
+            e.HasIndex(x => new { x.OrganizationId, x.FullNumber })
+                .HasDatabaseName("ix_fiscal_document_org_number");
+        });
+    }
+
+    /// <summary>
     /// Cuentas y cargos (FSF bloque 3, épica FAC-4). Acá vive la invariante que define la épica:
     /// el índice único de idempotencia sobre el origen del cargo.
     /// </summary>
@@ -511,6 +640,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.CountryCode).HasMaxLength(2).IsRequired();
             e.Property(x => x.RegimeCode).HasMaxLength(40).IsRequired();
             e.Property(x => x.ConfigJson).HasColumnType("jsonb");
+            e.Property(x => x.IssuerTaxId).HasMaxLength(32);
+            e.Property(x => x.IssuerLegalName).HasMaxLength(300);
             e.Property(x => x.ValidFrom).IsRequired();
             e.Property(x => x.ValidTo);
             e.Property(x => x.CreatedAt).IsRequired();

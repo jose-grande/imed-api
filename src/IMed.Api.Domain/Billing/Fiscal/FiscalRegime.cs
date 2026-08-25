@@ -26,6 +26,23 @@ public sealed class FiscalRegime
     /// <summary>Configuración que solo el adaptador entiende. JSON opaco para el núcleo.</summary>
     public string? ConfigJson { get; private set; }
 
+    /// <summary>
+    /// Identificación tributaria del emisor — el RTN de la clínica en Honduras.
+    ///
+    /// <para><b>Vive acá y no en la organización</b> porque es la identidad con la que se emite
+    /// <em>bajo este régimen</em>, y comparte su vigencia: si la clínica cambia de RTN, lo
+    /// correcto es cerrar el régimen y abrir otro, para que los documentos ya emitidos sigan
+    /// explicándose con el RTN que llevaban impreso. Colgarlo de la organización lo convertiría en
+    /// un dato mutable que reescribe la historia de cada factura.</para>
+    ///
+    /// <para>Nullable porque el régimen se puede configurar antes de tener el dato; la emisión sí
+    /// lo exige (FSF-DEC-07: varias sedes, un solo emisor fiscal).</para>
+    /// </summary>
+    public string? IssuerTaxId { get; private set; }
+
+    /// <summary>Razón social del emisor, como debe salir impresa.</summary>
+    public string? IssuerLegalName { get; private set; }
+
     public DateOnly ValidFrom { get; private set; }
     public DateOnly? ValidTo { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -40,6 +57,8 @@ public sealed class FiscalRegime
         DateOnly validFrom,
         string? configJson = null,
         DateOnly? validTo = null,
+        string? issuerTaxId = null,
+        string? issuerLegalName = null,
         TimeProvider? timeProvider = null)
     {
         if (string.IsNullOrWhiteSpace(countryCode))
@@ -63,12 +82,28 @@ public sealed class FiscalRegime
             CountryCode = countryCode.Trim().ToUpperInvariant(),
             RegimeCode = regimeCode.Trim().ToUpperInvariant(),
             ConfigJson = string.IsNullOrWhiteSpace(configJson) ? null : configJson,
+            IssuerTaxId = Trim(issuerTaxId),
+            IssuerLegalName = Trim(issuerLegalName),
             ValidFrom = validFrom,
             ValidTo = validTo,
             CreatedAt = now,
             UpdatedAt = now,
         };
     }
+
+    /// <summary>
+    /// Fija la identidad fiscal del emisor. Se puede completar después de configurar el régimen,
+    /// pero antes de la primera emisión.
+    /// </summary>
+    public void SetIssuer(string? taxId, string? legalName, TimeProvider? timeProvider = null)
+    {
+        IssuerTaxId = Trim(taxId);
+        IssuerLegalName = Trim(legalName);
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
+    private static string? Trim(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public bool IsInEffectOn(DateOnly day) =>
         day >= ValidFrom && (ValidTo is not { } end || day <= end);

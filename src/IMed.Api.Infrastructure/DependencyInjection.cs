@@ -142,6 +142,7 @@ public static class DependencyInjection
         // se inicializa lazy en el ctor — seguro como singleton.
         services.AddSingleton<IPrescriptionPdfRenderer, PrescriptionPdfRenderer>();
         services.AddSingleton<ILabOrderPdfRenderer, LabOrderPdfRenderer>();
+        services.AddSingleton<IInvoicePdfRenderer, InvoicePdfRenderer>();
         services.AddSingleton<ILabReportPdfRenderer, LabReportPdfRenderer>();
         services.AddSingleton<ISpecimenLabelPdfRenderer, SpecimenLabelPdfRenderer>();
         return services;
@@ -273,6 +274,7 @@ public static class DependencyInjection
         services.AddScoped<IBillingAccountRepository, BillingAccountRepository>();
         services.AddScoped<IPartyRepository, PartyRepository>();
         services.AddScoped<IAuthorizationLimitRepository, AuthorizationLimitRepository>();
+        services.AddScoped<IInvoiceRepository, InvoiceRepository>();
         services.AddSingleton<IFiscalAdapter, HondurasSarAdapter>();
         services.AddSingleton<IFiscalAdapterResolver, FiscalAdapterResolver>();
         services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();
@@ -464,6 +466,13 @@ public static class DependencyInjection
         services.AddScoped<CaptureChargeHandler>();
         services.AddScoped<ReverseChargeHandler>();
         services.AddScoped<CaptureLabOrderChargesHandler>();
+
+        // Factura y timbrado (FAC-5).
+        services.AddScoped<IssueInvoiceHandler>();
+        services.AddScoped<GetInvoiceHandler>();
+        services.AddScoped<ListAccountInvoicesHandler>();
+        services.AddScoped<VoidInvoiceHandler>();
+        services.AddScoped<GetInvoicePdfHandler>();
         services.AddScoped<CheckInOrderHandler>();
         services.AddScoped<ReferOrderExternalHandler>();
         services.AddScoped<ReceiveRequisitionHandler>();

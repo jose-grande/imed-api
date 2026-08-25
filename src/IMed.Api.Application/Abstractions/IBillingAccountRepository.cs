@@ -19,6 +19,14 @@ public interface IBillingAccountRepository
     Task<IReadOnlyList<BillingCharge>> ListChargesAsync(
         Guid organizationId, Guid accountId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Cargos capturados de una cuenta, leídos <b>para modificarlos</b> — la emisión los marca
+    /// como facturados. Misma razón que <see cref="GetChargeForUpdateAsync"/>: adjuntar una
+    /// instancia distinta de una fila que el contexto ya rastrea es un conflicto de identidad.
+    /// </summary>
+    Task<IReadOnlyList<BillingCharge>> ListCapturedChargesForUpdateAsync(
+        Guid organizationId, Guid accountId, CancellationToken ct = default);
+
     Task<BillingCharge?> GetChargeAsync(Guid organizationId, Guid chargeId, CancellationToken ct = default);
 
     /// <summary>

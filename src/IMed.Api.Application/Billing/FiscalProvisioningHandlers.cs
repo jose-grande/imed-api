@@ -12,6 +12,8 @@ public sealed record TaxCodeDto(
 /// <summary>Qué quedó configurado tras aprovisionar el régimen.</summary>
 public sealed record FiscalSetupDto(
     string? RegimeCode,
+    string? IssuerTaxId,
+    string? IssuerLegalName,
     IReadOnlyList<FiscalDocumentTypeDto> DocumentTypes,
     IReadOnlyList<TaxCodeDto> TaxCodes);
 
@@ -25,6 +27,8 @@ public sealed class GetFiscalSetupHandler(IFiscalRepository repo, IClinicClock c
 
         return new FiscalSetupDto(
             regime?.RegimeCode,
+            regime?.IssuerTaxId,
+            regime?.IssuerLegalName,
             tipos.Select(t => new FiscalDocumentTypeDto(
                 t.Id, t.Code, t.Name, t.DocumentCode, t.AffectsReceivable, t.Sign, t.Active)).ToList(),
             tributos.Select(t => new TaxCodeDto(
@@ -72,7 +76,11 @@ public sealed class ProvisionFiscalRegimeHandler(IFiscalRepository repo, IClinic
     ];
 
     public async Task<FiscalSetupDto> HandleAsync(
-        Guid orgId, string regimeCode, CancellationToken ct = default)
+        Guid orgId,
+        string regimeCode,
+        string? issuerTaxId = null,
+        string? issuerLegalName = null,
+        CancellationToken ct = default)
     {
         if (!string.Equals(regimeCode, "HN_SAR_CAI", StringComparison.OrdinalIgnoreCase))
         {
@@ -81,11 +89,23 @@ public sealed class ProvisionFiscalRegimeHandler(IFiscalRepository repo, IClinic
         }
 
         var today = clock.Today();
+        var regimen = await repo.GetActiveRegimeAsync(orgId, today, ct);
 
-        if (await repo.GetActiveRegimeAsync(orgId, today, ct) is null)
+        if (regimen is null)
         {
             await repo.AddRegimeAsync(
-                FiscalRegime.Create(orgId, "HN", "HN_SAR_CAI", today), ct);
+                FiscalRegime.Create(
+                    orgId, "HN", "HN_SAR_CAI", today,
+                    issuerTaxId: issuerTaxId, issuerLegalName: issuerLegalName), ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(issuerTaxId) || !string.IsNullOrWhiteSpace(issuerLegalName))
+        {
+            // Volver a llamar con los datos del emisor los completa: el régimen suele configurarse
+            // antes de tener el RTN a mano.
+            regimen.SetIssuer(
+                issuerTaxId ?? regimen.IssuerTaxId,
+                issuerLegalName ?? regimen.IssuerLegalName);
+            await repo.UpdateRegimeAsync(regimen, ct);
         }
 
         var tiposExistentes = (await repo.ListDocumentTypesAsync(orgId, ct))

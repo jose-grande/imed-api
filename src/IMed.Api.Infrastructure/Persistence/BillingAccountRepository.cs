@@ -61,6 +61,15 @@ public sealed class BillingAccountRepository(AppDbContext db) : IBillingAccountR
             .OrderBy(x => x.PerformedAt)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<BillingCharge>> ListCapturedChargesForUpdateAsync(
+        Guid organizationId, Guid accountId, CancellationToken ct = default) =>
+        await db.BillingCharges
+            .Where(x => x.OrganizationId == organizationId
+                        && x.AccountId == accountId
+                        && x.Status == ChargeStatus.Captured)
+            .OrderBy(x => x.PerformedAt)
+            .ToListAsync(ct);
+
     public Task<BillingCharge?> GetChargeAsync(
         Guid organizationId, Guid chargeId, CancellationToken ct = default) =>
         db.BillingCharges.AsNoTracking()

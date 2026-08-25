@@ -79,7 +79,8 @@ public static class BillingFiscalEndpoints
         try
         {
             return Results.Ok(await handler.HandleAsync(
-                orgId.Value, request.RegimeCode ?? "HN_SAR_CAI", ct));
+                orgId.Value, request.RegimeCode ?? "HN_SAR_CAI",
+                request.IssuerTaxId, request.IssuerLegalName, ct));
         }
         catch (ArgumentException ex)
         {
@@ -190,7 +191,10 @@ public static class BillingFiscalEndpoints
         Guid.TryParse(principal.FindFirstValue("organization_id"), out var id) ? id : null;
 }
 
-public sealed record ProvisionFiscalRequest(string? RegimeCode);
+public sealed record ProvisionFiscalRequest(
+    string? RegimeCode,
+    string? IssuerTaxId,
+    string? IssuerLegalName);
 
 public sealed record RegisterAuthorizationRequest(
     Guid LocationId,

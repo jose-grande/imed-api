@@ -22,6 +22,7 @@ public interface IFiscalRepository
     // ---- Régimen y catálogos del núcleo ----
     Task<FiscalRegime?> GetActiveRegimeAsync(Guid organizationId, DateOnly day, CancellationToken ct = default);
     Task AddRegimeAsync(FiscalRegime regime, CancellationToken ct = default);
+    Task UpdateRegimeAsync(FiscalRegime regime, CancellationToken ct = default);
 
     Task<IReadOnlyList<TaxCode>> ListTaxCodesAsync(Guid organizationId, CancellationToken ct = default);
     Task<TaxCode?> GetTaxCodeAsync(Guid organizationId, Guid id, CancellationToken ct = default);

@@ -27,6 +27,15 @@ public sealed class FiscalRepository(AppDbContext db) : IFiscalRepository
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task UpdateRegimeAsync(FiscalRegime regime, CancellationToken ct = default)
+    {
+        if (db.Entry(regime).State == EntityState.Detached)
+        {
+            db.FiscalRegimes.Update(regime);
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task<IReadOnlyList<TaxCode>> ListTaxCodesAsync(
         Guid organizationId, CancellationToken ct = default) =>
         await db.TaxCodes.AsNoTracking()
