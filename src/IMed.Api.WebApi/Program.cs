@@ -168,6 +168,7 @@ app.MapBillingAccountEndpoints();
 app.MapBillingInvoiceEndpoints();
 app.MapBillingCashEndpoints();
 app.MapBillingGateEndpoints();
+app.MapBillingReportEndpoints();
 app.MapAuthorizationEndpoints();
 app.MapFormsEndpoints();
 app.MapDiagnosesEndpoints();

@@ -277,6 +277,7 @@ public static class DependencyInjection
         services.AddScoped<IInvoiceRepository, InvoiceRepository>();
         services.AddScoped<ICashRepository, CashRepository>();
         services.AddScoped<IServiceWaiverRepository, ServiceWaiverRepository>();
+        services.AddScoped<IFiscalReportRepository, FiscalReportRepository>();
         services.AddSingleton<IFiscalAdapter, HondurasSarAdapter>();
         services.AddSingleton<IFiscalAdapterResolver, FiscalAdapterResolver>();
         services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();
@@ -491,6 +492,12 @@ public static class DependencyInjection
         services.AddScoped<IServiceGate, ServiceGateAdapter>();
         services.AddScoped<WaiveServiceHandler>();
         services.AddScoped<ListServiceWaiversHandler>();
+
+        // Corte fiscal y reportes (FAC-8).
+        services.AddScoped<GetDailyCashCutHandler>();
+        services.AddScoped<GetTaxReportHandler>();
+        services.AddScoped<GetDocumentLedgerHandler>();
+        services.AddScoped<GetExceptionReportHandler>();
         services.AddScoped<CheckInOrderHandler>();
         services.AddScoped<ReferOrderExternalHandler>();
         services.AddScoped<ReceiveRequisitionHandler>();
