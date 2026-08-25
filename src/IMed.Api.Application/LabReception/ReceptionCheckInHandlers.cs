@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Billing;
 using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Lab;
 
@@ -9,10 +10,16 @@ namespace IMed.Api.Application.LabReception;
 /// clínica → la orden entra a la cola de recepción. Devuelve qué exámenes quedan
 /// en cola (in-house) y cuáles hay que referir a un laboratorio externo
 /// (no ofertados en la sede). Idempotente.
+///
+/// <para><b>Acá entra el cargo</b> (FAC-4, origen <c>lab_order</c>): admitir la orden es el acto
+/// que la clínica cobra. La captura es lo último que se hace y no puede tumbar nada de lo
+/// anterior — un laboratorio que no puede recibir una muestra porque la facturación tuvo un
+/// problema es peor que un cargo que hay que agregar a mano después.</para>
 /// </summary>
 public sealed class CheckInOrderHandler(
     IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops,
-    ResolveActiveLocationHandler activeLocation, TimeProvider timeProvider)
+    ResolveActiveLocationHandler activeLocation, CaptureLabOrderChargesHandler billing,
+    TimeProvider timeProvider)
 {
     private static readonly HashSet<string> ExcludedStatuses =
         new(StringComparer.OrdinalIgnoreCase) { "revoked", "entered-in-error" };
@@ -44,6 +51,7 @@ public sealed class CheckInOrderHandler(
 
         var queued = new List<CheckInExam>();
         var external = new List<CheckInExam>();
+        var cobrables = new List<CaptureLabOrderChargesHandler.LabOrderCharge>();
         foreach (var o in orders)
         {
             var tests = await LabRouting.ExpandOrderAsync(catalog, orgId, o.CatalogCode, ct);
@@ -52,6 +60,9 @@ public sealed class CheckInOrderHandler(
             if (inHouse)
             {
                 queued.Add(exam);
+                // Solo lo que se hace acá se cobra acá: lo referido lo paga el paciente en el
+                // laboratorio que se lo haga.
+                cobrables.Add(await DescribirCobroAsync(orgId, o, ct));
             }
             else
             {
@@ -72,7 +83,48 @@ public sealed class CheckInOrderHandler(
             }
         }
 
-        return new CheckInResult(requisition, patientId, patientName, encounterId, queued, external);
+        // Último y aparte: el cargo. `CaptureLabOrderChargesHandler` no propaga excepciones, así
+        // que la admisión que acaba de ocurrir no se deshace por un problema de facturación.
+        var cobro = cobrables.Count > 0
+            ? await billing.HandleAsync(orgId, cobrables, ct)
+            : null;
+
+        return new CheckInResult(
+            requisition, patientId, patientName, encounterId, queued, external, cobro);
+    }
+
+    /// <summary>
+    /// Traduce una orden del LIS a lo que la facturación necesita: el id de catálogo de su panel
+    /// o su prueba, que es por donde se busca el cobrable enlazado.
+    ///
+    /// <para>Se resuelve panel primero, igual que <see cref="LabRouting.ExpandOrderAsync"/>: un
+    /// código puede existir en las dos tablas, y si acá ganara la prueba se cobraría el analito
+    /// suelto en vez del panel entero.</para>
+    /// </summary>
+    private async Task<CaptureLabOrderChargesHandler.LabOrderCharge> DescribirCobroAsync(
+        Guid orgId, LabOrderSnapshot o, CancellationToken ct)
+    {
+        Guid? panelId = null;
+        Guid? testId = null;
+
+        if (!string.IsNullOrWhiteSpace(o.CatalogCode))
+        {
+            var panel = await catalog.GetPanelByCodeOrLoincAsync(orgId, o.CatalogCode, ct);
+            if (panel is not null)
+            {
+                panelId = panel.Id;
+            }
+            else
+            {
+                var prueba = await catalog.GetTestByCodeOrLoincAsync(orgId, o.CatalogCode, ct);
+                testId = prueba?.Id;
+            }
+        }
+
+        return new CaptureLabOrderChargesHandler.LabOrderCharge(
+            o.Id, testId, panelId,
+            o.CodeText ?? o.CodeDisplay ?? o.CatalogCode ?? "Estudio de laboratorio",
+            o.PatientFhirId, o.EncounterFhirId);
     }
 }
 
@@ -82,7 +134,13 @@ public sealed record CheckInResult(
     string? PatientName,
     string? EncounterId,
     IReadOnlyList<CheckInExam> Queued,
-    IReadOnlyList<CheckInExam> External);
+    IReadOnlyList<CheckInExam> External,
+    /// <summary>
+    /// Qué pasó con el cobro. Null si no había nada que cobrar. Va en la respuesta para que la
+    /// recepción pueda mostrar los exámenes que quedaron sin cobrable en vez de que el examen se
+    /// haga gratis en silencio.
+    /// </summary>
+    LabChargeSummary? Billing = null);
 
 public sealed record CheckInExam(string ServiceRequestId, string? LoincCode, string? CodeText);
 

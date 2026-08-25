@@ -34,6 +34,15 @@ public static class PermissionCatalog
     /// <summary>Crear y modificar datos del expediente: paciente, encuentro, alergias, recetas.</summary>
     public const string RecordWrite = "record.write";
 
+    // --- Facturación (U1 · FAC-1) -------------------------------------------
+    // Se declaran los cuatro de una vez aunque FAC-1 no tenga todavía una pantalla que cobre:
+    // son los que la consola del módulo y el guard consultan para decidir qué estación mostrar,
+    // y agregarlos de a uno obligaría a re-sembrar la matriz en cada épica.
+    public const string BillingRead = "billing.read";
+    public const string BillingCharge = "billing.charge";
+    public const string BillingCollect = "billing.collect";
+    public const string BillingSupervise = "billing.supervise";
+
     // --- Administración -----------------------------------------------------
     public const string OrgManage = "org.manage";
     public const string OrgTeamManage = "org.team.manage";
@@ -56,6 +65,13 @@ public static class PermissionCatalog
         "pathologist",
         "lab_tech",
         "auxiliar",
+        "billing_supervisor",
+        "billing_clerk",
+        "cashier",
+        "pharmacist",
+        "pharmacy_tech",
+        "inventory_manager",
+        "warehouse_keeper",
         "imed_superadmin",
     ];
 
@@ -76,6 +92,11 @@ public static class PermissionCatalog
         (LabResultReadAny, "lab", "Ver cualquier resultado del laboratorio"),
         (RecordWrite, "record", "Crear y modificar datos del expediente"),
 
+        (BillingRead, "billing", "Ver el módulo de facturación: cuentas, cargos, documentos"),
+        (BillingCharge, "billing", "Abrir cuentas y capturar cargos"),
+        (BillingCollect, "billing", "Cobrar, emitir documentos y arquear el propio turno"),
+        (BillingSupervise, "billing", "Autorizar descuentos y anulaciones, gestionar CAI y arqueos ajenos"),
+
         (OrgManage, "org", "Administrar la organización"),
         (OrgTeamManage, "org", "Administrar el equipo y las invitaciones"),
         (OrgLocationsManage, "org", "Administrar las sedes"),
@@ -92,6 +113,7 @@ public static class PermissionCatalog
         ("org_admin", LabRead), ("org_admin", LabOperate), ("org_admin", LabValidate), ("org_admin", LabManage),
         ("org_admin", RecordSearchDemographics), ("org_admin", RecordReadAny), ("org_admin", LabResultReadAny),
         ("org_admin", RecordWrite),
+        ("org_admin", BillingRead), ("org_admin", BillingCharge), ("org_admin", BillingCollect), ("org_admin", BillingSupervise),
         ("org_admin", OrgManage), ("org_admin", OrgTeamManage), ("org_admin", OrgLocationsManage), ("org_admin", OrgPolicyManage),
 
         // El médico ve el laboratorio y el expediente. En una clínica chica el de turno cubre a
@@ -115,6 +137,25 @@ public static class PermissionCatalog
         ("lab_supervisor", LabRead), ("lab_supervisor", LabOperate), ("lab_supervisor", LabValidate),
         ("lab_supervisor", LabManage), ("lab_supervisor", RecordSearchDemographics),
         ("lab_supervisor", LabResultReadAny), ("lab_supervisor", OrgLocationsManage),
+
+        // Facturación (U1). Los tres reciben `record.search.demographics` y nada más del
+        // expediente: para cobrar una consulta hay que poder identificar al paciente, pero no hay
+        // razón para que caja lea su historia. La forma `patient.find` de SEC-4 ya recorta la
+        // respuesta a los campos de identificación cuando el que pregunta no puede leer todo.
+        ("cashier", BillingRead), ("cashier", BillingCollect),
+        ("cashier", RecordSearchDemographics),
+
+        ("billing_clerk", BillingRead), ("billing_clerk", BillingCharge),
+        ("billing_clerk", RecordSearchDemographics),
+
+        ("billing_supervisor", BillingRead), ("billing_supervisor", BillingCharge),
+        ("billing_supervisor", BillingCollect), ("billing_supervisor", BillingSupervise),
+        ("billing_supervisor", RecordSearchDemographics),
+
+        // `pharmacist`, `pharmacy_tech`, `warehouse_keeper` e `inventory_manager` se declaran en
+        // `Roles` sin permisos base: sus módulos son U2 y U3. Existir sin conceder nada los deja
+        // configurables desde la pantalla de la matriz —que es el punto de tenerlos listados— sin
+        // abrir acceso a nada mientras tanto.
 
         // Soporte interno de IMed: acceso elevado, auditado. Sin permisos de expediente por
         // defecto — que soporte pueda leer historias clínicas debe ser una decisión explícita.

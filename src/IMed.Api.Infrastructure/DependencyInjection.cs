@@ -3,6 +3,7 @@ using IMed.Api.Application.Abstractions.Email;
 using IMed.Api.Application.Abstractions.Terminology;
 using IMed.Api.Application.Allergies;
 using IMed.Api.Application.Authorization;
+using IMed.Api.Application.Billing;
 using IMed.Api.Application.Catalogs;
 using IMed.Api.Application.Diagnoses;
 using IMed.Api.Application.FhirGateway;
@@ -28,6 +29,7 @@ using IMed.Api.Application.Practitioners;
 using IMed.Api.Application.Prescriptions;
 using IMed.Api.Application.Profile;
 using IMed.Api.Application.Team;
+using IMed.Api.Infrastructure.Billing;
 using IMed.Api.Infrastructure.Email;
 using IMed.Api.Infrastructure.Hapi;
 using IMed.Api.Infrastructure.Identifiers;
@@ -61,6 +63,12 @@ public static class DependencyInjection
         // reinician cada día, así que tienen que usar el día local y no el de UTC.
         services.Configure<ClinicClockOptions>(configuration.GetSection(ClinicClockOptions.SectionName));
         services.TryAddSingleton<IClinicClock, ClinicClock>();
+
+        // Umbrales de aviso del motor fiscal (FAC-2). Se inyecta la instancia y no IOptions<>
+        // porque los handlers la usan en un mapeo puro y no necesitan recarga en caliente.
+        var fiscalAlerts = new FiscalAlertOptions();
+        configuration.GetSection(FiscalAlertOptions.SectionName).Bind(fiscalAlerts);
+        services.AddSingleton(fiscalAlerts);
 
         services.AddDatabase(configuration);
         services.AddKeycloakAdmin(configuration);
@@ -256,6 +264,17 @@ public static class DependencyInjection
         services.AddScoped<SetPermissionGrantHandler>();
         services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<ILocationProvisioning, LocationProvisioning>();
+
+        // Motor fiscal (FAC-2). El adaptador se registra en la colección y se resuelve por
+        // `regime_code`: agregar facturación electrónica u otro país es sumar una línea acá, no
+        // tocar el motor.
+        services.AddScoped<IFiscalRepository, FiscalRepository>();
+        services.AddScoped<IBillingCatalogRepository, BillingCatalogRepository>();
+        services.AddScoped<IBillingAccountRepository, BillingAccountRepository>();
+        services.AddScoped<IPartyRepository, PartyRepository>();
+        services.AddScoped<IAuthorizationLimitRepository, AuthorizationLimitRepository>();
+        services.AddSingleton<IFiscalAdapter, HondurasSarAdapter>();
+        services.AddSingleton<IFiscalAdapterResolver, FiscalAdapterResolver>();
         services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();
         services.AddScoped<ILabOperationsRepository, LabOperationsRepository>();
         services.AddScoped<ILabRuleRepository, LabRuleRepository>();
@@ -417,6 +436,34 @@ public static class DependencyInjection
         services.AddScoped<UpdateLocationHandler>();
         services.AddScoped<AssignUserToLocationHandler>();
         services.AddScoped<UnassignUserFromLocationHandler>();
+
+        // Motor fiscal (FAC-2).
+        services.AddScoped<GetFiscalSetupHandler>();
+        services.AddScoped<ProvisionFiscalRegimeHandler>();
+        services.AddScoped<ListFiscalAuthorizationsHandler>();
+        services.AddScoped<RegisterFiscalAuthorizationHandler>();
+        services.AddScoped<RevokeFiscalAuthorizationHandler>();
+        services.AddScoped<ListCashPointsHandler>();
+        services.AddScoped<CreateCashPointHandler>();
+        services.AddScoped<SetCashPointActiveHandler>();
+
+        // Catálogo de cobrables y tarifarios (FAC-3).
+        services.AddScoped<SearchBillableItemsHandler>();
+        services.AddScoped<CreateBillableItemHandler>();
+        services.AddScoped<ResolvePriceHandler>();
+        services.AddScoped<ListPriceListsHandler>();
+        services.AddScoped<CreatePriceListHandler>();
+        services.AddScoped<ListPriceListItemsHandler>();
+        services.AddScoped<SetPriceHandler>();
+
+        // Cuentas y captura de cargos (FAC-4).
+        services.AddScoped<OpenAccountHandler>();
+        services.AddScoped<CloseAccountHandler>();
+        services.AddScoped<SearchAccountsHandler>();
+        services.AddScoped<GetAccountStatementHandler>();
+        services.AddScoped<CaptureChargeHandler>();
+        services.AddScoped<ReverseChargeHandler>();
+        services.AddScoped<CaptureLabOrderChargesHandler>();
         services.AddScoped<CheckInOrderHandler>();
         services.AddScoped<ReferOrderExternalHandler>();
         services.AddScoped<ReceiveRequisitionHandler>();

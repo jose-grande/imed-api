@@ -1,6 +1,10 @@
 using System.Text.Json;
 using IMed.Api.Domain.Auditing;
 using IMed.Api.Domain.Authorization;
+using IMed.Api.Domain.Billing;
+using IMed.Api.Domain.Billing.Accounts;
+using IMed.Api.Domain.Billing.Catalog;
+using IMed.Api.Domain.Billing.Fiscal;
 using IMed.Api.Domain.Catalogs;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Forms;
@@ -76,6 +80,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     // Eje de sede (ADR-008)
     public DbSet<OrganizationLocation> OrganizationLocations => Set<OrganizationLocation>();
     public DbSet<UserLocationAssignment> UserLocations => Set<UserLocationAssignment>();
+    public DbSet<Party> Parties => Set<Party>();
+    public DbSet<UserAuthorizationLimit> UserAuthorizationLimits => Set<UserAuthorizationLimit>();
+    public DbSet<FiscalRegime> FiscalRegimes => Set<FiscalRegime>();
+    public DbSet<TaxCode> TaxCodes => Set<TaxCode>();
+    public DbSet<FiscalDocumentType> FiscalDocumentTypes => Set<FiscalDocumentType>();
+    public DbSet<FiscalAuthorization> FiscalAuthorizations => Set<FiscalAuthorization>();
+    public DbSet<CashPoint> CashPoints => Set<CashPoint>();
+    public DbSet<BillableItem> BillableItems => Set<BillableItem>();
+    public DbSet<PriceList> PriceLists => Set<PriceList>();
+    public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
+    public DbSet<BillingAccount> BillingAccounts => Set<BillingAccount>();
+    public DbSet<BillingCharge> BillingCharges => Set<BillingCharge>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -83,6 +99,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         ConfigureAuthorization(modelBuilder);
         ConfigureLocations(modelBuilder);
+        ConfigureBillingFoundations(modelBuilder);
+        ConfigureFiscalEngine(modelBuilder);
+        ConfigureBillingCatalog(modelBuilder);
+        ConfigureBillingAccounts(modelBuilder);
         ConfigureOrganizationSubscription(modelBuilder);
         ConfigureUserTierAssignment(modelBuilder);
         ConfigureOutboxEvent(modelBuilder);
@@ -207,6 +227,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Code).HasMaxLength(32).IsRequired();
             e.Property(x => x.Name).HasMaxLength(200).IsRequired();
             e.Property(x => x.LocationFhirId).HasMaxLength(64);
+            // Código de establecimiento fiscal (FSF): 3 dígitos, nulo mientras la sede no facture.
+            e.Property(x => x.FiscalEstablishmentCode).HasMaxLength(3);
             e.Property(x => x.IsDefault).IsRequired();
             e.Property(x => x.Active).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
@@ -237,6 +259,358 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .HasDatabaseName("ix_user_location_org_user");
             e.HasIndex(x => x.LocationId)
                 .HasDatabaseName("ix_user_location_location");
+        });
+    }
+
+    /// <summary>
+    /// Cimientos de facturación (FSF bloque 0, épica FAC-1). La sede no está acá: es
+    /// <c>organization_location</c> de ADR-008, que ya es exactamente eso.
+    /// </summary>
+    private static void ConfigureBillingFoundations(ModelBuilder b)
+    {
+        b.Entity<Party>(e =>
+        {
+            e.ToTable("party");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(32).IsRequired();
+            e.Property(x => x.PatientFhirId).HasMaxLength(64);
+            e.Property(x => x.LegalName).HasMaxLength(300).IsRequired();
+            e.Property(x => x.TradeName).HasMaxLength(300);
+            e.Property(x => x.TaxId).HasMaxLength(32);
+            e.Property(x => x.TaxIdKind).HasMaxLength(32);
+            e.Property(x => x.Address).HasMaxLength(500);
+            e.Property(x => x.Email).HasMaxLength(200);
+            e.Property(x => x.Phone).HasMaxLength(50);
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // Un paciente tiene una sola parte por organización. Sin esto, dos cobros del mismo
+            // paciente pueden colgar de partes distintas y su estado de cuenta queda partido en
+            // dos sin que nada lo señale. Filtrado porque solo las partes de tipo paciente lo tienen.
+            e.HasIndex(x => new { x.OrganizationId, x.PatientFhirId })
+                .IsUnique()
+                .HasFilter("patient_fhir_id IS NOT NULL")
+                .HasDatabaseName("ux_party_org_patient");
+
+            // El RTN se repite legítimamente —una empresa que además es proveedora— así que el
+            // índice es de búsqueda, no único: la caja teclea el RTN para encontrar al cliente.
+            e.HasIndex(x => new { x.OrganizationId, x.TaxId })
+                .HasDatabaseName("ix_party_org_tax_id");
+            e.HasIndex(x => new { x.OrganizationId, x.Kind })
+                .HasDatabaseName("ix_party_org_kind");
+        });
+
+        b.Entity<UserAuthorizationLimit>(e =>
+        {
+            e.ToTable("user_authorization_limit");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.UserId).IsRequired();
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            // Todo el dinero del módulo va en numeric(19,4).
+            e.Property(x => x.Value).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.RequiresApprovalAbove).IsRequired();
+            e.Property(x => x.ValidFrom).IsRequired();
+            e.Property(x => x.ValidTo);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // La consulta real es "el tope vigente de este usuario para esta clase"; la vigencia
+            // se filtra en memoria porque solaparse es legítimo al reemplazar un tope.
+            e.HasIndex(x => new { x.OrganizationId, x.UserId, x.Kind })
+                .HasDatabaseName("ix_user_authorization_limit_org_user_kind");
+        });
+    }
+
+    /// <summary>
+    /// Cuentas y cargos (FSF bloque 3, épica FAC-4). Acá vive la invariante que define la épica:
+    /// el índice único de idempotencia sobre el origen del cargo.
+    /// </summary>
+    private static void ConfigureBillingAccounts(ModelBuilder b)
+    {
+        b.Entity<BillingAccount>(e =>
+        {
+            e.ToTable("billing_account");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.PartyId).IsRequired();
+            e.Property(x => x.PatientFhirId).HasMaxLength(64);
+            e.Property(x => x.GuarantorPartyId);
+            e.Property(x => x.EncounterFhirId).HasMaxLength(64);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.OpenedAt).IsRequired();
+            e.Property(x => x.ClosedAt);
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // Una cuenta de episodio por encuentro. Sin esto, dos capturas concurrentes del mismo
+            // encuentro abren dos cuentas y el estado del paciente queda partido en dos sin que
+            // nada lo señale. Filtrado porque las cuentas corrientes no tienen encuentro.
+            e.HasIndex(x => new { x.OrganizationId, x.EncounterFhirId })
+                .IsUnique()
+                .HasFilter("encounter_fhir_id IS NOT NULL")
+                .HasDatabaseName("ux_billing_account_org_encounter");
+
+            e.HasIndex(x => new { x.OrganizationId, x.PatientFhirId })
+                .HasDatabaseName("ix_billing_account_org_patient");
+            e.HasIndex(x => new { x.OrganizationId, x.Status })
+                .HasDatabaseName("ix_billing_account_org_status");
+        });
+
+        b.Entity<BillingCharge>(e =>
+        {
+            e.ToTable("billing_charge");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.AccountId).IsRequired();
+            e.Property(x => x.BillableItemId).IsRequired();
+            e.Property(x => x.DescriptionSnapshot).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Quantity).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.UnitPrice).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.PriceSource).HasConversion<string>().HasMaxLength(30).IsRequired();
+            e.Property(x => x.PriceListId);
+            e.Property(x => x.TaxCodeId).IsRequired();
+            e.Property(x => x.TaxRate).HasPrecision(7, 4).IsRequired();
+            e.Property(x => x.DiscountAmount).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.DiscountAuthorizedBy);
+            e.Property(x => x.Component).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.PerformedAt).IsRequired();
+            e.Property(x => x.PerformerPractitionerId).HasMaxLength(64);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.SourceKind).HasConversion<string>().HasMaxLength(30).IsRequired();
+            e.Property(x => x.SourceId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.SourceFhirRef).HasMaxLength(128);
+            e.Property(x => x.Reason).HasMaxLength(500);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.ReversedAt);
+            e.Property(x => x.ReversalReason).HasMaxLength(500);
+
+            // 🔴 LA invariante de FAC-4. Un mismo acto clínico no puede producir dos cargos del
+            // mismo ítem. Sin esto, CUALQUIER reproceso —un resultado que se vuelve a liberar, un
+            // job que reintenta, un doble clic— le cobra dos veces al paciente. Es la clase de
+            // defecto que no se ve en pruebas y llega como reclamo.
+            //
+            // Excluye los reversados a propósito: si un cargo se reversó por error de captura, el
+            // acto tiene que poder volver a cobrarse. De lo contrario un error de dedo dejaría el
+            // servicio sin poder facturarse nunca.
+            e.HasIndex(x => new { x.OrganizationId, x.SourceKind, x.SourceId, x.BillableItemId, x.Component })
+                .IsUnique()
+                .HasFilter("status <> 'Reversed'")
+                .HasDatabaseName("ux_billing_charge_source_idempotency");
+
+            e.HasIndex(x => new { x.AccountId, x.Status })
+                .HasDatabaseName("ix_billing_charge_account_status");
+        });
+    }
+
+    /// <summary>
+    /// Catálogo de cobrables y tarifarios (FSF bloque 2, épica FAC-3). Es el CDM: un solo lugar
+    /// donde vive el precio, para que cada punto de captura no invente el suyo.
+    /// </summary>
+    private static void ConfigureBillingCatalog(ModelBuilder b)
+    {
+        b.Entity<BillableItem>(e =>
+        {
+            e.ToTable("billing_billable_item");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(30).IsRequired();
+            e.Property(x => x.Component).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.TaxCodeId).IsRequired();
+            e.Property(x => x.DefaultPrice).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.PaymentTiming).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.LabTestId);
+            e.Property(x => x.LabPanelId);
+            e.Property(x => x.StockItemId);
+            e.Property(x => x.ServiceCode).HasMaxLength(64);
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_billable_item_org_code");
+
+            // El LIS captura el cargo buscando por la prueba o el panel de la orden: sin estos
+            // índices, cada admisión de orden barre el catálogo entero.
+            e.HasIndex(x => new { x.OrganizationId, x.LabTestId })
+                .HasFilter("lab_test_id IS NOT NULL")
+                .HasDatabaseName("ix_billable_item_org_lab_test");
+            e.HasIndex(x => new { x.OrganizationId, x.LabPanelId })
+                .HasFilter("lab_panel_id IS NOT NULL")
+                .HasDatabaseName("ix_billable_item_org_lab_panel");
+        });
+
+        b.Entity<PriceList>(e =>
+        {
+            e.ToTable("billing_price_list");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.PayerContractId);
+            e.Property(x => x.Priority).IsRequired();
+            e.Property(x => x.ValidFrom).IsRequired();
+            e.Property(x => x.ValidTo);
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_price_list_org_code");
+        });
+
+        b.Entity<PriceListItem>(e =>
+        {
+            e.ToTable("billing_price_list_item");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.PriceListId).IsRequired();
+            e.Property(x => x.BillableItemId).IsRequired();
+            e.Property(x => x.Price).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.MinPrice).HasPrecision(19, 4);
+            e.Property(x => x.DiscountPctMax).HasPrecision(7, 4);
+            e.Property(x => x.ValidFrom).IsRequired();
+            e.Property(x => x.ValidTo);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // La consulta de la resolución: todos los precios de un ítem, de cualquier lista.
+            e.HasIndex(x => new { x.OrganizationId, x.BillableItemId })
+                .HasDatabaseName("ix_price_list_item_org_item");
+            e.HasIndex(x => x.PriceListId)
+                .HasDatabaseName("ix_price_list_item_list");
+            // Un ítem no puede tener dos precios vigentes a la vez en la misma lista: si los
+            // tuviera, el que gana dependería del orden de las filas. Se permite sucesión con
+            // fechas distintas, no duplicado con la misma.
+            e.HasIndex(x => new { x.PriceListId, x.BillableItemId, x.ValidFrom })
+                .IsUnique()
+                .HasDatabaseName("ux_price_list_item_list_item_from");
+        });
+    }
+
+    /// <summary>
+    /// Motor fiscal (FSF bloque 1, épica FAC-2). El núcleo —régimen, tributos, tipos de
+    /// documento— no menciona ningún país; el adaptador se resuelve por <c>regime_code</c>.
+    /// </summary>
+    private static void ConfigureFiscalEngine(ModelBuilder b)
+    {
+        b.Entity<FiscalRegime>(e =>
+        {
+            e.ToTable("fiscal_regime");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.CountryCode).HasMaxLength(2).IsRequired();
+            e.Property(x => x.RegimeCode).HasMaxLength(40).IsRequired();
+            e.Property(x => x.ConfigJson).HasColumnType("jsonb");
+            e.Property(x => x.ValidFrom).IsRequired();
+            e.Property(x => x.ValidTo);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.ValidFrom })
+                .HasDatabaseName("ix_fiscal_regime_org_from");
+        });
+
+        b.Entity<TaxCode>(e =>
+        {
+            e.ToTable("tax_code");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.Code).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Rate).HasPrecision(7, 4).IsRequired();
+            e.Property(x => x.Treatment).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_tax_code_org_code");
+        });
+
+        b.Entity<FiscalDocumentType>(e =>
+        {
+            e.ToTable("fiscal_document_type");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.DocumentCode).HasMaxLength(2).IsRequired();
+            e.Property(x => x.AffectsReceivable).IsRequired();
+            e.Property(x => x.Sign).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_fiscal_document_type_org_code");
+        });
+
+        b.Entity<FiscalAuthorization>(e =>
+        {
+            e.ToTable("fiscal_authorization");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.LocationId).IsRequired();
+            e.Property(x => x.DocumentTypeId).IsRequired();
+            e.Property(x => x.Cai).HasMaxLength(64).IsRequired();
+            e.Property(x => x.EmissionPointCode).HasMaxLength(3).IsRequired();
+            e.Property(x => x.RangeFrom).IsRequired();
+            e.Property(x => x.RangeTo).IsRequired();
+            e.Property(x => x.NextSequence).IsRequired();
+            e.Property(x => x.LimitDate).IsRequired();
+            // Se guarda como texto porque el UPDATE atómico de la reserva compara contra 'Active'
+            // en SQL crudo: con un enum numérico esa condición diría `status = 0` y dejaría de
+            // leerse como lo que significa.
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.IssuedAt).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // Un CAI es una autorización distinta por cada tipo de documento y punto de emisión.
+            e.HasIndex(x => new { x.OrganizationId, x.Cai, x.DocumentTypeId, x.EmissionPointCode })
+                .IsUnique()
+                .HasDatabaseName("ux_fiscal_authorization_org_cai_type_point");
+            // La consulta de la caja: la autorización vigente de esta sede para este documento.
+            e.HasIndex(x => new { x.OrganizationId, x.LocationId, x.DocumentTypeId, x.Status })
+                .HasDatabaseName("ix_fiscal_authorization_org_location_type_status");
+        });
+
+        b.Entity<CashPoint>(e =>
+        {
+            e.ToTable("cash_point");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.LocationId).IsRequired();
+            e.Property(x => x.Code).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Profile).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.EmissionPointCode).HasMaxLength(3).IsRequired();
+            e.Property(x => x.IsTemporary).IsRequired();
+            e.Property(x => x.PrinterProfile).HasMaxLength(64);
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => new { x.OrganizationId, x.Code })
+                .IsUnique()
+                .HasDatabaseName("ux_cash_point_org_code");
+            // Deliberadamente NO único sobre emission_point_code: varias cajas pueden compartir
+            // punto de emisión si la autoridad lo acepta, y esa respuesta la da el contador del
+            // cliente. Imponerlo acá cerraría la mitad de las configuraciones legales.
+            e.HasIndex(x => new { x.OrganizationId, x.LocationId })
+                .HasDatabaseName("ix_cash_point_org_location");
         });
     }
 

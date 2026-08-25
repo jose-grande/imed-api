@@ -49,6 +49,53 @@ public sealed class PermissionMatrixTests(ImedApiFixture fixture) : IAsyncLifeti
     }
 
     [Fact]
+    public async Task LosRolesDeFacturacion_cobranSinPoderLeerElExpediente()
+    {
+        // El punto de FAC-1: caja necesita identificar al paciente para cobrarle, y nada más.
+        // Si algún día alguien le concede `record.read.any` a caja, que sea una decisión visible
+        // en la pantalla de la matriz y no un descuido de esta línea.
+        using var scope = fixture.Factory.Services.CreateScope();
+        var resolver = scope.ServiceProvider.GetRequiredService<IPermissionResolver>();
+        var org = Guid.NewGuid();
+
+        var cajero = await resolver.ResolveAsync(org, ["cashier"]);
+        cajero.Has(PermissionCatalog.BillingCollect).Should().BeTrue();
+        cajero.Has(PermissionCatalog.RecordSearchDemographics).Should().BeTrue("hay que identificar a quién se le cobra");
+        cajero.Has(PermissionCatalog.RecordReadAny).Should().BeFalse("caja no tiene por qué leer historias clínicas");
+        cajero.Has(PermissionCatalog.BillingSupervise).Should().BeFalse("el cajero no autoriza sus propios descuentos");
+
+        var facturador = await resolver.ResolveAsync(org, ["billing_clerk"]);
+        facturador.Has(PermissionCatalog.BillingCharge).Should().BeTrue();
+        facturador.Has(PermissionCatalog.BillingCollect).Should().BeFalse("facturar no es cobrar");
+
+        var jefe = await resolver.ResolveAsync(org, ["billing_supervisor"]);
+        jefe.Has(PermissionCatalog.BillingSupervise).Should().BeTrue();
+        jefe.Has(PermissionCatalog.BillingCollect).Should().BeTrue("cubre la caja cuando hace falta");
+        jefe.Has(PermissionCatalog.RecordReadAny).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task LosRolesDeFarmaciaYBodega_existenSinConcederNada()
+    {
+        // Se declararon en el realm junto con los de facturación para tocarlo una sola vez. Que
+        // existan no puede significar que abran algo: sus módulos son U2 y U3.
+        using var scope = fixture.Factory.Services.CreateScope();
+        var resolver = scope.ServiceProvider.GetRequiredService<IPermissionResolver>();
+        var org = Guid.NewGuid();
+
+        foreach (var rol in new[] { "pharmacist", "pharmacy_tech", "warehouse_keeper", "inventory_manager" })
+        {
+            var permisos = await resolver.ResolveAsync(org, [rol]);
+            permisos.Has(PermissionCatalog.BillingRead).Should().BeFalse($"'{rol}' no es de facturación");
+            permisos.Has(PermissionCatalog.RecordReadAny).Should().BeFalse($"'{rol}' no lee expedientes");
+            permisos.Has(PermissionCatalog.LabRead).Should().BeFalse($"'{rol}' no es del laboratorio");
+        }
+
+        // Pero sí tienen que estar listados, porque es lo que permite configurarlos.
+        PermissionCatalog.Roles.Should().Contain(["pharmacist", "pharmacy_tech", "warehouse_keeper", "inventory_manager"]);
+    }
+
+    [Fact]
     public async Task RevocarUnPermiso_surteEfectoSinEsperarElTtl()
     {
         var userId = Guid.NewGuid();

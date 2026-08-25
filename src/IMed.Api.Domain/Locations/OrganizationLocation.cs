@@ -37,6 +37,20 @@ public sealed class OrganizationLocation
     /// </summary>
     public bool IsDefault { get; private set; }
 
+    /// <summary>
+    /// Código de establecimiento con el que la autoridad fiscal identifica esta sede — en Honduras,
+    /// los tres primeros dígitos del número de factura (FSF, bloque 0).
+    ///
+    /// <para>Vive acá y no en una tabla aparte porque la "sede física" del módulo de facturación y
+    /// la sede de ADR-008 son la misma cosa: dos tablas de sedes obligarían a contestar en cada
+    /// bodega, caja y punto de emisión cuál de las dos es la buena, y a mantenerlas sincronizadas
+    /// a mano.</para>
+    ///
+    /// <para>Null mientras la sede no facture. La organización aporta el RTN y la razón social;
+    /// la sede aporta solo este código (FSF-DEC-07: varias sedes, un solo emisor fiscal).</para>
+    /// </summary>
+    public string? FiscalEstablishmentCode { get; private set; }
+
     public bool Active { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -81,6 +95,30 @@ public sealed class OrganizationLocation
             throw new ArgumentException("El id del Location FHIR es obligatorio.", nameof(locationFhirId));
         }
         LocationFhirId = locationFhirId;
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
+    /// <summary>
+    /// Fija el código de establecimiento fiscal. Se valida acá y no en la pantalla porque un
+    /// código mal formado no se descubre al guardarlo: se descubre cuando el primer documento
+    /// sale con un número que la autoridad no reconoce.
+    /// </summary>
+    public void SetFiscalEstablishmentCode(string? code, TimeProvider? timeProvider = null)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            FiscalEstablishmentCode = null;
+        }
+        else
+        {
+            var trimmed = code.Trim();
+            if (trimmed.Length != 3 || !trimmed.All(char.IsAsciiDigit))
+            {
+                throw new ArgumentException(
+                    "El código de establecimiento son exactamente 3 dígitos.", nameof(code));
+            }
+            FiscalEstablishmentCode = trimmed;
+        }
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 

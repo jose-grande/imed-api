@@ -235,6 +235,897 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("role_permission", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Accounts.BillingAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at");
+
+                    b.Property<string>("EncounterFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("encounter_fhir_id");
+
+                    b.Property<Guid?>("GuarantorPartyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("guarantor_party_id");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset>("OpenedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("opened_at");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("PartyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("party_id");
+
+                    b.Property<string>("PatientFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("patient_fhir_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "EncounterFhirId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_billing_account_org_encounter")
+                        .HasFilter("encounter_fhir_id IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "PatientFhirId")
+                        .HasDatabaseName("ix_billing_account_org_patient");
+
+                    b.HasIndex("OrganizationId", "Status")
+                        .HasDatabaseName("ix_billing_account_org_status");
+
+                    b.ToTable("billing_account", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Accounts.BillingCharge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<Guid>("BillableItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("billable_item_id");
+
+                    b.Property<string>("Component")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("component");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DescriptionSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("description_snapshot");
+
+                    b.Property<decimal>("DiscountAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("discount_amount");
+
+                    b.Property<Guid?>("DiscountAuthorizedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("discount_authorized_by");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("PerformedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("performed_at");
+
+                    b.Property<string>("PerformerPractitionerId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("performer_practitioner_id");
+
+                    b.Property<Guid?>("PriceListId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("price_list_id");
+
+                    b.Property<string>("PriceSource")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("price_source");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("quantity");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("ReversalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reversal_reason");
+
+                    b.Property<DateTimeOffset?>("ReversedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reversed_at");
+
+                    b.Property<string>("SourceFhirRef")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("source_fhir_ref");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("source_id");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("source_kind");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TaxCodeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tax_code_id");
+
+                    b.Property<decimal>("TaxRate")
+                        .HasPrecision(7, 4)
+                        .HasColumnType("numeric(7,4)")
+                        .HasColumnName("tax_rate");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("unit_price");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "Status")
+                        .HasDatabaseName("ix_billing_charge_account_status");
+
+                    b.HasIndex("OrganizationId", "SourceKind", "SourceId", "BillableItemId", "Component")
+                        .IsUnique()
+                        .HasDatabaseName("ux_billing_charge_source_idempotency")
+                        .HasFilter("status <> 'Reversed'");
+
+                    b.ToTable("billing_charge", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Catalog.BillableItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("Component")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("component");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal>("DefaultPrice")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("default_price");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid?>("LabPanelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_panel_id");
+
+                    b.Property<Guid?>("LabTestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lab_test_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PaymentTiming")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("payment_timing");
+
+                    b.Property<string>("ServiceCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("service_code");
+
+                    b.Property<Guid?>("StockItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_item_id");
+
+                    b.Property<Guid>("TaxCodeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tax_code_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_billable_item_org_code");
+
+                    b.HasIndex("OrganizationId", "LabPanelId")
+                        .HasDatabaseName("ix_billable_item_org_lab_panel")
+                        .HasFilter("lab_panel_id IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "LabTestId")
+                        .HasDatabaseName("ix_billable_item_org_lab_test")
+                        .HasFilter("lab_test_id IS NOT NULL");
+
+                    b.ToTable("billing_billable_item", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Catalog.PriceList", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid?>("PayerContractId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("payer_contract_id");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer")
+                        .HasColumnName("priority");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_from");
+
+                    b.Property<DateOnly?>("ValidTo")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_to");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_price_list_org_code");
+
+                    b.ToTable("billing_price_list", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Catalog.PriceListItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BillableItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("billable_item_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal?>("DiscountPctMax")
+                        .HasPrecision(7, 4)
+                        .HasColumnType("numeric(7,4)")
+                        .HasColumnName("discount_pct_max");
+
+                    b.Property<decimal?>("MinPrice")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("min_price");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("price");
+
+                    b.Property<Guid>("PriceListId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("price_list_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_from");
+
+                    b.Property<DateOnly?>("ValidTo")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_to");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PriceListId")
+                        .HasDatabaseName("ix_price_list_item_list");
+
+                    b.HasIndex("OrganizationId", "BillableItemId")
+                        .HasDatabaseName("ix_price_list_item_org_item");
+
+                    b.HasIndex("PriceListId", "BillableItemId", "ValidFrom")
+                        .IsUnique()
+                        .HasDatabaseName("ux_price_list_item_list_item_from");
+
+                    b.ToTable("billing_price_list_item", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Fiscal.CashPoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EmissionPointCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("emission_point_code");
+
+                    b.Property<bool>("IsTemporary")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_temporary");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PrinterProfile")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("printer_profile");
+
+                    b.Property<string>("Profile")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("profile");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_cash_point_org_code");
+
+                    b.HasIndex("OrganizationId", "LocationId")
+                        .HasDatabaseName("ix_cash_point_org_location");
+
+                    b.ToTable("cash_point", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Fiscal.FiscalAuthorization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Cai")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("cai");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DocumentTypeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_type_id");
+
+                    b.Property<string>("EmissionPointCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("emission_point_code");
+
+                    b.Property<DateTimeOffset>("IssuedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("issued_at");
+
+                    b.Property<DateOnly>("LimitDate")
+                        .HasColumnType("date")
+                        .HasColumnName("limit_date");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<long>("NextSequence")
+                        .HasColumnType("bigint")
+                        .HasColumnName("next_sequence");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<long>("RangeFrom")
+                        .HasColumnType("bigint")
+                        .HasColumnName("range_from");
+
+                    b.Property<long>("RangeTo")
+                        .HasColumnType("bigint")
+                        .HasColumnName("range_to");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Cai", "DocumentTypeId", "EmissionPointCode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_fiscal_authorization_org_cai_type_point");
+
+                    b.HasIndex("OrganizationId", "LocationId", "DocumentTypeId", "Status")
+                        .HasDatabaseName("ix_fiscal_authorization_org_location_type_status");
+
+                    b.ToTable("fiscal_authorization", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Fiscal.FiscalDocumentType", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<bool>("AffectsReceivable")
+                        .HasColumnType("boolean")
+                        .HasColumnName("affects_receivable");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DocumentCode")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)")
+                        .HasColumnName("document_code");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<short>("Sign")
+                        .HasColumnType("smallint")
+                        .HasColumnName("sign");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_fiscal_document_type_org_code");
+
+                    b.ToTable("fiscal_document_type", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Fiscal.FiscalRegime", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ConfigJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("config_json");
+
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)")
+                        .HasColumnName("country_code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("RegimeCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("regime_code");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_from");
+
+                    b.Property<DateOnly?>("ValidTo")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_to");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ValidFrom")
+                        .HasDatabaseName("ix_fiscal_regime_org_from");
+
+                    b.ToTable("fiscal_regime", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Fiscal.TaxCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(7, 4)
+                        .HasColumnType("numeric(7,4)")
+                        .HasColumnName("rate");
+
+                    b.Property<string>("Treatment")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("treatment");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_tax_code_org_code");
+
+                    b.ToTable("tax_code", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Party", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("address");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("LegalName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("legal_name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PatientFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("patient_fhir_id");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("phone");
+
+                    b.Property<string>("TaxId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("tax_id");
+
+                    b.Property<string>("TaxIdKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("tax_id_kind");
+
+                    b.Property<string>("TradeName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("trade_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Kind")
+                        .HasDatabaseName("ix_party_org_kind");
+
+                    b.HasIndex("OrganizationId", "PatientFhirId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_party_org_patient")
+                        .HasFilter("patient_fhir_id IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "TaxId")
+                        .HasDatabaseName("ix_party_org_tax_id");
+
+                    b.ToTable("party", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.UserAuthorizationLimit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<bool>("RequiresApprovalAbove")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_approval_above");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_from");
+
+                    b.Property<DateOnly?>("ValidTo")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_to");
+
+                    b.Property<decimal>("Value")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("value");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "UserId", "Kind")
+                        .HasDatabaseName("ix_user_authorization_limit_org_user_kind");
+
+                    b.ToTable("user_authorization_limit", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Catalogs.AllergyCatalogEntry", b =>
                 {
                     b.Property<string>("Code")
@@ -2299,6 +3190,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("FiscalEstablishmentCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("fiscal_establishment_code");
 
                     b.Property<bool>("IsDefault")
                         .HasColumnType("boolean")
