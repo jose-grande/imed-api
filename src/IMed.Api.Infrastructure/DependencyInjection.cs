@@ -276,6 +276,7 @@ public static class DependencyInjection
         services.AddScoped<IAuthorizationLimitRepository, AuthorizationLimitRepository>();
         services.AddScoped<IInvoiceRepository, InvoiceRepository>();
         services.AddScoped<ICashRepository, CashRepository>();
+        services.AddScoped<IServiceWaiverRepository, ServiceWaiverRepository>();
         services.AddSingleton<IFiscalAdapter, HondurasSarAdapter>();
         services.AddSingleton<IFiscalAdapterResolver, FiscalAdapterResolver>();
         services.AddScoped<ILabCatalogProvisioning, LabCatalogProvisioning>();
@@ -484,6 +485,12 @@ public static class DependencyInjection
         services.AddScoped<GetOpenSessionHandler>();
         services.AddScoped<ReceivePaymentHandler>();
         services.AddScoped<ListSessionPaymentsHandler>();
+
+        // Puerta de prepago y orden de servicio (FAC-7).
+        services.AddScoped<EvaluateServiceGateHandler>();
+        services.AddScoped<IServiceGate, ServiceGateAdapter>();
+        services.AddScoped<WaiveServiceHandler>();
+        services.AddScoped<ListServiceWaiversHandler>();
         services.AddScoped<CheckInOrderHandler>();
         services.AddScoped<ReferOrderExternalHandler>();
         services.AddScoped<ReceiveRequisitionHandler>();

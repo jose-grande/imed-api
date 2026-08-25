@@ -1233,6 +1233,53 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("tax_code", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Gate.ServiceWaiver", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("SourceRef")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("source_ref");
+
+                    b.Property<DateTimeOffset>("WaivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("waived_at");
+
+                    b.Property<Guid>("WaivedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("waived_by");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "SourceRef")
+                        .IsUnique()
+                        .HasDatabaseName("ux_service_waiver_org_source");
+
+                    b.HasIndex("OrganizationId", "WaivedAt")
+                        .HasDatabaseName("ix_service_waiver_org_date");
+
+                    b.ToTable("service_waiver", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Billing.Invoicing.FiscalDocument", b =>
                 {
                     b.Property<Guid>("Id")

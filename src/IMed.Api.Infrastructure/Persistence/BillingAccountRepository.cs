@@ -80,6 +80,22 @@ public sealed class BillingAccountRepository(AppDbContext db) : IBillingAccountR
         db.BillingCharges
             .FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.Id == chargeId, ct);
 
+    public Task<BillingCharge?> FindAnyLiveChargeBySourceAsync(
+        Guid organizationId,
+        ChargeSourceKind sourceKind,
+        string sourceId,
+        CancellationToken ct = default)
+    {
+        var sid = sourceId.Trim();
+        return db.BillingCharges.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId
+                        && x.SourceKind == sourceKind
+                        && x.SourceId == sid
+                        && x.Status != ChargeStatus.Reversed)
+            .OrderBy(x => x.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+    }
+
     public Task<BillingCharge?> FindLiveChargeBySourceAsync(
         Guid organizationId,
         ChargeSourceKind sourceKind,

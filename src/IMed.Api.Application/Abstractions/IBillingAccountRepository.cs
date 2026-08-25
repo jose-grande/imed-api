@@ -42,6 +42,16 @@ public interface IBillingAccountRepository
     /// Cargo vivo (no reversado) de un acto concreto. Es la lectura de idempotencia: contesta
     /// "¿este acto ya se cobró?" antes de intentar cobrarlo.
     /// </summary>
+    /// <summary>
+    /// Cualquier cargo vivo de un acto, sin importar qué cobrable sea. Lo usa la puerta de
+    /// prepago: pregunta "¿este examen está pagado?" sin saber a qué ítem del catálogo se enlazó.
+    /// </summary>
+    Task<BillingCharge?> FindAnyLiveChargeBySourceAsync(
+        Guid organizationId,
+        ChargeSourceKind sourceKind,
+        string sourceId,
+        CancellationToken ct = default);
+
     Task<BillingCharge?> FindLiveChargeBySourceAsync(
         Guid organizationId,
         ChargeSourceKind sourceKind,

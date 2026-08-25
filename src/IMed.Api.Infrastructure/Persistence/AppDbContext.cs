@@ -6,6 +6,7 @@ using IMed.Api.Domain.Billing.Accounts;
 using IMed.Api.Domain.Billing.Cash;
 using IMed.Api.Domain.Billing.Catalog;
 using IMed.Api.Domain.Billing.Fiscal;
+using IMed.Api.Domain.Billing.Gate;
 using IMed.Api.Domain.Billing.Invoicing;
 using IMed.Api.Domain.Catalogs;
 using IMed.Api.Domain.Catalogs.Lab;
@@ -101,6 +102,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<CashMovement> CashMovements => Set<CashMovement>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<PaymentAllocation> PaymentAllocations => Set<PaymentAllocation>();
+    public DbSet<ServiceWaiver> ServiceWaivers => Set<ServiceWaiver>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -423,6 +425,29 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Amount).HasPrecision(19, 4).IsRequired();
 
             e.HasIndex(x => x.InvoiceId).HasDatabaseName("ix_payment_allocation_invoice");
+        });
+
+        // Puerta de prepago (FAC-7): constancia de lo que se dio sin cobrar.
+        b.Entity<ServiceWaiver>(e =>
+        {
+            e.ToTable("service_waiver");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.SourceRef).HasMaxLength(128).IsRequired();
+            e.Property(x => x.AccountId);
+            e.Property(x => x.WaivedBy).IsRequired();
+            e.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            e.Property(x => x.WaivedAt).IsRequired();
+
+            // Un acto se libera una vez. El técnico que aprieta el botón otra vez porque la
+            // pantalla tardó no debería generar dos registros de excepción sobre el mismo acto.
+            e.HasIndex(x => new { x.OrganizationId, x.SourceRef })
+                .IsUnique()
+                .HasDatabaseName("ux_service_waiver_org_source");
+
+            // El reporte de excepciones barre por fecha.
+            e.HasIndex(x => new { x.OrganizationId, x.WaivedAt })
+                .HasDatabaseName("ix_service_waiver_org_date");
         });
     }
 

@@ -12,7 +12,8 @@ namespace IMed.Api.Application.LabReception;
 /// requisición (número de orden) con nombre del paciente y disponibilidad por examen.
 /// </summary>
 public sealed class GetAwaitingAdmissionHandler(
-    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops)
+    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops,
+    IServiceGate gate)
 {
     public async Task<IReadOnlyList<AwaitingAdmissionOrder>> HandleAsync(Guid orgId, CancellationToken ct = default)
     {
@@ -50,7 +51,15 @@ public sealed class GetAwaitingAdmissionHandler(
                 groups[key] = g;
             }
             var availability = await ClassifyAsync(catalog, orgId, o.CatalogCode, ct);
-            g.Exams.Add(new AwaitingAdmissionExam(o.Id, o.LoincCode, o.CodeText, availability));
+
+            // FAC-7: el LIS **consulta** el estado de cobro, no lo calcula. Y lo muestra sin
+            // bloquear: un sistema que impide recibir la muestra se evade —el técnico anota en
+            // papel— y eso es peor que no tener el control.
+            var payment = await gate.EvaluateAsync(orgId, o.Id, o.Priority, ct);
+
+            g.Exams.Add(new AwaitingAdmissionExam(
+                o.Id, o.LoincCode, o.CodeText, availability,
+                payment.Verdict, payment.Message));
         }
 
         return groups.Values
@@ -171,8 +180,21 @@ public sealed class CreateExternalOrderMultiHandler(
 
 // ── DTOs (Fase 1) ───────────────────────────────────────────────────────────
 
-/// <summary>Un examen dentro de una orden esperando admisión, con su disponibilidad.</summary>
-public sealed record AwaitingAdmissionExam(string ServiceRequestId, string? LoincCode, string? CodeText, string Availability);
+/// <summary>
+/// Un examen dentro de una orden esperando admisión, con su disponibilidad y su estado de cobro.
+/// </summary>
+/// <param name="PaymentStatus">
+/// <c>Authorized</c> / <c>PendingPayment</c> / <c>Waived</c>. <b>Es información, no una orden</b>:
+/// la recepción lo muestra y deja continuar.
+/// </param>
+/// <param name="PaymentMessage">Texto listo para mostrar al técnico.</param>
+public sealed record AwaitingAdmissionExam(
+    string ServiceRequestId,
+    string? LoincCode,
+    string? CodeText,
+    string Availability,
+    string? PaymentStatus = null,
+    string? PaymentMessage = null);
 
 /// <summary>Una orden solicitada aún no admitida, agrupada por requisición.</summary>
 public sealed record AwaitingAdmissionOrder(
