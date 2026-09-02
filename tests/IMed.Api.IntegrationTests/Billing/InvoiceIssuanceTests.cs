@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using FluentAssertions;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Billing;
@@ -82,6 +83,44 @@ public sealed class InvoiceIssuanceTests(ImedApiFixture fixture) : IAsyncLifetim
             new CaptureChargeCommand(
                 e.OrgId, e.AccountId, itemId, ChargeSourceKind.LabOrder, sourceId, cantidad));
         r.Succeeded.Should().BeTrue(r.Rejected);
+    }
+
+    [Fact]
+    public async Task LaSedeSinCodigo_seDestrabaDesdeLaAplicacionYEmite()
+    {
+        // El arranque real de una clínica: la sede nace sin código de establecimiento porque lo
+        // asigna el SAR. Hasta que alguien lo cargue, no sale ninguna factura.
+        //
+        // Todas las demás pruebas de facturación siembran el código llamando al dominio, así que
+        // ninguna ejercía el camino por el que un usuario lo carga. Esta empieza donde empieza QA:
+        // sin código, y usando solo lo que la aplicación expone.
+        var e = await ArrangeAsync(establecimiento: "");
+        using var scope = fixture.Factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+        await CobrarAsync(sp, e, e.ExentoItemId, "sr-destrabe");
+
+        var bloqueada = await sp.GetRequiredService<IssueInvoiceHandler>().HandleAsync(
+            new IssueInvoiceCommand(e.OrgId, e.AccountId, e.LocationId, e.FacturaTypeId));
+        bloqueada.Succeeded.Should().BeFalse("sin establecimiento el número saldría incompleto");
+        bloqueada.Rejected!.Code.Should().Be("sede_sin_codigo");
+
+        await Task.Delay(800);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId);
+        var client = fixture.CreateClientWithToken(fixture.Keycloak.IssueUserToken(
+            userId, organizationId: e.OrgId.ToString(), realmRoles: ["billing_supervisor"]));
+
+        var puesto = await client.PutAsJsonAsync(
+            $"/api/locations/{e.LocationId}/fiscal-establishment", new { code = "001" });
+        puesto.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+
+        using var scope2 = fixture.Factory.Services.CreateScope();
+        var r = await scope2.ServiceProvider.GetRequiredService<IssueInvoiceHandler>().HandleAsync(
+            new IssueInvoiceCommand(e.OrgId, e.AccountId, e.LocationId, e.FacturaTypeId));
+
+        r.Succeeded.Should().BeTrue(r.Rejected?.Message);
+        // El cargo siguió vivo esperando: cargar el código destraba lo que ya estaba, sin rehacerlo.
+        r.Invoice!.FiscalDocument!.FullNumber.Should().Be("001-002-01-00000001");
     }
 
     [Fact]

@@ -37,6 +37,13 @@ public static class LocationsEndpoints
             .WithSummary("Renombra, activa/desactiva o designa una sede como principal.")
             .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.OrgLocationsManage));
 
+        // Va con `billing.supervise` y no con el permiso de sedes: el código sale del mismo trámite
+        // del SAR que el CAI y lo registra la misma persona. `org_admin` también lo tiene.
+        group.MapPut("/{locationId:guid}/fiscal-establishment", SetEstablishmentAsync)
+            .WithName("SetLocationFiscalEstablishment")
+            .WithSummary("Fija o borra el código de establecimiento fiscal de una sede.")
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingSupervise));
+
         group.MapPost("/{locationId:guid}/users/{userId:guid}", AssignAsync)
             .WithName("AssignUserToLocation")
             .WithSummary("Habilita a un usuario a operar en una sede.")
@@ -122,6 +129,27 @@ public static class LocationsEndpoints
         }
     }
 
+    private static async Task<IResult> SetEstablishmentAsync(
+        Guid locationId, SetEstablishmentRequest request, ClaimsPrincipal principal,
+        SetEstablishmentCodeHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        try
+        {
+            var updated = await handler.HandleAsync(
+                new SetEstablishmentCodeCommand(orgId.Value, locationId, request.Code), ct);
+            return updated is null ? Results.NotFound() : Results.Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     private static async Task<IResult> AssignAsync(
         Guid locationId, Guid userId, AssignLocationRequest? request, ClaimsPrincipal principal,
         AssignUserToLocationHandler handler, CancellationToken ct)
@@ -167,5 +195,8 @@ public static class LocationsEndpoints
 public sealed record CreateLocationRequest(string Code, string Name);
 
 public sealed record UpdateLocationRequest(string? Name, bool? Active, bool? MakeDefault);
+
+/// <summary>Tres dígitos, o vacío/null para dejar la sede sin código.</summary>
+public sealed record SetEstablishmentRequest(string? Code);
 
 public sealed record AssignLocationRequest(bool MakePrimary);

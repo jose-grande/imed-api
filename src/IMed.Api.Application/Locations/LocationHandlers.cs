@@ -10,10 +10,11 @@ public sealed record LocationDto(
     string Name,
     bool IsDefault,
     bool Active,
-    string? LocationFhirId)
+    string? LocationFhirId,
+    string? FiscalEstablishmentCode)
 {
     public static LocationDto FromDomain(OrganizationLocation l) =>
-        new(l.Id, l.Code, l.Name, l.IsDefault, l.Active, l.LocationFhirId);
+        new(l.Id, l.Code, l.Name, l.IsDefault, l.Active, l.LocationFhirId, l.FiscalEstablishmentCode);
 }
 
 /// <summary>Sede del usuario, con la marca de cuál se le ofrece primero.</summary>
@@ -137,6 +138,40 @@ public sealed class UpdateLocationHandler(ILocationRepository locations, TimePro
             location.Reactivate(timeProvider);
         }
 
+        await locations.UpdateAsync(location, ct);
+        return LocationDto.FromDomain(location);
+    }
+}
+
+public sealed record SetEstablishmentCodeCommand(
+    Guid OrganizationId, Guid LocationId, string? Code);
+
+/// <summary>
+/// Fija el código de establecimiento fiscal de una sede — los tres primeros dígitos del número de
+/// factura (FSF, bloque 0).
+///
+/// <para><b>Por qué es su propio comando y no un campo más del PATCH de sede.</b> Acá <c>null</c>
+/// significa "borralo", y en un PATCH parcial no se distingue de "no lo mandé". Una sede que deja
+/// de facturar tiene que poder quedarse sin código, y confundir las dos cosas lo borraría sin que
+/// nadie lo pidiera.</para>
+///
+/// <para><b>Por qué lo gobierna <c>billing.supervise</c> y no <c>org.locations.manage</c>.</b> Este
+/// código sale del mismo trámite del SAR que el CAI y lo registra la misma persona en la misma
+/// sentada. <c>billing_supervisor</c> no administra sedes, así que pedir el permiso de sedes
+/// partiría un solo trámite entre dos roles y obligaría a buscar a un administrador para escribir
+/// tres dígitos.</para>
+/// </summary>
+public sealed class SetEstablishmentCodeHandler(ILocationRepository locations, TimeProvider timeProvider)
+{
+    public async Task<LocationDto?> HandleAsync(SetEstablishmentCodeCommand cmd, CancellationToken ct = default)
+    {
+        var location = await locations.GetAsync(cmd.OrganizationId, cmd.LocationId, ct);
+        if (location is null)
+        {
+            return null;
+        }
+
+        location.SetFiscalEstablishmentCode(cmd.Code, timeProvider);
         await locations.UpdateAsync(location, ct);
         return LocationDto.FromDomain(location);
     }

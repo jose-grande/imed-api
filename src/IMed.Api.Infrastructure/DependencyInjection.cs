@@ -439,6 +439,7 @@ public static class DependencyInjection
         services.AddScoped<ListMyLocationsHandler>();
         services.AddScoped<CreateLocationHandler>();
         services.AddScoped<UpdateLocationHandler>();
+        services.AddScoped<SetEstablishmentCodeHandler>();
         services.AddScoped<AssignUserToLocationHandler>();
         services.AddScoped<UnassignUserFromLocationHandler>();
 

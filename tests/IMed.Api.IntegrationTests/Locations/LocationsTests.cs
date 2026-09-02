@@ -198,6 +198,103 @@ public sealed class LocationsTests(ImedApiFixture fixture) : IAsyncLifetime
             "un header no puede habilitar a operar en la sede de otra organización");
     }
 
+    // ---- Código de establecimiento fiscal (FSF bloque 0) --------------------------------------
+
+    [Fact]
+    public async Task LaSedeReciénCreada_noTraeCodigoDeEstablecimiento()
+    {
+        var (client, _, _) = await AuthedOrgAsync();
+
+        var locations = await (await client.GetAsync("/api/locations"))
+            .Content.ReadFromJsonAsync<List<LocationDto>>();
+
+        // No se inventa: el código lo asigna el SAR, y poner uno por defecto haría salir facturas
+        // con un establecimiento que la autoridad no reconoce.
+        locations!.Single().FiscalEstablishmentCode.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ElSupervisorDeFacturacion_fijaElCodigoSinSerAdministradorDeSedes()
+    {
+        // El código sale del mismo trámite del SAR que el CAI. Si hiciera falta `org.locations.manage`,
+        // quien registra el CAI tendría que ir a buscar a un administrador para escribir tres dígitos.
+        var (client, _, _) = await AuthedOrgAsync("billing_supervisor");
+        var sede = (await (await client.GetAsync("/api/locations"))
+            .Content.ReadFromJsonAsync<List<LocationDto>>())!.Single();
+
+        var resp = await client.PutAsJsonAsync(
+            $"/api/locations/{sede.Id}/fiscal-establishment", new { code = "001" });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var actualizada = await resp.Content.ReadFromJsonAsync<LocationDto>();
+        actualizada!.FiscalEstablishmentCode.Should().Be("001");
+    }
+
+    [Fact]
+    public async Task ElCajero_noFijaElCodigoDeEstablecimiento()
+    {
+        var (client, _, _) = await AuthedOrgAsync("cashier");
+        var (admin, _, _) = await AuthedOrgAsync();
+        var sede = (await (await admin.GetAsync("/api/locations"))
+            .Content.ReadFromJsonAsync<List<LocationDto>>())!.Single();
+
+        var resp = await client.PutAsJsonAsync(
+            $"/api/locations/{sede.Id}/fiscal-establishment", new { code = "001" });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "cambiar el establecimiento cambia el número de toda factura que salga de esa sede");
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("12")]
+    [InlineData("1234")]
+    [InlineData("00A")]
+    [InlineData("  1")]
+    public async Task UnCodigoMalFormado_seRechazaAlGuardarlo(string malo)
+    {
+        // Un código mal formado no se descubre al guardarlo: se descubre cuando el primer documento
+        // sale con un número que la autoridad no reconoce. Por eso se valida acá y no en la pantalla.
+        var (client, _, _) = await AuthedOrgAsync();
+        var sede = (await (await client.GetAsync("/api/locations"))
+            .Content.ReadFromJsonAsync<List<LocationDto>>())!.Single();
+
+        var resp = await client.PutAsJsonAsync(
+            $"/api/locations/{sede.Id}/fiscal-establishment", new { code = malo });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task ElCodigoSePuedeBorrar_cuandoLaSedeDejaDeFacturar()
+    {
+        var (client, _, _) = await AuthedOrgAsync();
+        var sede = (await (await client.GetAsync("/api/locations"))
+            .Content.ReadFromJsonAsync<List<LocationDto>>())!.Single();
+        await client.PutAsJsonAsync($"/api/locations/{sede.Id}/fiscal-establishment", new { code = "001" });
+
+        var resp = await client.PutAsJsonAsync(
+            $"/api/locations/{sede.Id}/fiscal-establishment", new { code = (string?)null });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await resp.Content.ReadFromJsonAsync<LocationDto>())!.FiscalEstablishmentCode.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ElCodigoNoSeToma_deLaSedeDeOtraOrganizacion()
+    {
+        var (clientA, _, _) = await AuthedOrgAsync();
+        var (clientB, _, _) = await AuthedOrgAsync();
+        var ajena = (await (await clientA.GetAsync("/api/locations"))
+            .Content.ReadFromJsonAsync<List<LocationDto>>())!.Single();
+
+        var resp = await clientB.PutAsJsonAsync(
+            $"/api/locations/{ajena.Id}/fiscal-establishment", new { code = "001" });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "el id correcto con la organización equivocada no alcanza");
+    }
+
     private sealed record BootstrapProbe(Guid OrganizationId);
 
     private sealed record CollectionPlanProbe(IReadOnlyList<ContainerProbe> Containers);
