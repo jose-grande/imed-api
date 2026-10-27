@@ -79,6 +79,14 @@ public sealed class CreateBillableItemHandler(
             ?? throw new ArgumentException(
                 "El tributo no existe en esta organización.", nameof(cmd));
 
+        // Un examen tiene un solo cobrable (lo crea el sistema al darlo de alta, A6). Dar de alta
+        // otro chocaría con el índice único y saldría como un error sin explicación.
+        if (await repo.FindAnyByLabAsync(cmd.OrganizationId, cmd.LabTestId, cmd.LabPanelId, ct) is { } existente)
+        {
+            throw new InvalidOperationException(
+                $"Ese examen ya tiene su cobrable ({existente.Code} — {existente.Name}). Editá su precio en vez de crear otro.");
+        }
+
         var item = BillableItem.Create(
             cmd.OrganizationId, cmd.Code, cmd.Name,
             Parse<BillableItemKind>(cmd.Kind, BillableItemKind.Service),

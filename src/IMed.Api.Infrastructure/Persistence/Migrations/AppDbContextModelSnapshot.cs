@@ -468,6 +468,26 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("billing_charge", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Billing.BillingSettings", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<int>("FollowUpWindowDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("follow_up_window_days");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("OrganizationId");
+
+                    b.ToTable("billing_settings", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.CashMovement", b =>
                 {
                     b.Property<Guid>("Id")

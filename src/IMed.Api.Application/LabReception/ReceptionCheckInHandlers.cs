@@ -101,31 +101,9 @@ public sealed class CheckInOrderHandler(
     /// código puede existir en las dos tablas, y si acá ganara la prueba se cobraría el analito
     /// suelto en vez del panel entero.</para>
     /// </summary>
-    private async Task<CaptureLabOrderChargesHandler.LabOrderCharge> DescribirCobroAsync(
-        Guid orgId, LabOrderSnapshot o, CancellationToken ct)
-    {
-        Guid? panelId = null;
-        Guid? testId = null;
-
-        if (!string.IsNullOrWhiteSpace(o.CatalogCode))
-        {
-            var panel = await catalog.GetPanelByCodeOrLoincAsync(orgId, o.CatalogCode, ct);
-            if (panel is not null)
-            {
-                panelId = panel.Id;
-            }
-            else
-            {
-                var prueba = await catalog.GetTestByCodeOrLoincAsync(orgId, o.CatalogCode, ct);
-                testId = prueba?.Id;
-            }
-        }
-
-        return new CaptureLabOrderChargesHandler.LabOrderCharge(
-            o.Id, testId, panelId,
-            o.CodeText ?? o.CodeDisplay ?? o.CatalogCode ?? "Estudio de laboratorio",
-            o.PatientFhirId, o.EncounterFhirId);
-    }
+    private Task<CaptureLabOrderChargesHandler.LabOrderCharge> DescribirCobroAsync(
+        Guid orgId, LabOrderSnapshot o, CancellationToken ct) =>
+        LabOrderChargeDescriber.DescribeAsync(catalog, orgId, o, ct);
 }
 
 public sealed record CheckInResult(

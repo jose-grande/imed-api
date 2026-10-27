@@ -727,6 +727,10 @@ public sealed partial class HapiMockServer : IDisposable
     }
 
     /// <summary>Siembra una orden directamente (helper de tests para flujos de recepción por requisición).</summary>
+    /// <summary>Cambia el estado de una orden sembrada (emitir, revocar…).</summary>
+    public void SetServiceRequestStatus(string id, string status) =>
+        _serviceRequests[id] = _serviceRequests[id] with { Status = status };
+
     /// <summary>
     /// Siembra una orden. <paramref name="localCode"/> permite sembrarla como la escribe el cliente
     /// real cuando el examen es un panel propio de la clínica: **solo** código local, sin LOINC.

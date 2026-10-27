@@ -50,6 +50,35 @@ public interface IBillableItemProvisioner
     Task<int> ReconcileLabAsync(Guid organizationId, CancellationToken ct = default);
 }
 
+/// <summary>Disparadores del alta automática que nunca pueden romper el flujo que los llama.</summary>
+public static class BillableItemProvisionerExtensions
+{
+    /// <summary>
+    /// Asegura las consultas de una especialidad sin dejar que un fallo detenga el flujo clínico
+    /// que lo dispara (perfil del médico, invitación). Si falla, la consulta igual se crea al
+    /// cobrar el primer encuentro de esa especialidad.
+    /// </summary>
+    public static async Task TryEnsureForSpecialtyAsync(
+        this IBillableItemProvisioner provisioner, Guid organizationId, string? specialtyCode,
+        ILogger logger, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(specialtyCode))
+        {
+            return;
+        }
+        try
+        {
+            await provisioner.EnsureForSpecialtyAsync(organizationId, specialtyCode, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "No se pudieron crear las consultas de la especialidad {Specialty} en {Org}.",
+                specialtyCode, organizationId);
+        }
+    }
+}
+
 public sealed class BillableItemProvisioner(
     IBillingCatalogRepository catalog,
     IFiscalRepository fiscal,

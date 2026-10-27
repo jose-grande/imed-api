@@ -180,4 +180,28 @@ public sealed class BillingAccountRepository(AppDbContext db) : IBillingAccountR
                         && x.Status == ChargeStatus.Captured
                         && x.PricePending)
             .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<BillingCharge>> ListLiveChargesBySourceForUpdateAsync(
+        Guid organizationId, ChargeSourceKind sourceKind, string sourceId, CancellationToken ct = default) =>
+        await db.BillingCharges
+            .Where(x => x.OrganizationId == organizationId
+                        && x.SourceKind == sourceKind
+                        && x.SourceId == sourceId
+                        && x.Status != ChargeStatus.Reversed)
+            .ToListAsync(ct);
+
+    public Task<bool> HasConsultationSinceAsync(
+        Guid organizationId, string patientFhirId, string specialtyCode, DateTimeOffset since,
+        string? excludeEncounterFhirId, CancellationToken ct = default) =>
+        (from c in db.BillingCharges
+         join a in db.BillingAccounts on c.AccountId equals a.Id
+         join i in db.BillableItems on c.BillableItemId equals i.Id
+         where c.OrganizationId == organizationId
+               && c.SourceKind == ChargeSourceKind.Encounter
+               && c.Status != ChargeStatus.Reversed
+               && c.PerformedAt >= since
+               && a.PatientFhirId == patientFhirId
+               && i.SpecialtyCode == specialtyCode
+               && (excludeEncounterFhirId == null || c.SourceId != excludeEncounterFhirId)
+         select c.Id).AnyAsync(ct);
 }

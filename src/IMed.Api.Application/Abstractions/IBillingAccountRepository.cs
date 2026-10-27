@@ -75,6 +75,18 @@ public interface IBillingAccountRepository
     /// </summary>
     Task<bool> TryAddChargeAsync(BillingCharge charge, CancellationToken ct = default);
 
+    /// <summary>Cargos no reversados de un acto (todos sus cobrables), rastreados para modificarlos.</summary>
+    Task<IReadOnlyList<BillingCharge>> ListLiveChargesBySourceForUpdateAsync(
+        Guid organizationId, ChargeSourceKind sourceKind, string sourceId, CancellationToken ct = default);
+
+    /// <summary>
+    /// ¿El paciente tuvo una consulta (cargo de encuentro, no reversado) de esa especialidad desde
+    /// <paramref name="since"/>? Es lo que propone "control" en vez de "primera vez" (P1).
+    /// </summary>
+    Task<bool> HasConsultationSinceAsync(
+        Guid organizationId, string patientFhirId, string specialtyCode, DateTimeOffset since,
+        string? excludeEncounterFhirId, CancellationToken ct = default);
+
     Task UpdateChargeAsync(BillingCharge charge, CancellationToken ct = default);
 
     /// <summary>

@@ -1,3 +1,4 @@
+using IMed.Api.Application.Billing;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Profile;
 using Microsoft.Extensions.Logging;
@@ -47,6 +48,7 @@ public sealed class UpsertMyPractitionerProfileHandler(
     IUpsertPractitionerProfilePersistence persistence,
     IKeycloakAdminClient keycloakAdmin,
     ISpecialtyRepository specialtyRepo,
+    IBillableItemProvisioner billableItems,
     ILogger<UpsertMyPractitionerProfileHandler> logger,
     TimeProvider timeProvider)
 {
@@ -139,6 +141,10 @@ public sealed class UpsertMyPractitionerProfileHandler(
         // Hot-path: actualizar atributo practitioner_id en KC para que el
         // próximo refresh del JWT lo incluya. Si falla, el outbox worker
         // reintenta con backoff.
+        // Su especialidad pasa a tener consultas en el catálogo (A2), sin precio hasta que se fije.
+        await billableItems.TryEnsureForSpecialtyAsync(
+            command.OrganizationId, command.SpecialtyCode, logger, cancellationToken);
+
         try
         {
             await keycloakAdmin.SetUserAttributesAsync(

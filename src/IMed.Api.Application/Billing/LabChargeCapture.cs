@@ -25,8 +25,8 @@ public sealed record LabChargeSummary(
 /// </summary>
 public sealed class CaptureLabOrderChargesHandler(
     IBillingCatalogRepository catalog,
-    IBillingAccountRepository accounts,
-    IPartyRepository parties,
+    IBillableItemProvisioner provisioner,
+    IEncounterAccountResolver accountResolver,
     CaptureChargeHandler capture,
     ILogger<CaptureLabOrderChargesHandler> logger)
 {
@@ -37,7 +37,8 @@ public sealed class CaptureLabOrderChargesHandler(
         Guid? LabPanelId,
         string Display,
         string PatientFhirId,
-        string? EncounterFhirId);
+        string? EncounterFhirId,
+        string? Requisition = null);
 
     /// <param name="locationId">Sede donde se admitieron las órdenes: ahí se presta el servicio (FAC-9).</param>
     public async Task<LabChargeSummary> HandleAsync(
@@ -51,8 +52,8 @@ public sealed class CaptureLabOrderChargesHandler(
         {
             try
             {
-                var cobrable = await catalog.FindByLabAsync(orgId, orden.LabTestId, orden.LabPanelId, ct);
-                if (cobrable is null)
+                var cobrableId = await CobrableAsync(orgId, orden, ct);
+                if (cobrableId is null)
                 {
                     sinPrecio.Add(orden.Display);
                     continue;
@@ -66,7 +67,7 @@ public sealed class CaptureLabOrderChargesHandler(
                 }
 
                 var r = await capture.HandleAsync(new CaptureChargeCommand(
-                    orgId, cuenta.Value, cobrable.Id,
+                    orgId, cuenta.Value, cobrableId.Value,
                     ChargeSourceKind.LabOrder, orden.ServiceRequestId,
                     SourceFhirRef: $"ServiceRequest/{orden.ServiceRequestId}",
                     LocationId: locationId), ct);
@@ -101,35 +102,44 @@ public sealed class CaptureLabOrderChargesHandler(
     }
 
     /// <summary>
-    /// La cuenta del encuentro, o la cuenta corriente del paciente si la orden es ambulatoria.
-    /// Null si no se puede resolver ninguna.
+    /// El cobrable del examen. Si la prueba o el panel no tiene uno —se creó antes del alta
+    /// automática—, se crea ahora sin precio (D1): el examen se cobra cuando alguien fije el
+    /// precio, en vez de hacerse gratis en silencio. Null solo si no hay régimen fiscal o el
+    /// código no corresponde a nada del catálogo.
     /// </summary>
-    private async Task<Guid?> ResolverCuentaAsync(
-        Guid orgId, LabOrderCharge orden, CancellationToken ct)
+    private async Task<Guid?> CobrableAsync(Guid orgId, LabOrderCharge orden, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(orden.EncounterFhirId))
+        if (await catalog.FindByLabAsync(orgId, orden.LabTestId, orden.LabPanelId, ct) is { } activo)
         {
-            var delEncuentro = await accounts.FindByEncounterAsync(orgId, orden.EncounterFhirId, ct);
-            if (delEncuentro is not null)
-            {
-                return delEncuentro.AcceptsCharges ? delEncuentro.Id : null;
-            }
+            return activo.Id;
         }
+        var nuevo = orden.LabPanelId is { } panel
+            ? await provisioner.EnsureForLabPanelAsync(orgId, panel, ct)
+            : orden.LabTestId is { } prueba
+                ? await provisioner.EnsureForLabTestAsync(orgId, prueba, ct)
+                : null;
+        // Un cobrable que alguien desactivó no se reactiva solo: desactivar es una decisión.
+        return nuevo is { Active: true } ? nuevo.Id : null;
+    }
 
-        // Orden externa o sin encuentro: la cuenta corriente abierta del paciente.
+    /// <summary>
+    /// La cuenta de la orden (D2): la de la consulta si salió de una, o una propia por orden
+    /// —agrupada por requisición— si el paciente llegó con una orden externa.
+    /// </summary>
+    private Task<Guid?> ResolverCuentaAsync(Guid orgId, LabOrderCharge orden, CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(orden.PatientFhirId))
         {
-            return null;
+            return Task.FromResult<Guid?>(null);
         }
-
-        var parte = await parties.FindByPatientAsync(orgId, orden.PatientFhirId, ct);
-        if (parte is null)
+        if (!string.IsNullOrWhiteSpace(orden.EncounterFhirId))
         {
-            return null;
+            return accountResolver.GetOrOpenForEncounterAsync(
+                orgId, orden.EncounterFhirId, orden.PatientFhirId, null, ct);
         }
-
-        var abiertas = await accounts.SearchAccountsAsync(
-            orgId, orden.PatientFhirId, nameof(BillingAccountStatus.Open), 5, ct);
-        return abiertas.Count > 0 ? abiertas[0].Id : null;
+        return accountResolver.GetOrOpenStandaloneAsync(
+            orgId, BillingAccountOrigin.LabOrder,
+            string.IsNullOrWhiteSpace(orden.Requisition) ? orden.ServiceRequestId : orden.Requisition,
+            orden.PatientFhirId, null, ct);
     }
 }

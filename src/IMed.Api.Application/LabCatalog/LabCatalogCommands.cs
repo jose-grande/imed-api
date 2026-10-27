@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using IMed.Api.Application.Billing;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Catalogs.Lab;
 
@@ -33,7 +35,9 @@ public sealed record CreateLabTestCommand(
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
     decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 
-public sealed class CreateLabTestHandler(ILabCatalogRepository repo, TimeProvider timeProvider)
+public sealed class CreateLabTestHandler(
+    ILabCatalogRepository repo, TimeProvider timeProvider, IBillableItemProvisioner billableItems,
+    ILogger<CreateLabTestHandler> logger)
 {
     public async Task<LabTestDto> HandleAsync(CreateLabTestCommand cmd, CancellationToken cancellationToken = default)
     {
@@ -50,6 +54,21 @@ public sealed class CreateLabTestHandler(ILabCatalogRepository repo, TimeProvide
         test.SetCollectionRequirements(
             cmd.MinVolumeMl, cmd.PreferredVolumeMl, cmd.AnalyzerMinVolumeMl, cmd.StabilityMinutes, timeProvider);
         await repo.AddTestAsync(test, cancellationToken);
+
+        // Cada prueba propia nace con su cobrable sin precio (A6): sin él, el examen se haría y
+        // no se cobraría. Best-effort: un fallo acá no deshace la prueba; la reconciliación de la
+        // organización la vuelve a intentar.
+        if (cmd.OrganizationId is { } org)
+        {
+            try
+            {
+                await billableItems.EnsureForLabTestAsync(org, test.Id, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "La prueba {Test} se creó sin su cobrable.", test.Id);
+            }
+        }
         return LabTestDto.FromDomain(test);
     }
 }
@@ -97,7 +116,9 @@ public sealed class SetLabTestActiveHandler(ILabCatalogRepository repo, TimeProv
 public sealed record CreateLabPanelCommand(
     Guid? OrganizationId, string Code, string Name, string? Description, IReadOnlyList<Guid> TestIds);
 
-public sealed class CreateLabPanelHandler(ILabCatalogRepository repo, TimeProvider timeProvider, IClinicClock clock)
+public sealed class CreateLabPanelHandler(
+    ILabCatalogRepository repo, TimeProvider timeProvider, IClinicClock clock,
+    IBillableItemProvisioner billableItems, ILogger<CreateLabPanelHandler> logger)
 {
     public async Task<LabPanelDetailDto> HandleAsync(CreateLabPanelCommand cmd, CancellationToken cancellationToken = default)
     {
@@ -112,6 +133,19 @@ public sealed class CreateLabPanelHandler(ILabCatalogRepository repo, TimeProvid
         var version = LabPanelVersion.Create(panel.Id, 1, effectiveDate, PanelVersionStatus.Active, timeProvider);
         var (items, itemDtos) = await BuildItemsAsync(repo, version.Id, cmd.TestIds, cancellationToken);
         await repo.AddVersionWithItemsAsync(version, items, cancellationToken);
+
+        // El panel nace con su cobrable sin precio (A6), igual que una prueba.
+        if (cmd.OrganizationId is { } org)
+        {
+            try
+            {
+                await billableItems.EnsureForLabPanelAsync(org, panel.Id, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "El panel {Panel} se creó sin su cobrable.", panel.Id);
+            }
+        }
 
         return new LabPanelDetailDto(panel.Id, panel.OrganizationId, panel.Code, panel.Name, panel.Description,
             panel.Active, version.Version, version.EffectiveDate, itemDtos);

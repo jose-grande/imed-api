@@ -4,7 +4,9 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Billing;
 using IMed.Api.Application.FhirGateway;
+using IMed.Api.Domain.Outbox;
 using IMed.Api.Domain.Auditing;
 using IMed.Api.Domain.Authorization;
 using IMed.Api.Infrastructure.Hapi;
@@ -188,6 +190,57 @@ public static class FhirProxyEndpoint
         if (error != ForwarderError.None)
         {
             logger.LogError("Fallo al reenviar a HAPI: {Error}", error);
+            return;
+        }
+
+        await EnqueueEncounterBillingAsync(db, context, orgId.Value, descriptor, body, logger);
+    }
+
+    /// <summary>
+    /// Si HAPI aceptó una escritura de <c>Encounter</c>, pide reconciliar su cobro (A4). Va
+    /// después del reenvío: un encuentro que HAPI rechazó no tiene nada que cobrar.
+    ///
+    /// <para>Best-effort como la auditoría: si encolar falla, la consulta ya quedó guardada y no se
+    /// le devuelve un error al médico; queda en el log y en el reporte de consultas sin cargo.</para>
+    /// </summary>
+    private static async Task EnqueueEncounterBillingAsync(
+        AppDbContext db, HttpContext context, Guid organizationId,
+        FhirRequestDescriptor descriptor, string? body, ILogger logger)
+    {
+        if (context.Response.StatusCode is < 200 or >= 300)
+        {
+            return;
+        }
+        var location = context.Response.Headers.Location.ToString();
+        var encuentros = EncounterBillingSyncEvent.WrittenEncounterIds(descriptor, body, location);
+        // Las órdenes de laboratorio también: emitirlas (borrador → activa) es el momento de cobrarlas (D5).
+        var ordenes = FhirWrites.WrittenIds("ServiceRequest", descriptor, body, location);
+        if (encuentros.Count == 0 && ordenes.Count == 0)
+        {
+            return;
+        }
+        try
+        {
+            foreach (var id in encuentros)
+            {
+                db.OutboxEvents.Add(OutboxEvent.Create(
+                    aggregate: $"Encounter:{id}:Org:{organizationId}",
+                    type: EncounterBillingSyncEvent.OutboxEventType,
+                    payloadJson: JsonSerializer.Serialize(new EncounterBillingSyncEvent.Payload(organizationId, id))));
+            }
+            foreach (var id in ordenes)
+            {
+                db.OutboxEvents.Add(OutboxEvent.Create(
+                    aggregate: $"ServiceRequest:{id}:Org:{organizationId}",
+                    type: LabOrderBillingSyncEvent.OutboxEventType,
+                    payloadJson: JsonSerializer.Serialize(new LabOrderBillingSyncEvent.Payload(organizationId, id))));
+            }
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "No se pudo encolar el cobro de {Encounters} / {Orders}.",
+                string.Join(",", encuentros), string.Join(",", ordenes));
         }
     }
 

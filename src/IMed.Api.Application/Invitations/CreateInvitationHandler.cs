@@ -1,3 +1,4 @@
+using IMed.Api.Application.Billing;
 using IMed.Api.Domain.Authorization;
 using System.Text.Json;
 using IMed.Api.Application.Abstractions;
@@ -31,7 +32,8 @@ public sealed class CreateInvitationHandler(
     ILogger<CreateInvitationHandler> logger,
     TimeProvider timeProvider,
     ILocationRepository locations,
-    ILocationProvisioning locationProvisioning)
+    ILocationProvisioning locationProvisioning,
+    IBillableItemProvisioner billableItems)
 {
     public async Task<CreateInvitationResult> HandleAsync(
         CreateInvitationCommand command,
@@ -152,6 +154,11 @@ public sealed class CreateInvitationHandler(
         invitation.AttachKeycloakUser(keycloakUserId);
 
         await persistence.CreatePendingAsync(invitation, command.CreatedBy, cancellationToken);
+
+        // 5.4 La especialidad sugerida ya tiene consultas en el catálogo (A2), sin precio. Así el
+        //     jefe administrativo puede ponerles precio antes de que el médico atienda.
+        await billableItems.TryEnsureForSpecialtyAsync(
+            command.OrganizationId, command.SpecialtyHint, logger, cancellationToken);
 
         // 5.5 Sedes (FAC-9). Se asignan ya, con el usuario de Keycloak recién creado: cuando acepte
         //     y entre por primera vez, su selector de sede ya sabe dónde trabaja.

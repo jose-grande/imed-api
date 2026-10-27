@@ -92,7 +92,7 @@ public sealed record UpsertLabOrderCommand(
     string? Note,
     string? Requisition);
 
-public sealed class UpsertLabOrderHandler(IHapiFhirClient hapi, ILabCatalogRepository catalog)
+public sealed class UpsertLabOrderHandler(IHapiFhirClient hapi, ILabCatalogRepository catalog, IOutboxWriter outbox)
 {
     public async Task<LabOrderDto> HandleAsync(UpsertLabOrderCommand cmd, CancellationToken ct = default)
     {
@@ -132,6 +132,18 @@ public sealed class UpsertLabOrderHandler(IHapiFhirClient hapi, ILabCatalogRepos
         {
             id = cmd.Id;
             await hapi.UpdateLabOrderAsync(id, req, ct);
+        }
+
+        // Emitir la orden es cobrarla (D5): el reconciliador decide según el estado guardado. Un
+        // borrador no encola nada, y no hace falta: nadie lo cobra hasta que se emita.
+        if (!string.Equals(cmd.Status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            await outbox.EnqueueAsync(
+                Billing.LabOrderBillingSyncEvent.OutboxEventType,
+                $"ServiceRequest:{id}:Org:{cmd.OrganizationId}",
+                System.Text.Json.JsonSerializer.Serialize(
+                    new Billing.LabOrderBillingSyncEvent.Payload(cmd.OrganizationId, id)),
+                ct);
         }
 
         var availability = await LabAvailability.ClassifyAsync(

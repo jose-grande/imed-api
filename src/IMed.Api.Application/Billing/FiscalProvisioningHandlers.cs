@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Billing.Fiscal;
 
@@ -59,7 +60,9 @@ public sealed class ProvisionFiscalRegimeHandler(
     ILegalEntityRepository legalEntities,
     ILocationProvisioning provisioning,
     IClinicClock clock,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    OrganizationCatalogReconciler catalog,
+    ILogger<ProvisionFiscalRegimeHandler> logger)
 {
     /// <summary>Tipos de documento del SAR: (código, nombre, dígitos, mueve saldo, signo).</summary>
     private static readonly (string Code, string Name, string DocumentCode, bool Receivable, short Sign)[] HnDocumentTypes =
@@ -160,6 +163,17 @@ public sealed class ProvisionFiscalRegimeHandler(
                 continue;
             }
             await repo.AddTaxCodeAsync(TaxCode.Create(orgId, code, name, rate, treatment), ct);
+        }
+
+        // Con tributos ya se pueden crear los cobrables que esperaban (A2, A6): las consultas de
+        // las especialidades del equipo y los exámenes del laboratorio, todos sin precio.
+        try
+        {
+            await catalog.ReconcileAsync(orgId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Régimen configurado, pero el catálogo de {Org} no se pudo poner al día; lo hará el próximo arranque.", orgId);
         }
 
         return await new GetFiscalSetupHandler(repo, legalEntities, clock).HandleAsync(orgId, ct);

@@ -43,16 +43,15 @@ public sealed class LabOrderChargeWiringTests(ImedApiFixture fixture) : IAsyncLi
             .HandleAsync(orgId, "HN_SAR_CAI");
         var exento = setup.TaxCodes.First(t => t.Code == "EXENTO").Id;
 
-        if (conCobrable)
-        {
-            var lab = sp.GetRequiredService<ILabCatalogRepository>();
-            var panel = (await lab.ListPanelsAsync(orgId)).First(p => p.Code == "CBC");
-
-            await sp.GetRequiredService<CreateBillableItemHandler>().HandleAsync(
-                new CreateBillableItemCommand(
-                    orgId, "LAB_CBC", "Hemograma completo", "Service", exento, 350m,
-                    "Prepaid", "Global", LabTestId: null, LabPanelId: panel.Id, ServiceCode: null));
-        }
+        // Configurar el régimen ya dio de alta, sin precio, el cobrable de cada prueba y panel (A6).
+        // Con cobrable: se le pone precio. Sin cobrable: se desactiva, que es como el jefe
+        // administrativo dice "esto no se cobra".
+        var lab = sp.GetRequiredService<ILabCatalogRepository>();
+        var panel = (await lab.ListPanelsAsync(orgId)).First(p => p.Code == "CBC");
+        var auto = await sp.GetRequiredService<IBillingCatalogRepository>().FindAnyByLabAsync(orgId, null, panel.Id);
+        auto.Should().NotBeNull("el régimen fiscal reconcilia el catálogo del laboratorio");
+        await sp.GetRequiredService<UpdateBillableItemHandler>().HandleAsync(new UpdateBillableItemCommand(
+            orgId, auto!.Id, "Hemograma completo", exento, 350m, "Prepaid", Active: conCobrable));
 
         if (conCuenta)
         {
@@ -142,20 +141,22 @@ public sealed class LabOrderChargeWiringTests(ImedApiFixture fixture) : IAsyncLi
     }
 
     [Fact]
-    public async Task SinCuentaAbierta_laOrdenSeAdmiteIgual()
+    public async Task SinCuentaAbierta_seAbreLaDeLaConsulta_yLaOrdenSeCobra()
     {
-        // Costura 4 del modelo: la facturación nunca bloquea al laboratorio. Un laboratorio que
-        // no puede recibir una muestra porque no hay cuenta es peor que un cargo pendiente.
+        // D2: cada consulta tiene su cuenta. Si todavía no existía, la abre el primer cargo.
         var e = await ArrangeAsync(conCuenta: false);
 
         using var scope = fixture.Factory.Services.CreateScope();
-        var checkIn = await scope.ServiceProvider.GetRequiredService<CheckInOrderHandler>()
+        var sp = scope.ServiceProvider;
+        var checkIn = await sp.GetRequiredService<CheckInOrderHandler>()
             .HandleAsync(e.OrgId, e.Requisition, e.UserId);
 
-        checkIn.Should().NotBeNull();
         checkIn!.Queued.Should().HaveCount(1);
-        checkIn.Billing!.Captured.Should().Be(0);
-        checkIn.Billing.Unpriced.Should().ContainSingle();
+        checkIn.Billing!.Captured.Should().Be(1);
+        var cuenta = await sp.GetRequiredService<IBillingAccountRepository>()
+            .FindByEncounterAsync(e.OrgId, e.Encounter);
+        cuenta.Should().NotBeNull();
+        cuenta!.Origin.Should().Be(IMed.Api.Domain.Billing.Accounts.BillingAccountOrigin.Encounter);
     }
 
     [Fact]

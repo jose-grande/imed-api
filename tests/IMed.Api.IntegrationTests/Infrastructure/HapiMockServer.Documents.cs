@@ -102,7 +102,7 @@ public sealed partial class HapiMockServer
         // verifica igual que en HAPI: un Location cuya razón social no está todavía se rechaza.
         _server
             .Given(Request.Create()
-                .WithPath(new WireMock.Matchers.RegexMatcher("^/fhir/(Location|Organization)/[a-zA-Z0-9-]+$"))
+                .WithPath(new WireMock.Matchers.RegexMatcher("^/fhir/(Location|Organization|Encounter)/[a-zA-Z0-9-]+$"))
                 .UsingPut())
             .RespondWith(Response.Create().WithCallback(req =>
             {

@@ -95,6 +95,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<FiscalAuthorization> FiscalAuthorizations => Set<FiscalAuthorization>();
     public DbSet<CashPoint> CashPoints => Set<CashPoint>();
     public DbSet<BillableItem> BillableItems => Set<BillableItem>();
+    public DbSet<BillingSettings> BillingSettings => Set<BillingSettings>();
     public DbSet<PriceList> PriceLists => Set<PriceList>();
     public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
     public DbSet<BillingAccount> BillingAccounts => Set<BillingAccount>();
@@ -781,6 +782,14 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
     /// </summary>
     private static void ConfigureBillingCatalog(ModelBuilder b)
     {
+        b.Entity<BillingSettings>(e =>
+        {
+            e.ToTable("billing_settings");
+            e.HasKey(x => x.OrganizationId);
+            e.Property(x => x.FollowUpWindowDays).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+        });
+
         b.Entity<BillableItem>(e =>
         {
             e.ToTable("billing_billable_item");

@@ -107,3 +107,39 @@ public enum ConsultationType
     /// <summary>Emergencia. Solo se elige a mano.</summary>
     Emergency = 2,
 }
+
+/// <summary>
+/// Cómo viaja el tipo de consulta en FHIR: <c>Encounter.type</c> y <c>Appointment.appointmentType</c>
+/// con este sistema y estos códigos (A3).
+/// </summary>
+public static class ConsultationTypeCodes
+{
+    public const string System = "https://imed.app/fhir/CodeSystem/consultation-type";
+
+    /// <summary>Medicina general y de familia: la consulta de quien no declaró especialidad (P2).</summary>
+    public const string GeneralPracticeSpecialty = "394814009";
+
+    public static string ToCode(ConsultationType type) => type switch
+    {
+        ConsultationType.FirstVisit => "first-visit",
+        ConsultationType.FollowUp => "follow-up",
+        ConsultationType.Emergency => "emergency",
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
+
+    public static ConsultationType? FromCode(string? code) => code switch
+    {
+        "first-visit" => ConsultationType.FirstVisit,
+        "follow-up" => ConsultationType.FollowUp,
+        "emergency" => ConsultationType.Emergency,
+        _ => null,
+    };
+
+    public static string Display(ConsultationType type) => type switch
+    {
+        ConsultationType.FirstVisit => "Primera vez",
+        ConsultationType.FollowUp => "Control",
+        ConsultationType.Emergency => "Emergencia",
+        _ => type.ToString(),
+    };
+}

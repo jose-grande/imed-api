@@ -192,6 +192,7 @@ public static class DependencyInjection
         // DESPUÉS de los seeders de globales: clona el catálogo a las orgs preexistentes
         // (copy-on-create, rev 53). Depende del orden de registro (seeders son IHostedService secuenciales).
         services.AddHostedService<LabCatalogProvisioningBackfill>();
+        services.AddHostedService<BillableCatalogBackfill>();
         // Recupera las muestras que ya pasaron por QC antes de existir la convergencia con
         // `order_intake`: sin esto no aparecen en Resultados/dashboard/TAT.
         services.AddHostedService<CollectionIntakeBackfill>();
@@ -223,6 +224,8 @@ public static class DependencyInjection
         services.AddScoped<IOutboxDispatcher, InvitationLazyProvisionPendingDispatcher>();
         services.AddScoped<IOutboxDispatcher, TeamRoleChangedDispatcher>();
         services.AddScoped<IOutboxDispatcher, TeamFunctionsChangedDispatcher>();
+        services.AddScoped<IOutboxDispatcher, EncounterBillingSyncDispatcher>();
+        services.AddScoped<IOutboxDispatcher, LabOrderBillingSyncDispatcher>();
         services.AddScoped<IOutboxDispatcher, LocationFhirSyncDispatcher>();
         services.AddScoped<IOutboxDispatcher, PractitionerLocationsSyncDispatcher>();
         services.AddScoped<LocationFhirProjector>();
@@ -498,6 +501,13 @@ public static class DependencyInjection
         services.AddScoped<IEncounterAccountResolver, EncounterAccountResolver>();
         // Devolución al inventario por nota de crédito (F0.5). Vacía hasta que el Stream B la reemplace.
         services.AddScoped<IStockReturnPort, NoStockReturnPort>();
+        // Cobro de consultas (A3/A4).
+        services.AddScoped<IBillingSettingsRepository, BillingSettingsRepository>();
+        services.AddScoped<SuggestConsultationTypeHandler>();
+        services.AddScoped<EncounterChargeReconciler>();
+        services.AddScoped<OrganizationCatalogReconciler>();
+        services.AddScoped<LabOrderChargeReconciler>();
+        services.AddScoped<IOutboxWriter, OutboxWriter>();
         services.AddScoped<ListPriceListsHandler>();
         services.AddScoped<CreatePriceListHandler>();
         services.AddScoped<ListPriceListItemsHandler>();

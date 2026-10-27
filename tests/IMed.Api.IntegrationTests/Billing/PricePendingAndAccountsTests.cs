@@ -115,8 +115,8 @@ public sealed class PricePendingAndAccountsTests(ImedApiFixture fixture) : IAsyn
 
             await scope.ServiceProvider.GetRequiredService<ProvisionFiscalRegimeHandler>()
                 .HandleAsync(e.OrgId, "HN_SAR_CAI", "08019999123456", "Clínica");
-            (await prov.ReconcileLabAsync(e.OrgId)).Should().Be(2);
-            (await prov.ReconcileLabAsync(e.OrgId)).Should().Be(0, "la segunda pasada no encuentra nada que crear");
+            // Configurar el régimen ya reconcilia el catálogo (A6): no queda nada por crear.
+            (await prov.ReconcileLabAsync(e.OrgId)).Should().Be(0, "el régimen fiscal ya los creó");
         }
 
         using var verify = fixture.Factory.Services.CreateScope();
