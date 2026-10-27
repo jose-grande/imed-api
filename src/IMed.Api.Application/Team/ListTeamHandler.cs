@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Authorization;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Profile;
 using IMed.Api.Domain.Practitioners;
@@ -128,6 +129,7 @@ public sealed class ListTeamHandler(
             SpecialtyCode = role.SpecialtyCode,
             SpecialtyDisplay = role.SpecialtyDisplay,
             IsActive = role.Active,
+            Functions = FunctionalRoles.All.Where(f => realmRoles.Contains(f, StringComparer.Ordinal)).ToList(),
         };
     }
 

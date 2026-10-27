@@ -97,7 +97,7 @@ public sealed class SetLabTestActiveHandler(ILabCatalogRepository repo, TimeProv
 public sealed record CreateLabPanelCommand(
     Guid? OrganizationId, string Code, string Name, string? Description, IReadOnlyList<Guid> TestIds);
 
-public sealed class CreateLabPanelHandler(ILabCatalogRepository repo, TimeProvider timeProvider)
+public sealed class CreateLabPanelHandler(ILabCatalogRepository repo, TimeProvider timeProvider, IClinicClock clock)
 {
     public async Task<LabPanelDetailDto> HandleAsync(CreateLabPanelCommand cmd, CancellationToken cancellationToken = default)
     {
@@ -108,7 +108,7 @@ public sealed class CreateLabPanelHandler(ILabCatalogRepository repo, TimeProvid
         var panel = LabPanel.Create(cmd.Code, cmd.Name, cmd.Description, cmd.OrganizationId, active: true, timeProvider: timeProvider);
         await repo.AddPanelAsync(panel, cancellationToken);
 
-        var effectiveDate = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        var effectiveDate = clock.Today();
         var version = LabPanelVersion.Create(panel.Id, 1, effectiveDate, PanelVersionStatus.Active, timeProvider);
         var (items, itemDtos) = await BuildItemsAsync(repo, version.Id, cmd.TestIds, cancellationToken);
         await repo.AddVersionWithItemsAsync(version, items, cancellationToken);
@@ -140,7 +140,7 @@ public sealed class CreateLabPanelHandler(ILabCatalogRepository repo, TimeProvid
 
 public sealed record CreatePanelVersionCommand(Guid PanelId, IReadOnlyList<Guid> TestIds);
 
-public sealed class CreatePanelVersionHandler(ILabCatalogRepository repo, TimeProvider timeProvider)
+public sealed class CreatePanelVersionHandler(ILabCatalogRepository repo, TimeProvider timeProvider, IClinicClock clock)
 {
     public async Task<LabPanelDetailDto> HandleAsync(CreatePanelVersionCommand cmd, CancellationToken cancellationToken = default)
     {
@@ -148,7 +148,7 @@ public sealed class CreatePanelVersionHandler(ILabCatalogRepository repo, TimePr
             ?? throw new KeyNotFoundException($"Panel '{cmd.PanelId}' no existe.");
 
         var nextVersion = await repo.GetMaxVersionNumberAsync(panel.Id, cancellationToken) + 1;
-        var effectiveDate = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        var effectiveDate = clock.Today();
         var version = LabPanelVersion.Create(panel.Id, nextVersion, effectiveDate, PanelVersionStatus.Active, timeProvider);
         var (items, itemDtos) = await CreateLabPanelHandler.BuildItemsAsync(repo, version.Id, cmd.TestIds, cancellationToken);
         await repo.AddVersionWithItemsAsync(version, items, cancellationToken);

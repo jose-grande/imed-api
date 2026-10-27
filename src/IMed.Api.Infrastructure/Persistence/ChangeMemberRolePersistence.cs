@@ -18,6 +18,20 @@ public sealed class ChangeMemberRolePersistence(
         Guid organizationId,
         CancellationToken cancellationToken = default)
     {
+        // Audit log lo emite el handler con IAppAuditLog (separado de la tx); acá solo se
+        // persiste el outbox para garantizar el retry path.
+        _ = auditEntry;
+        return await RecordOutboxAsync(
+            TeamRoleChangedEvent.OutboxEventType, payloadJson, targetKeycloakUserId, organizationId, cancellationToken);
+    }
+
+    public async Task<Guid> RecordOutboxAsync(
+        string eventType,
+        string payloadJson,
+        Guid targetKeycloakUserId,
+        Guid organizationId,
+        CancellationToken cancellationToken = default)
+    {
         var existingTx = dbContext.Database.CurrentTransaction;
         var ownTx = existingTx is null
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
@@ -26,13 +40,10 @@ public sealed class ChangeMemberRolePersistence(
         {
             var ev = OutboxEvent.Create(
                 aggregate: $"User:{targetKeycloakUserId}:Org:{organizationId}",
-                type: TeamRoleChangedEvent.OutboxEventType,
+                type: eventType,
                 payloadJson: payloadJson,
                 timeProvider: timeProvider);
             dbContext.OutboxEvents.Add(ev);
-            // Audit log lo emite el handler con IAppAuditLog (separado de la
-            // tx); acá solo persistimos el outbox para garantizar el retry path.
-            _ = auditEntry;
 
             await dbContext.SaveChangesAsync(cancellationToken);
             if (ownTx is not null)
@@ -40,7 +51,7 @@ public sealed class ChangeMemberRolePersistence(
                 await ownTx.CommitAsync(cancellationToken);
             }
 
-            logger.LogDebug("team.role-changed outbox event {Id} persistido", ev.Id);
+            logger.LogDebug("{Type} outbox event {Id} persistido", eventType, ev.Id);
             return ev.Id;
         }
         catch

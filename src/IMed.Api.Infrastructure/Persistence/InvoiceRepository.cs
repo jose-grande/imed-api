@@ -89,6 +89,10 @@ public sealed class InvoiceRepository(AppDbContext db) : IInvoiceRepository
             db.Entry(invoice).Property(x => x.Status).IsModified = true;
             db.Entry(invoice).Property(x => x.Balance).IsModified = true;
             db.Entry(invoice).Property(x => x.UpdatedAt).IsModified = true;
+            foreach (var linea in invoice.Lines)
+            {
+                db.Entry(linea).Property(x => x.Voided).IsModified = true;
+            }
         }
         if (db.Entry(document).State == EntityState.Detached)
         {

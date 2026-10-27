@@ -16,7 +16,8 @@ public sealed class EnterResultsHandler(
     IUserPractitionerAssignmentRepository assignments,
     IResultEvaluationService evaluation,
     ILabRuleRepository ruleRepository,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IClinicClock clock)
 {
     public async Task<EnterResultsResult> HandleAsync(EnterResultsCommand cmd, CancellationToken ct = default)
     {
@@ -56,7 +57,7 @@ public sealed class EnterResultsHandler(
         // Demografía del paciente para el flag (best-effort).
         var patient = await hapi.GetPatientAsync(order.PatientFhirId, partition, ct);
         var sex = ResultInterpreter.ParseSex(patient?.Gender);
-        var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        var today = clock.Today();
         var ageYears = ResultInterpreter.AgeYearsFromBirthDate(patient?.BirthDate, today);
 
         // Performer: in-house → Practitioner del técnico (best-effort).

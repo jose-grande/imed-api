@@ -1700,13 +1700,20 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(19,4)")
                         .HasColumnName("unit_price");
 
+                    b.Property<bool>("Voided")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("voided");
+
                     b.HasKey("Id");
 
                     b.HasIndex("InvoiceId");
 
                     b.HasIndex("OrganizationId", "ChargeId")
                         .IsUnique()
-                        .HasDatabaseName("ux_invoice_line_org_charge");
+                        .HasDatabaseName("ux_invoice_line_org_charge")
+                        .HasFilter("NOT voided");
 
                     b.ToTable("billing_invoice_line", (string)null);
                 });

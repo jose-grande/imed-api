@@ -222,6 +222,7 @@ public static class DependencyInjection
         services.AddScoped<IOutboxDispatcher, InvitationEmailPendingDispatcher>();
         services.AddScoped<IOutboxDispatcher, InvitationLazyProvisionPendingDispatcher>();
         services.AddScoped<IOutboxDispatcher, TeamRoleChangedDispatcher>();
+        services.AddScoped<IOutboxDispatcher, TeamFunctionsChangedDispatcher>();
         services.AddScoped<IOutboxDispatcher, LocationFhirSyncDispatcher>();
         services.AddScoped<IOutboxDispatcher, PractitionerLocationsSyncDispatcher>();
         services.AddScoped<LocationFhirProjector>();
@@ -386,6 +387,7 @@ public static class DependencyInjection
         // Team (Épica F2 + F5)
         services.AddScoped<ListTeamHandler>();
         services.AddScoped<ChangeMemberRoleHandler>();
+        services.AddScoped<SetMemberFunctionsHandler>();
 
         // Invitations (Épica F3)
         services.AddScoped<CreateInvitationHandler>();

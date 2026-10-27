@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Authorization;
 using System.Text.Json;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Profile;
@@ -70,6 +71,9 @@ public sealed class CreateInvitationHandler(
             }
         }
 
+        // Funciones (A1): también antes de tocar Keycloak, por la misma razón.
+        var funciones = FunctionalRoles.Normalize(command.Functions);
+
         // 1. Idempotency: ¿ya hay invitación pending para este email en esta org?
         var existingPending = await invitationsRepo.GetPendingByEmailAndOrganizationAsync(
             email, command.OrganizationId, cancellationToken);
@@ -130,6 +134,10 @@ public sealed class CreateInvitationHandler(
 
             // 4. Assign realm role. Idempotente — KC ignora duplicados.
             await keycloakAdmin.AssignRealmRoleAsync(keycloakUserId, realmRole, cancellationToken);
+            foreach (var funcion in funciones)
+            {
+                await keycloakAdmin.AssignRealmRoleAsync(keycloakUserId, funcion, cancellationToken);
+            }
         }
 
         // 5. Persistir invitation con KC user attached + audit log atómicamente.

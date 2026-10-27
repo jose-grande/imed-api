@@ -21,7 +21,7 @@ public sealed class GetResultEntrySheetHandler(
     IHapiFhirClient hapi,
     ILabCatalogRepository catalog,
     ILabOperationsRepository ops,
-    TimeProvider timeProvider)
+    IClinicClock clock)
 {
     /// <summary>Cuántos puntos de histórico se piden para mostrar el valor anterior.</summary>
     private const int HistoryPoints = 1;
@@ -39,7 +39,7 @@ public sealed class GetResultEntrySheetHandler(
 
         var patient = await hapi.GetPatientAsync(order.PatientFhirId, partition, ct);
         var sex = ResultInterpreter.ParseSex(patient?.Gender);
-        var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        var today = clock.Today();
         var ageYears = ResultInterpreter.AgeYearsFromBirthDate(patient?.BirthDate, today);
 
         var intake = await ops.GetIntakeByServiceRequestAsync(orgId, serviceRequestId, ct);

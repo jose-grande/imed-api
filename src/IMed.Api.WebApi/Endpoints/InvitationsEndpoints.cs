@@ -68,7 +68,8 @@ public static class InvitationsEndpoints
                 Email: request.Email,
                 Role: role,
                 SpecialtyHint: request.SpecialtyHint,
-                LocationIds: request.LocationIds), cancellationToken);
+                LocationIds: request.LocationIds,
+                Functions: request.Functions), cancellationToken);
 
             return Results.Created($"/api/invitations/{result.InvitationId}", new CreateInvitationResponse(
                 InvitationId: result.InvitationId,
@@ -231,7 +232,8 @@ public static class InvitationsEndpoints
 
 /// <param name="LocationIds">Sedes del invitado; la primera es su principal (FAC-9).</param>
 public sealed record CreateInvitationRequest(
-    string Email, string Role, string? SpecialtyHint, IReadOnlyList<Guid>? LocationIds = null);
+    string Email, string Role, string? SpecialtyHint, IReadOnlyList<Guid>? LocationIds = null,
+    IReadOnlyList<string>? Functions = null);
 
 public sealed record CreateInvitationResponse(Guid InvitationId, Guid KeycloakUserId, bool EmailDispatched);
 

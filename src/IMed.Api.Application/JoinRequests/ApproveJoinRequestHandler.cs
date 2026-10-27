@@ -62,7 +62,8 @@ public sealed class ApproveJoinRequestHandler(
                 Email: joinRequest.Email,
                 Role: command.Role,
                 SpecialtyHint: null,
-                LocationIds: command.LocationIds), cancellationToken);
+                LocationIds: command.LocationIds,
+                Functions: command.Functions), cancellationToken);
         }
         catch (InvitationConflictException ex)
         {

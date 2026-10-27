@@ -27,7 +27,7 @@ public sealed record CreateLabRuleCommand(
     Guid? OrganizationId, string Code, string Name, string Scope, string? TargetLoinc,
     string Action, string Severity, string? Message, string LogicJson);
 
-public sealed class CreateLabRuleHandler(ILabRuleRepository repo, TimeProvider timeProvider)
+public sealed class CreateLabRuleHandler(ILabRuleRepository repo, TimeProvider timeProvider, IClinicClock clock)
 {
     public async Task<LabRuleDto> HandleAsync(CreateLabRuleCommand cmd, CancellationToken ct = default)
     {
@@ -45,7 +45,7 @@ public sealed class CreateLabRuleHandler(ILabRuleRepository repo, TimeProvider t
 
         var rule = LabRule.Create(cmd.Code, cmd.Name, scope, action, cmd.TargetLoinc, severity, cmd.Message,
             cmd.OrganizationId, active: true, timeProvider: timeProvider);
-        var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        var today = clock.Today();
         var version = LabRuleVersion.Create(rule.Id, 1, cmd.LogicJson, today, RuleVersionStatus.Active, timeProvider);
         await repo.AddRuleWithVersionAsync(rule, version, ct);
         return LabRuleDto.FromDomain(rule);

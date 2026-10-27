@@ -228,6 +228,14 @@ public interface IChangeMemberRolePersistence
         Guid organizationId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Persiste un evento outbox de equipo de otro tipo (p. ej. el cambio de funciones).</summary>
+    Task<Guid> RecordOutboxAsync(
+        string eventType,
+        string payloadJson,
+        Guid targetKeycloakUserId,
+        Guid organizationId,
+        CancellationToken cancellationToken = default);
+
     Task MarkOutboxDispatchedAsync(Guid outboxEventId, CancellationToken cancellationToken = default);
 }
 

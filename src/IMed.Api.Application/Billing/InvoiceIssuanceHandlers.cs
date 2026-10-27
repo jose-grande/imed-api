@@ -402,7 +402,8 @@ public sealed class ListAccountInvoicesHandler(IInvoiceRepository invoices)
 /// Fuera de ventana el camino correcto es la nota de crédito, que es otro documento fiscal con su
 /// propio número.</para>
 /// </summary>
-public sealed class VoidInvoiceHandler(IInvoiceRepository invoices, IClinicClock clock)
+public sealed class VoidInvoiceHandler(
+    IInvoiceRepository invoices, IBillingAccountRepository accounts, IClinicClock clock)
 {
     /// <summary>
     /// Días dentro de los que se puede anular. Pasada la ventana, el documento ya salió del
@@ -450,6 +451,15 @@ public sealed class VoidInvoiceHandler(IInvoiceRepository invoices, IClinicClock
 
         factura.Void();
         documento.Void(reason);
+
+        // Los cargos vuelven a pendientes (A8) en la misma transacción que la anulación: se leen
+        // rastreados, así el SaveChanges de la anulación los guarda junto con la factura.
+        foreach (var chargeId in factura.Lines.Select(l => l.ChargeId).Distinct())
+        {
+            var cargo = await accounts.GetChargeForUpdateAsync(orgId, chargeId, ct);
+            cargo?.ReleaseFromVoidedInvoice();
+        }
+
         await invoices.SaveVoidAsync(factura, documento, ct);
 
         return IssueInvoiceResult.Ok(InvoiceMapper.ToDto(factura, documento));

@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Authorization;
 namespace IMed.Api.Application.Team;
 
 /// <summary>
@@ -26,6 +27,12 @@ public sealed record TeamMember
 
     /// <summary>Sedes donde trabaja, la principal primero (FAC-9). Nunca vacía para un miembro activo.</summary>
     public IReadOnlyList<TeamMemberLocation> Locations { get; init; } = [];
+
+    /// <summary>
+    /// Funciones adicionales al rol principal (A1): cajero, facturador, laboratorio, farmacia,
+    /// inventario. Realm roles de <see cref="FunctionalRoles"/>.
+    /// </summary>
+    public IReadOnlyList<string> Functions { get; init; } = [];
 }
 
 /// <summary>Sede de un miembro del equipo.</summary>

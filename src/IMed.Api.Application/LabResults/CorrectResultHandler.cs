@@ -38,7 +38,8 @@ public sealed class CorrectResultHandler(
     IHapiFhirClient hapi,
     ILabCatalogRepository catalog,
     ILabOperationsRepository ops,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IClinicClock clock)
 {
     public async Task<CorrectResultDto?> HandleAsync(CorrectResultCommand cmd, CancellationToken ct = default)
     {
@@ -69,7 +70,7 @@ public sealed class CorrectResultHandler(
         // Recalcular el flag con el valor corregido y los rangos de ESTE paciente.
         var patient = await hapi.GetPatientAsync(observation.PatientFhirId, partition, ct);
         var sex = ResultInterpreter.ParseSex(patient?.Gender);
-        var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        var today = clock.Today();
         var ageYears = ResultInterpreter.AgeYearsFromBirthDate(patient?.BirthDate, today);
 
         string? flagCode = null;

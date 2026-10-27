@@ -604,10 +604,14 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.UnitPrice).HasPrecision(19, 4).IsRequired();
             e.Property(x => x.DiscountAmount).HasPrecision(19, 4).IsRequired();
 
-            // Un cargo no puede salir en dos facturas: sería cobrarle dos veces al paciente por
-            // el mismo acto, con dos documentos legales que lo respaldan.
+            e.Property(x => x.Voided).IsRequired().HasDefaultValue(false);
+
+            // Un cargo no puede salir en dos facturas vigentes: sería cobrarle dos veces al
+            // paciente por el mismo acto, con dos documentos legales que lo respaldan. Las líneas
+            // de una factura anulada no cuentan: su cargo se vuelve a facturar (A8).
             e.HasIndex(x => new { x.OrganizationId, x.ChargeId })
                 .IsUnique()
+                .HasFilter("NOT voided")
                 .HasDatabaseName("ux_invoice_line_org_charge");
         });
 

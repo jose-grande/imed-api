@@ -16,7 +16,8 @@ public sealed record CreateInvitationCommand(
     string Email,
     InvitationRole Role,
     string? SpecialtyHint,
-    IReadOnlyList<Guid>? LocationIds = null);
+    IReadOnlyList<Guid>? LocationIds = null,
+    IReadOnlyList<string>? Functions = null);
 
 public sealed record CreateInvitationResult(
     Guid InvitationId,

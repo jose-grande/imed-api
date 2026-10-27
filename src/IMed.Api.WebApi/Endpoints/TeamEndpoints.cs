@@ -21,7 +21,40 @@ public static class TeamEndpoints
             .WithSummary("Cambia el rol realm del miembro indicado. Requiere rol org_admin.")
             .RequireAuthorization();
 
+        app.MapPut("/api/team/{keycloakUserId:guid}/functions", SetMemberFunctionsAsync)
+            .WithTags("Team")
+            .WithName("SetMemberFunctions")
+            .WithSummary("Reemplaza las funciones (cajero, laboratorio, farmacia, inventario…) del miembro. Requiere org_admin.")
+            .RequireAuthorization();
+
         return app;
+    }
+
+    private static async Task<IResult> SetMemberFunctionsAsync(
+        Guid keycloakUserId,
+        SetMemberFunctionsRequest request,
+        ClaimsPrincipal principal,
+        SetMemberFunctionsHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var (actorId, orgId, error) = ExtractAdminIds(principal);
+        if (error is not null)
+        {
+            return error;
+        }
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(new SetMemberFunctionsCommand(
+                orgId!.Value, keycloakUserId, actorId!.Value, request.Functions ?? []), cancellationToken));
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (ChangeMemberRoleException ex) when (ex.Code == "not_found")
+        {
+            return Results.Problem(title: "Miembro no encontrado", detail: ex.Message, statusCode: StatusCodes.Status404NotFound);
+        }
     }
 
     private static async Task<IResult> ListTeamAsync(
@@ -160,6 +193,8 @@ public static class TeamEndpoints
 }
 
 public sealed record ChangeMemberRoleRequest(string Role);
+
+public sealed record SetMemberFunctionsRequest(IReadOnlyList<string>? Functions);
 
 public sealed record ChangeMemberRoleResponse(
     Guid TargetKeycloakUserId,

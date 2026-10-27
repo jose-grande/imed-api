@@ -175,6 +175,10 @@ public sealed class Invoice
         }
         Status = InvoiceStatus.Voided;
         Balance = 0m;
+        foreach (var linea in _lines)
+        {
+            linea.MarkVoided();
+        }
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 }
@@ -204,6 +208,15 @@ public sealed class InvoiceLine
     public decimal UnitPrice { get; private set; }
     public decimal DiscountAmount { get; private set; }
     public int LineNumber { get; private set; }
+
+    /// <summary>
+    /// <c>true</c> si la factura se anuló. La línea queda como constancia, pero su cargo vuelve a
+    /// pendientes (A8) y puede salir en otra factura: la regla "un cargo, una factura" vale solo
+    /// para las líneas vigentes.
+    /// </summary>
+    public bool Voided { get; private set; }
+
+    internal void MarkVoided() => Voided = true;
 
     private InvoiceLine() { }
 

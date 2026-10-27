@@ -263,6 +263,22 @@ public sealed class BillingCharge
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 
+    /// <summary>
+    /// Devuelve el cargo a "pendiente de facturar" porque su factura se anuló (A8). El servicio se
+    /// prestó igual: si el cargo quedara facturado, la corrección más común —volver a facturar con
+    /// el RTN bien escrito— sería imposible. El rastro queda en la factura anulada, cuyas líneas
+    /// siguen apuntando a este cargo.
+    /// </summary>
+    public void ReleaseFromVoidedInvoice(TimeProvider? timeProvider = null)
+    {
+        if (Status != ChargeStatus.Invoiced)
+        {
+            return; // idempotente: solo un cargo facturado vuelve
+        }
+        Status = ChargeStatus.Captured;
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
     public void MarkInvoiced(TimeProvider? timeProvider = null)
     {
         if (Status == ChargeStatus.Reversed)

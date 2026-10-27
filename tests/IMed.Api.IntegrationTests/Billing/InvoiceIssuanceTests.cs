@@ -328,6 +328,40 @@ public sealed class InvoiceIssuanceTests(ImedApiFixture fixture) : IAsyncLifetim
     }
 
     [Fact]
+    public async Task Anular_devuelveLosCargosAPendientes_yLaCuentaSeVuelveAFacturar()
+    {
+        // A8: la corrección más común —el RTN del cliente estaba mal— es anular y volver a
+        // facturar los mismos servicios. Si los cargos quedaran "facturados", no habría cómo.
+        var e = await ArrangeAsync();
+        using var scope = fixture.Factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+        await CobrarAsync(sp, e, e.ExentoItemId, "sr-rehacer");
+
+        var primera = await sp.GetRequiredService<IssueInvoiceHandler>().HandleAsync(
+            new IssueInvoiceCommand(e.OrgId, e.AccountId, e.LocationId, e.FacturaTypeId,
+                BuyerName: "Juan Perez", BuyerTaxId: "08011999000001"));
+        var cargoId = primera.Invoice!.Lines.Single().ChargeId;
+
+        await sp.GetRequiredService<VoidInvoiceHandler>().HandleAsync(
+            e.OrgId, primera.Invoice.Id, "RTN del cliente mal escrito");
+
+        using (var lectura = fixture.Factory.Services.CreateScope())
+        {
+            var cargo = await lectura.ServiceProvider.GetRequiredService<IBillingAccountRepository>()
+                .GetChargeAsync(e.OrgId, cargoId);
+            cargo!.Status.Should().Be(ChargeStatus.Captured);
+        }
+
+        var segunda = await sp.GetRequiredService<IssueInvoiceHandler>().HandleAsync(
+            new IssueInvoiceCommand(e.OrgId, e.AccountId, e.LocationId, e.FacturaTypeId,
+                BuyerName: "Juan Pérez", BuyerTaxId: "08011999000002"));
+
+        segunda.Succeeded.Should().BeTrue(segunda.Rejected?.Message);
+        segunda.Invoice!.Lines.Single().ChargeId.Should().Be(cargoId);
+        segunda.Invoice.FiscalDocument!.Sequence.Should().Be(2, "el correlativo anulado no se reutiliza");
+    }
+
+    [Fact]
     public async Task AnularSinMotivo_seRechaza()
     {
         var e = await ArrangeAsync();
