@@ -51,6 +51,22 @@ public static class PermissionCatalog
     public const string BillingCollect = "billing.collect";
     public const string BillingSupervise = "billing.supervise";
 
+    // --- Inventario y farmacia (plan de salida a producción, F0.7) -----------
+    /// <summary>Ver existencias, lotes, kardex, artículos, bodegas y proveedores.</summary>
+    public const string InventoryRead = "inventory.read";
+
+    /// <summary>Mover inventario: entradas de compra, traslados, consumo interno y conteos.</summary>
+    public const string InventoryOperate = "inventory.operate";
+
+    /// <summary>Configurar el inventario (artículos, bodegas, proveedores) y aprobar ajustes.</summary>
+    public const string InventoryManage = "inventory.manage";
+
+    /// <summary>Despachar las recetas de las consultas.</summary>
+    public const string PharmacyDispense = "pharmacy.dispense";
+
+    /// <summary>Vender en mostrador artículos de venta libre.</summary>
+    public const string PharmacySell = "pharmacy.sell";
+
     // --- Administración -----------------------------------------------------
     public const string OrgManage = "org.manage";
     public const string OrgTeamManage = "org.team.manage";
@@ -106,6 +122,12 @@ public static class PermissionCatalog
         (BillingCollect, "billing", "Cobrar, emitir documentos y arquear el propio turno"),
         (BillingSupervise, "billing", "Autorizar descuentos y anulaciones, gestionar CAI y arqueos ajenos"),
 
+        (InventoryRead, "inventory", "Ver existencias, lotes, kardex, artículos y proveedores"),
+        (InventoryOperate, "inventory", "Registrar entradas de compra, traslados, consumo interno y conteos"),
+        (InventoryManage, "inventory", "Configurar artículos, bodegas y proveedores, y aprobar ajustes"),
+        (PharmacyDispense, "pharmacy", "Despachar recetas de las consultas"),
+        (PharmacySell, "pharmacy", "Vender en mostrador artículos de venta libre"),
+
         (OrgManage, "org", "Administrar la organización"),
         (OrgTeamManage, "org", "Administrar el equipo y las invitaciones"),
         (OrgLocationsManage, "org", "Administrar las sedes"),
@@ -124,6 +146,8 @@ public static class PermissionCatalog
         ("org_admin", RecordWrite), ("org_admin", RecordPreclinic),
         ("org_admin", BillingRead), ("org_admin", BillingCharge), ("org_admin", BillingCollect), ("org_admin", BillingSupervise),
         ("org_admin", OrgManage), ("org_admin", OrgTeamManage), ("org_admin", OrgLocationsManage), ("org_admin", OrgPolicyManage),
+        ("org_admin", InventoryRead), ("org_admin", InventoryOperate), ("org_admin", InventoryManage),
+        ("org_admin", PharmacyDispense), ("org_admin", PharmacySell),
 
         // El médico ve el laboratorio y el expediente. En una clínica chica el de turno cubre a
         // todos los pacientes; la contención real es el registro de accesos, no la restricción.
@@ -163,10 +187,17 @@ public static class PermissionCatalog
         ("billing_supervisor", BillingCollect), ("billing_supervisor", BillingSupervise),
         ("billing_supervisor", RecordSearchDemographics),
 
-        // `pharmacist`, `pharmacy_tech`, `warehouse_keeper` e `inventory_manager` se declaran en
-        // `Roles` sin permisos base: sus módulos son U2 y U3. Existir sin conceder nada los deja
-        // configurables desde la pantalla de la matriz —que es el punto de tenerlos listados— sin
-        // abrir acceso a nada mientras tanto.
+        // Inventario y farmacia (F0.7). Farmacia identifica al paciente para despachar o vender,
+        // pero no lee el expediente: la receta le llega por su propio endpoint.
+        ("inventory_manager", InventoryRead), ("inventory_manager", InventoryOperate),
+        ("inventory_manager", InventoryManage),
+        ("warehouse_keeper", InventoryRead), ("warehouse_keeper", InventoryOperate),
+        ("pharmacist", PharmacyDispense), ("pharmacist", PharmacySell),
+        ("pharmacist", InventoryRead), ("pharmacist", InventoryOperate),
+        ("pharmacist", RecordSearchDemographics),
+        ("pharmacy_tech", PharmacyDispense), ("pharmacy_tech", PharmacySell),
+        ("pharmacy_tech", InventoryRead),
+        ("pharmacy_tech", RecordSearchDemographics),
 
         // Soporte interno de IMed: acceso elevado, auditado. Sin permisos de expediente por
         // defecto — que soporte pueda leer historias clínicas debe ser una decisión explícita.

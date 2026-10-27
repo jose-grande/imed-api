@@ -365,8 +365,9 @@ public sealed class GetExceptionReportHandler(
         var descuadres = turnos
             .Where(t => t.Difference is not null && t.Difference != 0
                         && t.ClosedAt is { } cerrado
-                        && DateOnly.FromDateTime(cerrado.UtcDateTime) >= desde
-                        && DateOnly.FromDateTime(cerrado.UtcDateTime) <= hasta)
+                        // Día de la clínica: un turno cerrado a las 20:00 es de hoy, no de mañana.
+                        && clock.DateOf(cerrado) >= desde
+                        && clock.DateOf(cerrado) <= hasta)
             .ToList();
 
         foreach (var t in descuadres)

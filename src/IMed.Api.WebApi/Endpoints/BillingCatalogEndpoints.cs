@@ -28,6 +28,15 @@ public static class BillingCatalogEndpoints
             .WithSummary("Da de alta un cobrable.")
             .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingSupervise));
 
+        group.MapGet("/items/price-pending", ListPricePendingAsync)
+            .WithName("ListPricePendingBillableItems")
+            .WithSummary("Cobrables sin precio: no se facturan hasta que alguien fije su precio.");
+
+        group.MapPatch("/items/{itemId:guid}", UpdateItemAsync)
+            .WithName("UpdateBillableItem")
+            .WithSummary("Edita un cobrable. Fijar el precio resuelve el 'sin precio' y lo aplica a los cargos que esperaban.")
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingSupervise));
+
         group.MapGet("/items/{itemId:guid}/price", ResolvePriceAsync)
             .WithName("ResolveBillablePrice")
             .WithSummary("Precio resuelto de un cobrable, con la razón por la que es ese.");
@@ -88,6 +97,36 @@ public static class BillingCatalogEndpoints
         {
             return Results.Problem(
                 title: "Estado inválido", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
+    private static async Task<IResult> ListPricePendingAsync(
+        ClaimsPrincipal principal, ListPricePendingItemsHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        return orgId is null ? Forbidden() : Results.Ok(await handler.HandleAsync(orgId.Value, ct));
+    }
+
+    private static async Task<IResult> UpdateItemAsync(
+        Guid itemId, UpdateBillableItemRequest request, ClaimsPrincipal principal,
+        UpdateBillableItemHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        try
+        {
+            var r = await handler.HandleAsync(new UpdateBillableItemCommand(
+                orgId.Value, itemId, request.Name, request.TaxCodeId, request.DefaultPrice,
+                request.PaymentTiming, request.Active), ct);
+            return r is null ? Results.NotFound() : Results.Ok(r);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(
+                title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 
@@ -191,6 +230,13 @@ public sealed record CreateBillableItemRequest(
     Guid? LabTestId,
     Guid? LabPanelId,
     string? ServiceCode);
+
+public sealed record UpdateBillableItemRequest(
+    string Name,
+    Guid TaxCodeId,
+    decimal DefaultPrice,
+    string? PaymentTiming,
+    bool? Active);
 
 public sealed record CreatePriceListRequest(
     string Code,

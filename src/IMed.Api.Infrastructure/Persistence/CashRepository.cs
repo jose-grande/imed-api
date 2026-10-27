@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace IMed.Api.Infrastructure.Persistence;
 
 /// <summary>Caja sobre EF Core (FAC-6). Lecturas estrictas por organización.</summary>
-public sealed class CashRepository(AppDbContext db) : ICashRepository
+public sealed class CashRepository(AppDbContext db, IClinicClock clock) : ICashRepository
 {
     public Task<CashSession?> GetSessionAsync(
         Guid organizationId, Guid sessionId, CancellationToken ct = default) =>
@@ -47,8 +47,9 @@ public sealed class CashRepository(AppDbContext db) : ICashRepository
         }
         if (day is { } d)
         {
-            var desde = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            var hasta = desde.AddDays(1);
+            // Día de la clínica: el turno de la tarde hondureña es del mismo día.
+            var desde = clock.StartOf(d);
+            var hasta = clock.StartOf(d.AddDays(1));
             q = q.Where(x => x.OpenedAt >= desde && x.OpenedAt < hasta);
         }
 

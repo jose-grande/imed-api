@@ -19,5 +19,11 @@ public interface IPartyRepository
         Guid organizationId, IReadOnlyCollection<Guid> partyIds, CancellationToken ct = default);
 
     Task AddAsync(Party party, CancellationToken ct = default);
+
+    /// <summary>
+    /// Agrega la parte salvo que el paciente ya tenga una. Devuelve <c>false</c> si otro camino
+    /// la creó antes: el índice único por paciente decide.
+    /// </summary>
+    Task<bool> TryAddAsync(Party party, CancellationToken ct = default);
     Task UpdateAsync(Party party, CancellationToken ct = default);
 }

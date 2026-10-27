@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace IMed.Api.Infrastructure.Persistence;
 
 /// <summary>Lecturas de reporte sobre EF Core (FAC-8). Todas estrictas por organización.</summary>
-public sealed class FiscalReportRepository(AppDbContext db) : IFiscalReportRepository
+public sealed class FiscalReportRepository(AppDbContext db, IClinicClock clock) : IFiscalReportRepository
 {
     public async Task<IReadOnlyList<FiscalDocument>> ListDocumentsAsync(
         Guid organizationId, DateOnly since, DateOnly until, CancellationToken ct = default)
@@ -59,7 +59,7 @@ public sealed class FiscalReportRepository(AppDbContext db) : IFiscalReportRepos
     /// Rango medio abierto <c>[desde, hasta)</c>, con el día final incluido: quien pide "del 1 al
     /// 25" espera que lo del 25 a las 18:00 aparezca.
     /// </summary>
-    private static (DateTimeOffset Desde, DateTimeOffset Hasta) Rango(DateOnly since, DateOnly until) =>
-        (new DateTimeOffset(since.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
-         new DateTimeOffset(until.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+    /// <summary>Días de la clínica, no de UTC: ver <see cref="IClinicClock.StartOf"/>.</summary>
+    private (DateTimeOffset Desde, DateTimeOffset Hasta) Rango(DateOnly since, DateOnly until) =>
+        (clock.StartOf(since), clock.StartOf(until.AddDays(1)));
 }

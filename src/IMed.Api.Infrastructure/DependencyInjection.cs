@@ -488,6 +488,14 @@ public static class DependencyInjection
         services.AddScoped<SearchBillableItemsHandler>();
         services.AddScoped<CreateBillableItemHandler>();
         services.AddScoped<ResolvePriceHandler>();
+        services.AddScoped<ListPricePendingItemsHandler>();
+        services.AddScoped<UpdateBillableItemHandler>();
+        // Alta automática de cobrables "sin precio" (plan de salida a producción, F0.3).
+        services.AddScoped<IBillableItemProvisioner, BillableItemProvisioner>();
+        // Cuenta por consulta / por acto suelto (F0.4).
+        services.AddScoped<IEncounterAccountResolver, EncounterAccountResolver>();
+        // Devolución al inventario por nota de crédito (F0.5). Vacía hasta que el Stream B la reemplace.
+        services.AddScoped<IStockReturnPort, NoStockReturnPort>();
         services.AddScoped<ListPriceListsHandler>();
         services.AddScoped<CreatePriceListHandler>();
         services.AddScoped<ListPriceListItemsHandler>();

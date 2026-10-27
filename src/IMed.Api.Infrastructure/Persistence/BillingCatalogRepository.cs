@@ -67,6 +67,59 @@ public sealed class BillingCatalogRepository(AppDbContext db) : IBillingCatalogR
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<IReadOnlyList<BillableItem>> ListPricePendingItemsAsync(
+        Guid organizationId, CancellationToken ct = default) =>
+        await db.BillableItems.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.Active && x.PricePending)
+            .OrderBy(x => x.Name)
+            .ToListAsync(ct);
+
+    public Task<BillableItem?> FindBySpecialtyAsync(
+        Guid organizationId, string specialtyCode, ConsultationType type, CancellationToken ct = default) =>
+        db.BillableItems.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.OrganizationId == organizationId
+                                      && x.SpecialtyCode == specialtyCode
+                                      && x.ConsultationType == type, ct);
+
+    public Task<BillableItem?> FindAnyByLabAsync(
+        Guid organizationId, Guid? labTestId, Guid? labPanelId, CancellationToken ct = default)
+    {
+        if (labTestId is null && labPanelId is null)
+        {
+            return Task.FromResult<BillableItem?>(null);
+        }
+        return db.BillableItems.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId)
+            .Where(x => (labTestId != null && x.LabTestId == labTestId)
+                        || (labPanelId != null && x.LabPanelId == labPanelId))
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public Task<BillableItem?> FindAnyByStockItemAsync(
+        Guid organizationId, Guid stockItemId, CancellationToken ct = default) =>
+        db.BillableItems.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.StockItemId == stockItemId, ct);
+
+    public async Task<bool> TryAddLinkedItemAsync(BillableItem item, CancellationToken ct = default)
+    {
+        db.BillableItems.Add(item);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            // Se suelta: quien lo agregó solo necesita el id, y un request que después lo lea y
+            // lo actualice por su cuenta chocaría con esta instancia rastreada.
+            db.Entry(item).State = EntityState.Detached;
+            return true;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        {
+            // Otro camino dio de alta el mismo enlace entre la lectura y esta escritura (o el
+            // código chocó con uno existente): el índice único lo impidió y el resultado es el mismo.
+            db.Entry(item).State = EntityState.Detached;
+            return false;
+        }
+    }
+
     // ---- Tarifarios ----
 
     public async Task<IReadOnlyList<PriceList>> ListPriceListsAsync(

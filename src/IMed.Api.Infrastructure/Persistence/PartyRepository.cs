@@ -52,6 +52,24 @@ public sealed class PartyRepository(AppDbContext db) : IPartyRepository
             .ToDictionaryAsync(x => x.Id, x => x.LegalName, ct);
     }
 
+    public async Task<bool> TryAddAsync(Party party, CancellationToken ct = default)
+    {
+        db.Parties.Add(party);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            // Se suelta: quien lo agregó solo necesita el id, y un request que después lo lea y
+            // lo actualice por su cuenta chocaría con esta instancia rastreada.
+            db.Entry(party).State = EntityState.Detached;
+            return true;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        {
+            db.Entry(party).State = EntityState.Detached;
+            return false;
+        }
+    }
+
     public async Task AddAsync(Party party, CancellationToken ct = default)
     {
         db.Parties.Add(party);

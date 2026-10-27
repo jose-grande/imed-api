@@ -10,6 +10,26 @@ public enum BillingAccountKind
     Running = 1,
 }
 
+/// <summary>
+/// Qué acto abrió la cuenta (plan de salida a producción, D2). Junto con
+/// <see cref="BillingAccount.OriginRef"/> hace idempotente la apertura automática: reintentar una
+/// orden de laboratorio o una venta no abre una segunda cuenta.
+/// </summary>
+public enum BillingAccountOrigin
+{
+    /// <summary>Abierta a mano desde la pantalla de cuentas o la orden de servicio.</summary>
+    Manual = 0,
+
+    /// <summary>Una consulta: la cuenta del encuentro.</summary>
+    Encounter = 1,
+
+    /// <summary>Una orden de laboratorio sin consulta (orden externa).</summary>
+    LabOrder = 2,
+
+    /// <summary>Una venta libre de farmacia.</summary>
+    PharmacySale = 3,
+}
+
 public enum BillingAccountStatus
 {
     Open = 0,

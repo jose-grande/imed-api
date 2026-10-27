@@ -42,6 +42,14 @@ public sealed class BillingCharge
     /// <summary>Tarifario que ganó, si fue alguno.</summary>
     public Guid? PriceListId { get; private set; }
 
+    /// <summary>
+    /// <c>true</c> si se capturó cuando su cobrable todavía no tenía precio. El cargo existe —el
+    /// servicio se prestó—, pero no se factura hasta que el precio se fije y
+    /// <see cref="ApplyPrice"/> lo congele. Es la única excepción a "el precio se congela al
+    /// capturar": no había precio que congelar.
+    /// </summary>
+    public bool PricePending { get; private set; }
+
     public Guid TaxCodeId { get; private set; }
 
     /// <summary>Tasa congelada. Una reforma tributaria no puede recalcular lo ya cobrado.</summary>
@@ -106,7 +114,8 @@ public sealed class BillingCharge
         string? sourceFhirRef = null,
         string? reason = null,
         TimeProvider? timeProvider = null,
-        Guid? locationId = null)
+        Guid? locationId = null,
+        bool pricePending = false)
     {
         if (locationId is not { } sede || sede == Guid.Empty)
         {
@@ -138,6 +147,12 @@ public sealed class BillingCharge
                 nameof(sourceId));
         }
 
+        if (pricePending && discountAmount > 0)
+        {
+            throw new ArgumentException(
+                "Un cargo sin precio no lleva descuento: no hay sobre qué calcularlo.", nameof(discountAmount));
+        }
+
         var bruto = quantity * unitPrice;
         if (discountAmount > bruto)
         {
@@ -166,6 +181,7 @@ public sealed class BillingCharge
             UnitPrice = unitPrice,
             PriceSource = priceSource,
             PriceListId = priceListId,
+            PricePending = pricePending,
             TaxCodeId = taxCodeId,
             TaxRate = taxRate,
             DiscountAmount = discountAmount,
@@ -220,11 +236,42 @@ public sealed class BillingCharge
         UpdatedAt = now;
     }
 
+    /// <summary>
+    /// Congela el precio de un cargo que se capturó sin precio. Solo vale una vez y solo antes de
+    /// facturar: después el precio queda tan congelado como el de cualquier otro cargo.
+    /// </summary>
+    public void ApplyPrice(
+        decimal unitPrice, PriceSource priceSource, Guid? priceListId, TimeProvider? timeProvider = null)
+    {
+        if (!PricePending)
+        {
+            throw new InvalidOperationException("El cargo ya tiene precio: no se vuelve a calcular.");
+        }
+        if (Status != ChargeStatus.Captured)
+        {
+            throw new InvalidOperationException($"Un cargo en estado '{Status}' no cambia de precio.");
+        }
+        if (unitPrice < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(unitPrice), "El precio no puede ser negativo.");
+        }
+
+        UnitPrice = unitPrice;
+        PriceSource = priceSource;
+        PriceListId = priceListId;
+        PricePending = false;
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
     public void MarkInvoiced(TimeProvider? timeProvider = null)
     {
         if (Status == ChargeStatus.Reversed)
         {
             throw new InvalidOperationException("Un cargo reversado no se factura.");
+        }
+        if (PricePending)
+        {
+            throw new InvalidOperationException("Un cargo sin precio no se factura.");
         }
         Status = ChargeStatus.Invoiced;
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();

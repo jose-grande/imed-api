@@ -90,3 +90,20 @@ public enum PriceSource
     /// <summary>Precio base del ítem: no había tarifario que aplicara.</summary>
     ItemDefault = 4,
 }
+
+/// <summary>
+/// Tipo de consulta (plan de salida a producción, D4). El precio de una consulta depende de la
+/// especialidad <b>y</b> del tipo: cada combinación es un cobrable propio del catálogo, así los
+/// tarifarios la tratan como a cualquier otro servicio.
+/// </summary>
+public enum ConsultationType
+{
+    /// <summary>Primera vez con esa especialidad (o fuera de la ventana de control).</summary>
+    FirstVisit = 0,
+
+    /// <summary>Control o reconsulta dentro de la ventana configurada.</summary>
+    FollowUp = 1,
+
+    /// <summary>Emergencia. Solo se elige a mano.</summary>
+    Emergency = 2,
+}

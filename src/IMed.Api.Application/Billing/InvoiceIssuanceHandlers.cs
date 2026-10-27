@@ -186,6 +186,18 @@ public sealed class IssueInvoiceHandler(
                 ". Se facturan desde una sede de esa razón social.");
         }
 
+        // Sin precio (D1): la factura no sale con un servicio en L 0.00. El cargo se ve en la
+        // cuenta y el mensaje dice cuál falta, para que alguien con permiso lo complete.
+        var sinPrecio = propios.Where(c => c.PricePending).ToList();
+        if (sinPrecio.Count > 0)
+        {
+            var nombres = string.Join(", ", sinPrecio.Select(c => c.DescriptionSnapshot).Distinct());
+            return IssueInvoiceResult.Reject(
+                "cargo_sin_precio",
+                $"No se puede facturar: {nombres} todavía no tiene precio. " +
+                "El jefe administrativo lo fija en Catálogo de cobrables → Sin precio.");
+        }
+
         // ── Régimen y adaptador ──
         var regimen = await fiscal.GetActiveRegimeAsync(cmd.OrganizationId, today, ct);
         if (regimen is null)

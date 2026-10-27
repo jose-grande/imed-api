@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace IMed.Api.Infrastructure.Persistence;
 
 /// <summary>Constancias de liberación sobre EF Core (FAC-7).</summary>
-public sealed class ServiceWaiverRepository(AppDbContext db) : IServiceWaiverRepository
+public sealed class ServiceWaiverRepository(AppDbContext db, IClinicClock clock) : IServiceWaiverRepository
 {
     public Task<ServiceWaiver?> FindAsync(
         Guid organizationId, string sourceRef, CancellationToken ct = default)
@@ -22,13 +22,13 @@ public sealed class ServiceWaiverRepository(AppDbContext db) : IServiceWaiverRep
 
         if (since is { } desde)
         {
-            var inicio = new DateTimeOffset(desde.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var inicio = clock.StartOf(desde);
             q = q.Where(x => x.WaivedAt >= inicio);
         }
         if (until is { } hasta)
         {
             // Inclusivo: quien pide "hasta el 25" espera que el 25 esté adentro.
-            var fin = new DateTimeOffset(hasta.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var fin = clock.StartOf(hasta.AddDays(1));
             q = q.Where(x => x.WaivedAt < fin);
         }
 

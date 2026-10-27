@@ -57,6 +57,22 @@ public sealed class BillableItem
     /// <summary>Código de servicio (LOINC/SNOMED/CPT local) para lo que no tiene producto detrás.</summary>
     public string? ServiceCode { get; private set; }
 
+    /// <summary>
+    /// Especialidad (código SNOMED del catálogo de especialidades) cuya consulta cobra este ítem.
+    /// Va siempre con <see cref="ConsultationType"/>: la consulta se cobra por especialidad y tipo.
+    /// </summary>
+    public string? SpecialtyCode { get; private set; }
+
+    public ConsultationType? ConsultationType { get; private set; }
+
+    /// <summary>
+    /// <c>true</c> mientras nadie le puso precio. Lo tienen los cobrables que el sistema da de alta
+    /// solo —una especialidad nueva, un examen nuevo, un artículo vendible—: el acto clínico no se
+    /// detiene, pero la factura que lo incluya no se emite hasta que alguien fije el precio. Un
+    /// precio 0 por defecto saldría en una factura timbrada sin que nadie lo note.
+    /// </summary>
+    public bool PricePending { get; private set; }
+
     public bool Active { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -76,7 +92,10 @@ public sealed class BillableItem
         Guid? labPanelId = null,
         Guid? stockItemId = null,
         string? serviceCode = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        string? specialtyCode = null,
+        ConsultationType? consultationType = null,
+        bool pricePending = false)
     {
         if (string.IsNullOrWhiteSpace(code))
         {
@@ -97,6 +116,17 @@ public sealed class BillableItem
         }
 
         var enlaces = new[] { labTestId.HasValue, labPanelId.HasValue, stockItemId.HasValue }.Count(x => x);
+        if (enlaces > 0 && (specialtyCode is not null || consultationType is not null))
+        {
+            throw new ArgumentException(
+                "Un cobrable de consulta no enlaza además a una prueba, un panel o un ítem de inventario.",
+                nameof(specialtyCode));
+        }
+        if (string.IsNullOrWhiteSpace(specialtyCode) != (consultationType is null))
+        {
+            throw new ArgumentException(
+                "Especialidad y tipo de consulta van juntos.", nameof(consultationType));
+        }
         if (enlaces > 1)
         {
             throw new ArgumentException(
@@ -124,6 +154,9 @@ public sealed class BillableItem
             LabPanelId = labPanelId,
             StockItemId = stockItemId,
             ServiceCode = string.IsNullOrWhiteSpace(serviceCode) ? null : serviceCode.Trim(),
+            SpecialtyCode = string.IsNullOrWhiteSpace(specialtyCode) ? null : specialtyCode.Trim(),
+            ConsultationType = consultationType,
+            PricePending = pricePending,
             Active = true,
             CreatedAt = now,
             UpdatedAt = now,
@@ -154,6 +187,9 @@ public sealed class BillableItem
         TaxCodeId = taxCodeId;
         DefaultPrice = defaultPrice;
         PaymentTiming = paymentTiming;
+        // Fijar el precio base es justamente lo que resuelve el pendiente: es la decisión
+        // explícita de alguien con permiso sobre cuánto vale.
+        PricePending = false;
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 

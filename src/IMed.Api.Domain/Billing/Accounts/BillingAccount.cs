@@ -30,6 +30,15 @@ public sealed class BillingAccount
     /// <summary>Encuentro que originó la cuenta, cuando es de episodio.</summary>
     public string? EncounterFhirId { get; private set; }
 
+    /// <summary>Qué acto abrió la cuenta.</summary>
+    public BillingAccountOrigin Origin { get; private set; }
+
+    /// <summary>
+    /// Id del acto que abrió la cuenta dentro de su <see cref="Origin"/> (el encuentro, la orden,
+    /// la venta). Null en las abiertas a mano.
+    /// </summary>
+    public string? OriginRef { get; private set; }
+
     public BillingAccountStatus Status { get; private set; }
     public DateTimeOffset OpenedAt { get; private set; }
     public DateTimeOffset? ClosedAt { get; private set; }
@@ -44,7 +53,9 @@ public sealed class BillingAccount
         string? patientFhirId = null,
         string? encounterFhirId = null,
         Guid? guarantorPartyId = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        BillingAccountOrigin? origin = null,
+        string? originRef = null)
     {
         if (partyId == Guid.Empty)
         {
@@ -61,6 +72,13 @@ public sealed class BillingAccount
             PatientFhirId = string.IsNullOrWhiteSpace(patientFhirId) ? null : patientFhirId.Trim(),
             EncounterFhirId = string.IsNullOrWhiteSpace(encounterFhirId) ? null : encounterFhirId.Trim(),
             GuarantorPartyId = guarantorPartyId,
+            // Una cuenta con encuentro es la del encuentro aunque nadie lo diga: así las abiertas
+            // antes de este campo y las nuevas se leen igual.
+            Origin = origin ?? (string.IsNullOrWhiteSpace(encounterFhirId)
+                ? BillingAccountOrigin.Manual : BillingAccountOrigin.Encounter),
+            OriginRef = string.IsNullOrWhiteSpace(originRef)
+                ? (string.IsNullOrWhiteSpace(encounterFhirId) ? null : encounterFhirId.Trim())
+                : originRef.Trim(),
             Status = BillingAccountStatus.Open,
             OpenedAt = now,
             UpdatedAt = now,

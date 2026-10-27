@@ -27,7 +27,8 @@ public sealed record ChargeDto(
     string? SourceFhirRef,
     string? Reason,
     DateTimeOffset PerformedAt,
-    Guid LocationId);
+    Guid LocationId,
+    bool PricePending = false);
 
 /// <summary>
 /// Qué pasó al intentar capturar un cargo.
@@ -53,7 +54,8 @@ public static class ChargeMapper
         new(c.Id, c.AccountId, c.BillableItemId, c.DescriptionSnapshot, c.Quantity, c.UnitPrice,
             c.PriceSource.ToString(), priceListName, c.DiscountAmount, c.DiscountAuthorizedBy,
             c.TaxRate, c.NetAmount, c.TaxAmount, c.Total, c.Status.ToString(),
-            c.SourceKind.ToString(), c.SourceId, c.SourceFhirRef, c.Reason, c.PerformedAt, c.LocationId);
+            c.SourceKind.ToString(), c.SourceId, c.SourceFhirRef, c.Reason, c.PerformedAt, c.LocationId,
+            c.PricePending);
 }
 
 public sealed record CaptureChargeCommand(
@@ -132,6 +134,18 @@ public sealed class CaptureChargeHandler(
                 "El tributo del cobrable no existe: no se puede saber si la línea paga impuesto.");
         }
 
+        // Sin precio (D1): el cargo entra —el servicio se prestó— y espera a que alguien fije el
+        // precio. No se resuelve contra tarifarios: el precio base es la decisión que falta.
+        if (item.PricePending)
+        {
+            if (cmd.DiscountAmount > 0)
+            {
+                return ChargeCaptureResult.Reject(
+                    $"{item.Name} todavía no tiene precio: no se le puede aplicar descuento.");
+            }
+            precio = new ResolvedPrice(0m, PriceSource.ItemDefault, null, null, null, null);
+        }
+
         // ── Descuento: tope del usuario y piso del tarifario ──
         if (cmd.DiscountAmount > 0)
         {
@@ -159,7 +173,8 @@ public sealed class CaptureChargeHandler(
             performerPractitionerId: cmd.PerformerPractitionerId,
             sourceFhirRef: cmd.SourceFhirRef,
             reason: cmd.Reason,
-            locationId: sede);
+            locationId: sede,
+            pricePending: item.PricePending);
 
         // Segunda capa: la base decide si dos caminos llegaron a la vez.
         if (await accounts.TryAddChargeAsync(cargo, ct))

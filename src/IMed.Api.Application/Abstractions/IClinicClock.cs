@@ -21,4 +21,11 @@ public interface IClinicClock
 
     /// <summary>El día de la clínica al que pertenece un instante (para comparar con <see cref="Today"/>).</summary>
     DateOnly DateOf(DateTimeOffset instant);
+
+    /// <summary>
+    /// El instante (UTC) en que empieza un día de la clínica. Es lo que usa cualquier consulta
+    /// "del día X": cortar en la medianoche UTC deja las últimas seis horas de la tarde hondureña
+    /// en el día siguiente, y un corte de caja o un ISV corrido de día está mal declarado.
+    /// </summary>
+    DateTimeOffset StartOf(DateOnly day);
 }

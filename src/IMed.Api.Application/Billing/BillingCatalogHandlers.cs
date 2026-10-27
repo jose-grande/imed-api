@@ -15,7 +15,10 @@ public sealed record BillableItemDto(
     Guid? LabTestId,
     Guid? LabPanelId,
     string? ServiceCode,
-    bool Active);
+    bool Active,
+    bool PricePending = false,
+    string? SpecialtyCode = null,
+    string? ConsultationType = null);
 
 /// <summary>Un cobrable con su precio ya resuelto y la razón. Es lo que consume la caja.</summary>
 public sealed record PricedItemDto(
@@ -33,7 +36,7 @@ public static class BillableItemMapper
     public static BillableItemDto ToDto(BillableItem i) =>
         new(i.Id, i.Code, i.Name, i.Kind.ToString(), i.Component.ToString(), i.TaxCodeId,
             i.DefaultPrice, i.PaymentTiming.ToString(), i.LabTestId, i.LabPanelId,
-            i.ServiceCode, i.Active);
+            i.ServiceCode, i.Active, i.PricePending, i.SpecialtyCode, i.ConsultationType?.ToString());
 }
 
 public sealed class SearchBillableItemsHandler(IBillingCatalogRepository repo)
@@ -122,7 +125,89 @@ public sealed class ResolvePriceHandler(
             resuelto.PriceListName,
             resuelto.MinPrice,
             resuelto.DiscountPctMax,
-            resuelto.Explain());
+            item.PricePending
+                ? "Sin precio: el jefe administrativo tiene que fijarlo antes de facturar."
+                : resuelto.Explain());
+    }
+}
+
+/// <summary>Cobrables activos sin precio (D1): la lista que hay que completar antes de facturar.</summary>
+public sealed class ListPricePendingItemsHandler(IBillingCatalogRepository repo)
+{
+    public async Task<IReadOnlyList<BillableItemDto>> HandleAsync(Guid orgId, CancellationToken ct = default) =>
+        (await repo.ListPricePendingItemsAsync(orgId, ct)).Select(BillableItemMapper.ToDto).ToList();
+}
+
+public sealed record UpdateBillableItemCommand(
+    Guid OrganizationId,
+    Guid ItemId,
+    string Name,
+    Guid TaxCodeId,
+    decimal DefaultPrice,
+    string? PaymentTiming,
+    bool? Active);
+
+/// <summary>Resultado de editar un cobrable: el ítem y cuántos cargos que esperaban precio lo tomaron.</summary>
+public sealed record UpdateBillableItemResult(BillableItemDto Item, int RepricedCharges);
+
+/// <summary>
+/// Edita un cobrable. Fijar el precio base es lo que resuelve un "sin precio" (D1).
+///
+/// <para><b>Los cargos que esperaban toman el precio en la misma operación.</b> Si no, el
+/// paciente atendido ayer con un examen recién creado seguiría con una cuenta que no se puede
+/// facturar aunque el precio ya exista. Se resuelve con la regla de siempre —tarifarios y luego
+/// precio base— a la fecha de hoy, que es cuando el precio pasa a existir.</para>
+/// </summary>
+public sealed class UpdateBillableItemHandler(
+    IBillingCatalogRepository repo,
+    IBillingAccountRepository accounts,
+    IFiscalRepository fiscal,
+    IClinicClock clock)
+{
+    public async Task<UpdateBillableItemResult?> HandleAsync(
+        UpdateBillableItemCommand cmd, CancellationToken ct = default)
+    {
+        var item = await repo.GetItemAsync(cmd.OrganizationId, cmd.ItemId, ct);
+        if (item is null)
+        {
+            return null;
+        }
+
+        _ = await fiscal.GetTaxCodeAsync(cmd.OrganizationId, cmd.TaxCodeId, ct)
+            ?? throw new ArgumentException("El tributo no existe en esta organización.", nameof(cmd));
+
+        var estabaPendiente = item.PricePending;
+        item.UpdateDetails(
+            cmd.Name, cmd.TaxCodeId, cmd.DefaultPrice,
+            Enum.TryParse<PaymentTiming>(cmd.PaymentTiming, ignoreCase: true, out var t) ? t : item.PaymentTiming);
+        if (cmd.Active is false)
+        {
+            item.Deactivate();
+        }
+        else if (cmd.Active is true)
+        {
+            item.Reactivate();
+        }
+
+        // Los cargos se modifican antes de guardar el ítem: el repositorio de cuentas y el del
+        // catálogo comparten la unidad de trabajo, así que el precio del ítem y el de sus cargos
+        // pendientes se confirman en el mismo SaveChanges. Guardarlos por separado podría dejar
+        // el ítem con precio y cargos que ya nadie va a volver a repreciar.
+        var repreciados = 0;
+        if (estabaPendiente)
+        {
+            var candidatos = await repo.GetPriceCandidatesAsync(cmd.OrganizationId, item.Id, ct);
+            var precio = PriceResolver.Resolve(item, candidatos, clock.Today(), payerContractId: null);
+            var pendientes = await accounts.ListPricePendingChargesForUpdateAsync(cmd.OrganizationId, item.Id, ct);
+            foreach (var cargo in pendientes)
+            {
+                cargo.ApplyPrice(precio.Price, precio.Source, precio.PriceListId);
+            }
+            repreciados = pendientes.Count;
+        }
+        await repo.UpdateItemAsync(item, ct);
+
+        return new UpdateBillableItemResult(BillableItemMapper.ToDto(item), repreciados);
     }
 }
 

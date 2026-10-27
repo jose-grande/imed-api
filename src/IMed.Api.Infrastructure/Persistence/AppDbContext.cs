@@ -26,7 +26,7 @@ using NpgsqlTypes;
 
 namespace IMed.Api.Infrastructure.Persistence;
 
-public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<OrganizationSubscription> OrganizationSubscriptions => Set<OrganizationSubscription>();
     public DbSet<OrganizationBranding> OrganizationBranding => Set<OrganizationBranding>();
@@ -168,6 +168,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureCollectionPlanItem(modelBuilder);
         ConfigureCollectionPlanUnavailableItem(modelBuilder);
         ConfigureCollectionEvent(modelBuilder);
+
+        // Módulos que mapean en archivos propios (plan de salida a producción, F0.6): cada uno
+        // pone sus IEntityTypeConfiguration bajo Persistence/Configurations/<Módulo>/ y sus DbSet
+        // en un AppDbContext.<Módulo>.cs. Así dos equipos no editan este archivo a la vez. Va
+        // antes de la convención de nombres para que también la reciban.
+        modelBuilder.ApplyConfigurationsFromAssembly(
+            typeof(AppDbContext).Assembly,
+            t => t.Namespace?.StartsWith(ConfigurationsNamespace, StringComparison.Ordinal) == true);
 
         ApplySnakeCaseConvention(modelBuilder);
     }
@@ -685,6 +693,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.PatientFhirId).HasMaxLength(64);
             e.Property(x => x.GuarantorPartyId);
             e.Property(x => x.EncounterFhirId).HasMaxLength(64);
+            e.Property(x => x.Origin).HasConversion<string>().HasMaxLength(20).IsRequired()
+                .HasDefaultValue(BillingAccountOrigin.Manual);
+            e.Property(x => x.OriginRef).HasMaxLength(64);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.OpenedAt).IsRequired();
             e.Property(x => x.ClosedAt);
@@ -697,6 +708,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .IsUnique()
                 .HasFilter("encounter_fhir_id IS NOT NULL")
                 .HasDatabaseName("ux_billing_account_org_encounter");
+
+            // Una cuenta por acto de origen (D2): la orden de laboratorio o la venta que se
+            // reintenta encuentra la cuenta que ya abrió.
+            e.HasIndex(x => new { x.OrganizationId, x.Origin, x.OriginRef })
+                .IsUnique()
+                .HasFilter("origin_ref IS NOT NULL")
+                .HasDatabaseName("ux_billing_account_org_origin");
 
             e.HasIndex(x => new { x.OrganizationId, x.PatientFhirId })
                 .HasDatabaseName("ix_billing_account_org_patient");
@@ -717,6 +735,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.UnitPrice).HasPrecision(19, 4).IsRequired();
             e.Property(x => x.PriceSource).HasConversion<string>().HasMaxLength(30).IsRequired();
             e.Property(x => x.PriceListId);
+            e.Property(x => x.PricePending).IsRequired().HasDefaultValue(false);
             e.Property(x => x.TaxCodeId).IsRequired();
             e.Property(x => x.TaxRate).HasPrecision(7, 4).IsRequired();
             e.Property(x => x.DiscountAmount).HasPrecision(19, 4).IsRequired();
@@ -774,6 +793,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.LabPanelId);
             e.Property(x => x.StockItemId);
             e.Property(x => x.ServiceCode).HasMaxLength(64);
+            e.Property(x => x.SpecialtyCode).HasMaxLength(60);
+            e.Property(x => x.ConsultationType).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.PricePending).IsRequired().HasDefaultValue(false);
             e.Property(x => x.Active).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
@@ -783,13 +805,32 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .HasDatabaseName("ux_billable_item_org_code");
 
             // El LIS captura el cargo buscando por la prueba o el panel de la orden: sin estos
-            // índices, cada admisión de orden barre el catálogo entero.
+            // índices, cada admisión de orden barre el catálogo entero. Son únicos porque el alta
+            // automática (D1) los usa para no crear dos cobrables del mismo examen, y porque un
+            // examen con dos cobrables no sabría a cuál cargarse.
             e.HasIndex(x => new { x.OrganizationId, x.LabTestId })
+                .IsUnique()
                 .HasFilter("lab_test_id IS NOT NULL")
-                .HasDatabaseName("ix_billable_item_org_lab_test");
+                .HasDatabaseName("ux_billable_item_org_lab_test");
             e.HasIndex(x => new { x.OrganizationId, x.LabPanelId })
+                .IsUnique()
                 .HasFilter("lab_panel_id IS NOT NULL")
-                .HasDatabaseName("ix_billable_item_org_lab_panel");
+                .HasDatabaseName("ux_billable_item_org_lab_panel");
+
+            e.HasIndex(x => new { x.OrganizationId, x.StockItemId })
+                .IsUnique()
+                .HasFilter("stock_item_id IS NOT NULL")
+                .HasDatabaseName("ux_billable_item_org_stock_item");
+
+            // Una consulta de una especialidad y un tipo tiene un solo precio en el catálogo (D4).
+            e.HasIndex(x => new { x.OrganizationId, x.SpecialtyCode, x.ConsultationType })
+                .IsUnique()
+                .HasFilter("specialty_code IS NOT NULL")
+                .HasDatabaseName("ux_billable_item_org_specialty_type");
+
+            e.HasIndex(x => x.OrganizationId)
+                .HasFilter("price_pending")
+                .HasDatabaseName("ix_billable_item_org_price_pending");
         });
 
         b.Entity<PriceList>(e =>

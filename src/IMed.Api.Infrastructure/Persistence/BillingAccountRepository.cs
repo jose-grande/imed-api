@@ -48,6 +48,32 @@ public sealed class BillingAccountRepository(AppDbContext db) : IBillingAccountR
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task<bool> TryAddAccountAsync(BillingAccount account, CancellationToken ct = default)
+    {
+        db.BillingAccounts.Add(account);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            // Se suelta: quien lo agregó solo necesita el id, y un request que después lo lea y
+            // lo actualice por su cuenta chocaría con esta instancia rastreada.
+            db.Entry(account).State = EntityState.Detached;
+            return true;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg
+                                           && pg.SqlState == UniqueViolation)
+        {
+            db.Entry(account).State = EntityState.Detached;
+            return false;
+        }
+    }
+
+    public Task<BillingAccount?> FindByOriginAsync(
+        Guid organizationId, BillingAccountOrigin origin, string originRef, CancellationToken ct = default) =>
+        db.BillingAccounts.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.OrganizationId == organizationId
+                                      && x.Origin == origin
+                                      && x.OriginRef == originRef, ct);
+
     public async Task UpdateAccountAsync(BillingAccount account, CancellationToken ct = default)
     {
         db.BillingAccounts.Update(account);
@@ -145,4 +171,13 @@ public sealed class BillingAccountRepository(AppDbContext db) : IBillingAccountR
         }
         await db.SaveChangesAsync(ct);
     }
+
+    public async Task<IReadOnlyList<BillingCharge>> ListPricePendingChargesForUpdateAsync(
+        Guid organizationId, Guid billableItemId, CancellationToken ct = default) =>
+        await db.BillingCharges
+            .Where(x => x.OrganizationId == organizationId
+                        && x.BillableItemId == billableItemId
+                        && x.Status == ChargeStatus.Captured
+                        && x.PricePending)
+            .ToListAsync(ct);
 }

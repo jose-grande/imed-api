@@ -14,6 +14,16 @@ public interface IBillingAccountRepository
         Guid organizationId, string? patientFhirId, string? status, int limit, CancellationToken ct = default);
 
     Task AddAccountAsync(BillingAccount account, CancellationToken ct = default);
+
+    /// <summary>
+    /// Agrega la cuenta salvo que otra ya ocupe su encuentro o su acto de origen. Devuelve
+    /// <c>false</c> si perdió la carrera: el índice único decide.
+    /// </summary>
+    Task<bool> TryAddAccountAsync(BillingAccount account, CancellationToken ct = default);
+
+    /// <summary>La cuenta abierta por un acto de origen, en cualquier estado.</summary>
+    Task<BillingAccount?> FindByOriginAsync(
+        Guid organizationId, BillingAccountOrigin origin, string originRef, CancellationToken ct = default);
     Task UpdateAccountAsync(BillingAccount account, CancellationToken ct = default);
 
     Task<IReadOnlyList<BillingCharge>> ListChargesAsync(
@@ -66,4 +76,12 @@ public interface IBillingAccountRepository
     Task<bool> TryAddChargeAsync(BillingCharge charge, CancellationToken ct = default);
 
     Task UpdateChargeAsync(BillingCharge charge, CancellationToken ct = default);
+
+    /// <summary>
+    /// Cargos capturados sin precio de un cobrable, rastreados para modificarlos. Los usa fijar el
+    /// precio del cobrable: los cargos que esperaban ese precio lo toman en el mismo SaveChanges
+    /// que guarda el cobrable (comparten la unidad de trabajo).
+    /// </summary>
+    Task<IReadOnlyList<BillingCharge>> ListPricePendingChargesForUpdateAsync(
+        Guid organizationId, Guid billableItemId, CancellationToken ct = default);
 }

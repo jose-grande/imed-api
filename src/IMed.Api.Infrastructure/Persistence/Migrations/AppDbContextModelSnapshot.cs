@@ -269,6 +269,19 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
 
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Manual")
+                        .HasColumnName("origin");
+
+                    b.Property<string>("OriginRef")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("origin_ref");
+
                     b.Property<Guid>("PartyId")
                         .HasColumnType("uuid")
                         .HasColumnName("party_id");
@@ -300,6 +313,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrganizationId", "Status")
                         .HasDatabaseName("ix_billing_account_org_status");
+
+                    b.HasIndex("OrganizationId", "Origin", "OriginRef")
+                        .IsUnique()
+                        .HasDatabaseName("ux_billing_account_org_origin")
+                        .HasFilter("origin_ref IS NOT NULL");
 
                     b.ToTable("billing_account", (string)null);
                 });
@@ -364,6 +382,12 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("PriceListId")
                         .HasColumnType("uuid")
                         .HasColumnName("price_list_id");
+
+                    b.Property<bool>("PricePending")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("price_pending");
 
                     b.Property<string>("PriceSource")
                         .IsRequired()
@@ -704,6 +728,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("component");
 
+                    b.Property<string>("ConsultationType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("consultation_type");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -743,10 +772,21 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("payment_timing");
 
+                    b.Property<bool>("PricePending")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("price_pending");
+
                     b.Property<string>("ServiceCode")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("service_code");
+
+                    b.Property<string>("SpecialtyCode")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("specialty_code");
 
                     b.Property<Guid?>("StockItemId")
                         .HasColumnType("uuid")
@@ -762,17 +802,33 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_billable_item_org_price_pending")
+                        .HasFilter("price_pending");
+
                     b.HasIndex("OrganizationId", "Code")
                         .IsUnique()
                         .HasDatabaseName("ux_billable_item_org_code");
 
                     b.HasIndex("OrganizationId", "LabPanelId")
-                        .HasDatabaseName("ix_billable_item_org_lab_panel")
+                        .IsUnique()
+                        .HasDatabaseName("ux_billable_item_org_lab_panel")
                         .HasFilter("lab_panel_id IS NOT NULL");
 
                     b.HasIndex("OrganizationId", "LabTestId")
-                        .HasDatabaseName("ix_billable_item_org_lab_test")
+                        .IsUnique()
+                        .HasDatabaseName("ux_billable_item_org_lab_test")
                         .HasFilter("lab_test_id IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "StockItemId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_billable_item_org_stock_item")
+                        .HasFilter("stock_item_id IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "SpecialtyCode", "ConsultationType")
+                        .IsUnique()
+                        .HasDatabaseName("ux_billable_item_org_specialty_type")
+                        .HasFilter("specialty_code IS NOT NULL");
 
                     b.ToTable("billing_billable_item", (string)null);
                 });

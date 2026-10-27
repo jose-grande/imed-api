@@ -54,6 +54,22 @@ public sealed class ClinicClockTests
     }
 
     [Fact]
+    public void ElDiaDeLaClinica_empiezaALasSeisUtc()
+    {
+        // Los reportes "del día X" filtran desde este instante. Con medianoche UTC, las facturas
+        // de 18:00 a 24:00 hondureñas caían en el corte y el ISV del día siguiente.
+        var reloj = Reloj(new DateTimeOffset(2026, 10, 26, 12, 0, 0, TimeSpan.Zero));
+
+        reloj.StartOf(new DateOnly(2026, 10, 26))
+            .Should().Be(new DateTimeOffset(2026, 10, 26, 6, 0, 0, TimeSpan.Zero));
+
+        // Una factura de las 20:10 del 26 (02:10Z del 27) es del 26.
+        var factura = new DateTimeOffset(2026, 10, 27, 2, 10, 0, TimeSpan.Zero);
+        factura.Should().BeOnOrAfter(reloj.StartOf(new DateOnly(2026, 10, 26)))
+            .And.BeBefore(reloj.StartOf(new DateOnly(2026, 10, 27)));
+    }
+
+    [Fact]
     public void UnaZonaInexistente_falla_enVezDeCaerASilencioUtc()
     {
         // Caer a UTC ante una configuración mala reintroduce el bug sin que nada avise, y un
