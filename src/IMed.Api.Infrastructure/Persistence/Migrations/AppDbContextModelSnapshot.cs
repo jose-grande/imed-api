@@ -3179,6 +3179,810 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("form_definitions", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.GoodsReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received_at");
+
+                    b.Property<Guid?>("ReceivedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("received_by");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("supplier_id");
+
+                    b.Property<DateOnly>("SupplierInvoiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("supplier_invoice_date");
+
+                    b.Property<string>("SupplierInvoiceNumber")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("supplier_invoice_number");
+
+                    b.Property<decimal>("Total")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("total");
+
+                    b.Property<string>("VoidReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("void_reason");
+
+                    b.Property<bool>("Voided")
+                        .HasColumnType("boolean")
+                        .HasColumnName("voided");
+
+                    b.Property<DateTimeOffset?>("VoidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("voided_at");
+
+                    b.Property<Guid?>("VoidedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("voided_by");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SupplierId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("OrganizationId", "ReceivedAt")
+                        .HasDatabaseName("ix_stock_goods_receipt_org_date");
+
+                    b.HasIndex("OrganizationId", "SupplierId", "SupplierInvoiceNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_goods_receipt_supplier_invoice");
+
+                    b.ToTable("stock_goods_receipt", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.InternalConsumption", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Area")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("area");
+
+                    b.Property<DateTimeOffset>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("consumed_at");
+
+                    b.Property<Guid?>("ConsumedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("consumed_by");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("OrganizationId", "ConsumedAt")
+                        .HasDatabaseName("ix_stock_internal_consumption_org_date");
+
+                    b.ToTable("stock_internal_consumption", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.InventorySettings", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<decimal>("AdjustmentApprovalThreshold")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("adjustment_approval_threshold");
+
+                    b.Property<int>("ExpiryAlertDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("expiry_alert_days");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("WalkInPartyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("walk_in_party_id");
+
+                    b.HasKey("OrganizationId");
+
+                    b.ToTable("inventory_settings", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockAdjustment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<Guid?>("DecidedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("decided_by");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("rejection_reason");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
+                    b.Property<Guid?>("RequestedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("StockCountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_count_id");
+
+                    b.Property<decimal>("Value")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("value");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("OrganizationId", "Status")
+                        .HasDatabaseName("ix_stock_adjustment_org_status");
+
+                    b.ToTable("stock_adjustment", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockBalance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<decimal>("QuantityOnHand")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("quantity_on_hand");
+
+                    b.Property<Guid>("StockItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_item_id");
+
+                    b.Property<Guid>("StockLotId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_lot_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StockItemId");
+
+                    b.HasIndex("StockLotId");
+
+                    b.HasIndex("OrganizationId", "StockItemId")
+                        .HasDatabaseName("ix_stock_balance_org_item");
+
+                    b.HasIndex("WarehouseId", "StockLotId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_balance_warehouse_lot");
+
+                    b.ToTable("stock_balance", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_stock_balance_non_negative", "quantity_on_hand >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockCount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AdjustmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("adjustment_id");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at");
+
+                    b.Property<Guid?>("ClosedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("closed_by");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<Guid?>("StartedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("started_by");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WarehouseId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_count_open_per_warehouse")
+                        .HasFilter("status = 'Draft'");
+
+                    b.ToTable("stock_count", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("barcode");
+
+                    b.Property<string>("BaseUnit")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("base_unit");
+
+                    b.Property<Guid?>("BillableItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("billable_item_id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<decimal?>("MinimumStock")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("minimum_stock");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<bool>("OverTheCounter")
+                        .HasColumnType("boolean")
+                        .HasColumnName("over_the_counter");
+
+                    b.Property<bool>("RequiresLot")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_lot");
+
+                    b.Property<bool>("Sellable")
+                        .HasColumnType("boolean")
+                        .HasColumnName("sellable");
+
+                    b.Property<Guid?>("TaxCodeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tax_code_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Barcode")
+                        .HasDatabaseName("ix_stock_item_org_barcode")
+                        .HasFilter("barcode IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_item_org_code");
+
+                    b.HasIndex("OrganizationId", "Active", "Name")
+                        .HasDatabaseName("ix_stock_item_org_active_name");
+
+                    b.ToTable("stock_item", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockItemCost", b =>
+                {
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.Property<Guid>("StockItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_item_id");
+
+                    b.Property<decimal>("AverageCost")
+                        .HasPrecision(19, 6)
+                        .HasColumnType("numeric(19,6)")
+                        .HasColumnName("average_cost");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<decimal>("QuantityOnHand")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("quantity_on_hand");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("WarehouseId", "StockItemId");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_stock_item_cost_org");
+
+                    b.HasIndex("StockItemId");
+
+                    b.ToTable("stock_item_cost", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_stock_item_cost_non_negative", "quantity_on_hand >= 0 AND average_cost >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockLot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly?>("ExpiryDate")
+                        .HasColumnType("date")
+                        .HasColumnName("expiry_date");
+
+                    b.Property<bool>("IsUntracked")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_untracked");
+
+                    b.Property<string>("LotCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("lot_code");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("StockItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_item_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ExpiryDate")
+                        .HasDatabaseName("ix_stock_lot_org_expiry");
+
+                    b.HasIndex("StockItemId", "LotCode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_lot_item_code");
+
+                    b.ToTable("stock_lot", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockMovement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("AverageCostAfter")
+                        .HasPrecision(19, 6)
+                        .HasColumnType("numeric(19,6)")
+                        .HasColumnName("average_cost_after");
+
+                    b.Property<int>("Direction")
+                        .HasColumnType("integer")
+                        .HasColumnName("direction");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("group_id");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid?>("PerformedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("performed_by");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("quantity");
+
+                    b.Property<decimal>("QuantityAfter")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("quantity_after");
+
+                    b.Property<Guid?>("ReversalOfMovementId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reversal_of_movement_id");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_id");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("source_kind");
+
+                    b.Property<Guid?>("SourceLineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_line_id");
+
+                    b.Property<Guid>("StockItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_item_id");
+
+                    b.Property<Guid>("StockLotId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_lot_id");
+
+                    b.Property<decimal>("TotalCost")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("total_cost");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("type");
+
+                    b.Property<decimal>("UnitCost")
+                        .HasPrecision(19, 6)
+                        .HasColumnType("numeric(19,6)")
+                        .HasColumnName("unit_cost");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StockItemId");
+
+                    b.HasIndex("StockLotId");
+
+                    b.HasIndex("OrganizationId", "OccurredAt")
+                        .HasDatabaseName("ix_stock_movement_org_date");
+
+                    b.HasIndex("SourceKind", "SourceId")
+                        .HasDatabaseName("ix_stock_movement_source");
+
+                    b.HasIndex("WarehouseId", "StockItemId", "OccurredAt")
+                        .HasDatabaseName("ix_stock_movement_kardex");
+
+                    b.ToTable("stock_movement", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_stock_movement_direction", "direction IN (1, -1)");
+
+                            t.HasCheckConstraint("ck_stock_movement_quantity", "quantity > 0");
+                        });
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockTransfer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("FromWarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("from_warehouse_id");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<Guid>("ToWarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("to_warehouse_id");
+
+                    b.Property<DateTimeOffset>("TransferredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("transferred_at");
+
+                    b.Property<Guid?>("TransferredBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transferred_by");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FromWarehouseId");
+
+                    b.HasIndex("ToWarehouseId");
+
+                    b.HasIndex("OrganizationId", "TransferredAt")
+                        .HasDatabaseName("ix_stock_transfer_org_date");
+
+                    b.ToTable("stock_transfer", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.Supplier", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("ContactName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("contact_name");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("phone");
+
+                    b.Property<string>("TaxId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("tax_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .HasDatabaseName("ix_stock_supplier_org_name");
+
+                    b.HasIndex("OrganizationId", "TaxId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_supplier_org_tax_id")
+                        .HasFilter("tax_id IS NOT NULL");
+
+                    b.ToTable("stock_supplier", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.Warehouse", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsGeneral")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_general");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LocationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_warehouse_general_per_location")
+                        .HasFilter("is_general");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_warehouse_org_code");
+
+                    b.HasIndex("OrganizationId", "LocationId")
+                        .HasDatabaseName("ix_stock_warehouse_org_location");
+
+                    b.ToTable("stock_warehouse", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Invitations.Invitation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4250,6 +5054,171 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("outbox_events", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Pharmacy.PharmacyDispense", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<string>("BuyerName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("buyer_name");
+
+                    b.Property<string>("BuyerTaxId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("buyer_tax_id");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cancellation_reason");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cancelled_at");
+
+                    b.Property<Guid?>("CancelledBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cancelled_by");
+
+                    b.Property<DateTimeOffset>("DispensedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispensed_at");
+
+                    b.Property<Guid?>("DispensedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("dispensed_by");
+
+                    b.Property<string>("EncounterFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("encounter_fhir_id");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<Guid?>("InvoiceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("invoice_id");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PatientFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("patient_fhir_id");
+
+                    b.Property<string>("PatientName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("patient_name");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("OrganizationId", "EncounterFhirId")
+                        .HasDatabaseName("ix_pharmacy_dispense_org_encounter")
+                        .HasFilter("encounter_fhir_id IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_pharmacy_dispense_org_key");
+
+                    b.HasIndex("OrganizationId", "LocationId", "DispensedAt")
+                        .HasDatabaseName("ix_pharmacy_dispense_org_location_date");
+
+                    b.ToTable("pharmacy_dispense", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Pharmacy.StockReturnRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ChargeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("charge_id");
+
+                    b.Property<Guid>("CreditNoteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("credit_note_id");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("note");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("quantity");
+
+                    b.Property<decimal>("ReturnedQuantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("returned_quantity");
+
+                    b.Property<Guid>("StockItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stock_item_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "CreditNoteId", "ChargeId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_return_credit_note_charge");
+
+                    b.ToTable("stock_return_record", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Practitioners.UserPractitionerAssignment", b =>
                 {
                     b.Property<Guid>("KeycloakUserId")
@@ -4404,6 +5373,601 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.GoodsReceipt", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.Supplier", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsMany("IMed.Api.Domain.Inventory.GoodsReceiptLine", "Lines", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<decimal>("FactorToBase")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("factor_to_base");
+
+                            b1.Property<Guid>("GoodsReceiptId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("goods_receipt_id");
+
+                            b1.Property<int>("LineNumber")
+                                .HasColumnType("integer")
+                                .HasColumnName("line_number");
+
+                            b1.Property<decimal>("LineTotal")
+                                .HasPrecision(19, 4)
+                                .HasColumnType("numeric(19,4)")
+                                .HasColumnName("line_total");
+
+                            b1.Property<string>("PresentationName")
+                                .HasMaxLength(60)
+                                .HasColumnType("character varying(60)")
+                                .HasColumnName("presentation_name");
+
+                            b1.Property<decimal>("PresentationQuantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("presentation_quantity");
+
+                            b1.Property<decimal>("Quantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("quantity");
+
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<Guid>("StockLotId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_lot_id");
+
+                            b1.Property<decimal>("UnitCost")
+                                .HasPrecision(19, 6)
+                                .HasColumnType("numeric(19,6)")
+                                .HasColumnName("unit_cost");
+
+                            b1.HasKey("Id");
+
+                            b1.HasIndex("GoodsReceiptId");
+
+                            b1.HasIndex("StockItemId");
+
+                            b1.HasIndex("StockLotId");
+
+                            b1.ToTable("stock_goods_receipt_line", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("GoodsReceiptId");
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                                .WithMany()
+                                .HasForeignKey("StockItemId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockLot", null)
+                                .WithMany()
+                                .HasForeignKey("StockLotId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+                        });
+
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.InternalConsumption", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsMany("IMed.Api.Domain.Inventory.StockDocumentLine", "Lines", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<int>("Direction")
+                                .HasColumnType("integer")
+                                .HasColumnName("direction");
+
+                            b1.Property<Guid>("DocumentId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("document_id");
+
+                            b1.Property<int>("LineNumber")
+                                .HasColumnType("integer")
+                                .HasColumnName("line_number");
+
+                            b1.Property<decimal>("Quantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("quantity");
+
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<Guid>("StockLotId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_lot_id");
+
+                            b1.Property<decimal>("UnitCost")
+                                .HasPrecision(19, 6)
+                                .HasColumnType("numeric(19,6)")
+                                .HasColumnName("unit_cost");
+
+                            b1.HasKey("Id");
+
+                            b1.HasIndex("DocumentId");
+
+                            b1.HasIndex("StockItemId");
+
+                            b1.HasIndex("StockLotId");
+
+                            b1.ToTable("stock_internal_consumption_line", null, t =>
+                                {
+                                    t.HasCheckConstraint("ck_stock_internal_consumption_line_quantity", "quantity > 0");
+                                });
+
+                            b1.WithOwner()
+                                .HasForeignKey("DocumentId");
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                                .WithMany()
+                                .HasForeignKey("StockItemId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockLot", null)
+                                .WithMany()
+                                .HasForeignKey("StockLotId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+                        });
+
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockAdjustment", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsMany("IMed.Api.Domain.Inventory.StockDocumentLine", "Lines", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<int>("Direction")
+                                .HasColumnType("integer")
+                                .HasColumnName("direction");
+
+                            b1.Property<Guid>("DocumentId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("document_id");
+
+                            b1.Property<int>("LineNumber")
+                                .HasColumnType("integer")
+                                .HasColumnName("line_number");
+
+                            b1.Property<decimal>("Quantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("quantity");
+
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<Guid>("StockLotId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_lot_id");
+
+                            b1.Property<decimal>("UnitCost")
+                                .HasPrecision(19, 6)
+                                .HasColumnType("numeric(19,6)")
+                                .HasColumnName("unit_cost");
+
+                            b1.HasKey("Id");
+
+                            b1.HasIndex("DocumentId");
+
+                            b1.HasIndex("StockItemId");
+
+                            b1.HasIndex("StockLotId");
+
+                            b1.ToTable("stock_adjustment_line", null, t =>
+                                {
+                                    t.HasCheckConstraint("ck_stock_adjustment_line_quantity", "quantity > 0");
+                                });
+
+                            b1.WithOwner()
+                                .HasForeignKey("DocumentId");
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                                .WithMany()
+                                .HasForeignKey("StockItemId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockLot", null)
+                                .WithMany()
+                                .HasForeignKey("StockLotId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+                        });
+
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockBalance", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                        .WithMany()
+                        .HasForeignKey("StockItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IMed.Api.Domain.Inventory.StockLot", null)
+                        .WithMany()
+                        .HasForeignKey("StockLotId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockCount", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsMany("IMed.Api.Domain.Inventory.StockCountLine", "Lines", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<decimal?>("CountedQuantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("counted_quantity");
+
+                            b1.Property<decimal>("ExpectedQuantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("expected_quantity");
+
+                            b1.Property<Guid>("StockCountId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_count_id");
+
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<Guid>("StockLotId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_lot_id");
+
+                            b1.HasKey("Id");
+
+                            b1.HasIndex("StockCountId");
+
+                            b1.HasIndex("StockItemId");
+
+                            b1.HasIndex("StockLotId");
+
+                            b1.ToTable("stock_count_line", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("StockCountId");
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                                .WithMany()
+                                .HasForeignKey("StockItemId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockLot", null)
+                                .WithMany()
+                                .HasForeignKey("StockLotId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+                        });
+
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockItem", b =>
+                {
+                    b.OwnsOne("IMed.Api.Domain.Inventory.MedicationProfile", "Medication", b1 =>
+                        {
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<string>("ActiveIngredient")
+                                .HasMaxLength(200)
+                                .HasColumnType("character varying(200)")
+                                .HasColumnName("active_ingredient");
+
+                            b1.Property<string>("AtcCode")
+                                .IsRequired()
+                                .HasMaxLength(10)
+                                .HasColumnType("character varying(10)")
+                                .HasColumnName("atc_code");
+
+                            b1.Property<string>("Concentration")
+                                .HasMaxLength(100)
+                                .HasColumnType("character varying(100)")
+                                .HasColumnName("concentration");
+
+                            b1.Property<string>("DoseForm")
+                                .HasMaxLength(60)
+                                .HasColumnType("character varying(60)")
+                                .HasColumnName("dose_form");
+
+                            b1.Property<string>("Route")
+                                .HasMaxLength(60)
+                                .HasColumnType("character varying(60)")
+                                .HasColumnName("route");
+
+                            b1.Property<string>("SanitaryRegistration")
+                                .HasMaxLength(60)
+                                .HasColumnType("character varying(60)")
+                                .HasColumnName("sanitary_registration");
+
+                            b1.HasKey("StockItemId");
+
+                            b1.HasIndex("AtcCode")
+                                .HasDatabaseName("ix_stock_item_medication_atc");
+
+                            b1.ToTable("stock_item_medication", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("StockItemId");
+                        });
+
+                    b.OwnsOne("IMed.Api.Domain.Inventory.ReagentProfile", "Reagent", b1 =>
+                        {
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<int?>("OpenStabilityDays")
+                                .HasColumnType("integer")
+                                .HasColumnName("open_stability_days");
+
+                            b1.Property<string>("StorageConditions")
+                                .HasMaxLength(200)
+                                .HasColumnType("character varying(200)")
+                                .HasColumnName("storage_conditions");
+
+                            b1.HasKey("StockItemId");
+
+                            b1.ToTable("stock_item_reagent", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("StockItemId");
+                        });
+
+                    b.OwnsMany("IMed.Api.Domain.Inventory.StockItemPresentation", "Presentations", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<decimal>("FactorToBase")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("factor_to_base");
+
+                            b1.Property<string>("Name")
+                                .IsRequired()
+                                .HasMaxLength(60)
+                                .HasColumnType("character varying(60)")
+                                .HasColumnName("name");
+
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.HasKey("Id");
+
+                            b1.HasIndex("StockItemId");
+
+                            b1.ToTable("stock_item_presentation", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("StockItemId");
+                        });
+
+                    b.OwnsOne("IMed.Api.Domain.Inventory.SupplyProfile", "Supply", b1 =>
+                        {
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<bool>("SingleUse")
+                                .HasColumnType("boolean")
+                                .HasColumnName("single_use");
+
+                            b1.Property<bool>("Sterile")
+                                .HasColumnType("boolean")
+                                .HasColumnName("sterile");
+
+                            b1.HasKey("StockItemId");
+
+                            b1.ToTable("stock_item_supply", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("StockItemId");
+                        });
+
+                    b.Navigation("Medication");
+
+                    b.Navigation("Presentations");
+
+                    b.Navigation("Reagent");
+
+                    b.Navigation("Supply");
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockItemCost", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                        .WithMany()
+                        .HasForeignKey("StockItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockLot", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                        .WithMany()
+                        .HasForeignKey("StockItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockMovement", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                        .WithMany()
+                        .HasForeignKey("StockItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IMed.Api.Domain.Inventory.StockLot", null)
+                        .WithMany()
+                        .HasForeignKey("StockLotId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.StockTransfer", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("FromWarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("ToWarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsMany("IMed.Api.Domain.Inventory.StockDocumentLine", "Lines", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<int>("Direction")
+                                .HasColumnType("integer")
+                                .HasColumnName("direction");
+
+                            b1.Property<Guid>("DocumentId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("document_id");
+
+                            b1.Property<int>("LineNumber")
+                                .HasColumnType("integer")
+                                .HasColumnName("line_number");
+
+                            b1.Property<decimal>("Quantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("quantity");
+
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<Guid>("StockLotId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_lot_id");
+
+                            b1.Property<decimal>("UnitCost")
+                                .HasPrecision(19, 6)
+                                .HasColumnType("numeric(19,6)")
+                                .HasColumnName("unit_cost");
+
+                            b1.HasKey("Id");
+
+                            b1.HasIndex("DocumentId");
+
+                            b1.HasIndex("StockItemId");
+
+                            b1.HasIndex("StockLotId");
+
+                            b1.ToTable("stock_transfer_line", null, t =>
+                                {
+                                    t.HasCheckConstraint("ck_stock_transfer_line_quantity", "quantity > 0");
+                                });
+
+                            b1.WithOwner()
+                                .HasForeignKey("DocumentId");
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                                .WithMany()
+                                .HasForeignKey("StockItemId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockLot", null)
+                                .WithMany()
+                                .HasForeignKey("StockLotId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+                        });
+
+                    b.Navigation("Lines");
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Lab.CollectionEvent", b =>
                 {
                     b.HasOne("IMed.Api.Domain.Lab.CollectionPlanContainer", null)
@@ -4447,6 +6011,160 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasForeignKey("LegalEntityId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Pharmacy.PharmacyDispense", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsMany("IMed.Api.Domain.Pharmacy.PharmacyDispenseLine", "Lines", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<Guid?>("ChargeId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("charge_id");
+
+                            b1.Property<bool>("CompletesPrescription")
+                                .HasColumnType("boolean")
+                                .HasColumnName("completes_prescription");
+
+                            b1.Property<string>("Description")
+                                .IsRequired()
+                                .HasMaxLength(300)
+                                .HasColumnType("character varying(300)")
+                                .HasColumnName("description");
+
+                            b1.Property<Guid>("DispenseId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("dispense_id");
+
+                            b1.Property<int>("LineNumber")
+                                .HasColumnType("integer")
+                                .HasColumnName("line_number");
+
+                            b1.Property<string>("MedicationRequestFhirId")
+                                .HasMaxLength(64)
+                                .HasColumnType("character varying(64)")
+                                .HasColumnName("medication_request_fhir_id");
+
+                            b1.Property<string>("PrescribedAtcCode")
+                                .HasMaxLength(10)
+                                .HasColumnType("character varying(10)")
+                                .HasColumnName("prescribed_atc_code");
+
+                            b1.Property<decimal?>("PrescribedQuantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("prescribed_quantity");
+
+                            b1.Property<string>("PrescribedText")
+                                .HasMaxLength(300)
+                                .HasColumnType("character varying(300)")
+                                .HasColumnName("prescribed_text");
+
+                            b1.Property<string>("PrescribedUnit")
+                                .HasMaxLength(40)
+                                .HasColumnType("character varying(40)")
+                                .HasColumnName("prescribed_unit");
+
+                            b1.Property<decimal>("Quantity")
+                                .HasPrecision(18, 6)
+                                .HasColumnType("numeric(18,6)")
+                                .HasColumnName("quantity");
+
+                            b1.Property<Guid>("StockItemId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("stock_item_id");
+
+                            b1.Property<string>("SubstitutionReason")
+                                .HasMaxLength(500)
+                                .HasColumnType("character varying(500)")
+                                .HasColumnName("substitution_reason");
+
+                            b1.HasKey("Id");
+
+                            b1.HasIndex("DispenseId");
+
+                            b1.HasIndex("MedicationRequestFhirId")
+                                .HasDatabaseName("ix_pharmacy_dispense_line_mr");
+
+                            b1.HasIndex("StockItemId");
+
+                            b1.ToTable("pharmacy_dispense_line", null, t =>
+                                {
+                                    t.HasCheckConstraint("ck_pharmacy_dispense_line_quantity", "quantity > 0");
+                                });
+
+                            b1.WithOwner()
+                                .HasForeignKey("DispenseId");
+
+                            b1.HasOne("IMed.Api.Domain.Inventory.StockItem", null)
+                                .WithMany()
+                                .HasForeignKey("StockItemId")
+                                .OnDelete(DeleteBehavior.Restrict)
+                                .IsRequired();
+
+                            b1.OwnsMany("IMed.Api.Domain.Pharmacy.PharmacyDispenseLot", "Lots", b2 =>
+                                {
+                                    b2.Property<Guid>("Id")
+                                        .HasColumnType("uuid")
+                                        .HasColumnName("id");
+
+                                    b2.Property<Guid>("DispenseLineId")
+                                        .HasColumnType("uuid")
+                                        .HasColumnName("dispense_line_id");
+
+                                    b2.Property<decimal>("Quantity")
+                                        .HasPrecision(18, 6)
+                                        .HasColumnType("numeric(18,6)")
+                                        .HasColumnName("quantity");
+
+                                    b2.Property<decimal>("ReturnedQuantity")
+                                        .HasPrecision(18, 6)
+                                        .HasColumnType("numeric(18,6)")
+                                        .HasColumnName("returned_quantity");
+
+                                    b2.Property<Guid>("StockLotId")
+                                        .HasColumnType("uuid")
+                                        .HasColumnName("stock_lot_id");
+
+                                    b2.Property<decimal>("UnitCost")
+                                        .HasPrecision(19, 6)
+                                        .HasColumnType("numeric(19,6)")
+                                        .HasColumnName("unit_cost");
+
+                                    b2.HasKey("Id");
+
+                                    b2.HasIndex("DispenseLineId");
+
+                                    b2.HasIndex("StockLotId");
+
+                                    b2.ToTable("pharmacy_dispense_lot", null, t =>
+                                        {
+                                            t.HasCheckConstraint("ck_pharmacy_dispense_lot_returned", "returned_quantity >= 0 AND returned_quantity <= quantity");
+                                        });
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("DispenseLineId");
+
+                                    b2.HasOne("IMed.Api.Domain.Inventory.StockLot", null)
+                                        .WithMany()
+                                        .HasForeignKey("StockLotId")
+                                        .OnDelete(DeleteBehavior.Restrict)
+                                        .IsRequired();
+                                });
+
+                            b1.Navigation("Lots");
+                        });
+
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.Payment", b =>
