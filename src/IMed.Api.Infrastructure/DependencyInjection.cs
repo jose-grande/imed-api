@@ -505,6 +505,7 @@ public static class DependencyInjection
         services.AddScoped<IBillingSettingsRepository, BillingSettingsRepository>();
         services.AddScoped<SuggestConsultationTypeHandler>();
         services.AddScoped<EncounterChargeReconciler>();
+        services.AddScoped<PractitionerSpecialtyLookup>();
         services.AddScoped<OrganizationCatalogReconciler>();
         services.AddScoped<LabOrderChargeReconciler>();
         services.AddScoped<IOutboxWriter, OutboxWriter>();

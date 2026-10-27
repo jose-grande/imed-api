@@ -221,6 +221,27 @@ public sealed class ConsultationChargeTests(ImedApiFixture fixture) : IAsyncLife
     }
 
     [Fact]
+    public async Task SinTipoEnElEncuentro_seUsaElDeLaCita()
+    {
+        var e = await ArrangeAsync();
+        var cita = fixture.Hapi.SeedResource(new JsonObject
+        {
+            ["resourceType"] = "Appointment",
+            ["status"] = "fulfilled",
+            ["appointmentType"] = new JsonObject { ["coding"] = new JsonArray(new JsonObject
+            {
+                ["system"] = ConsultationTypeCodes.System, ["code"] = "emergency",
+            }) },
+        });
+        var cuerpo = BuildEncounter(e, "in-progress", type: null);
+        cuerpo["appointment"] = new JsonArray(new JsonObject { ["reference"] = $"Appointment/{cita}" });
+        var enc = fixture.Hapi.SeedResource(cuerpo);
+
+        await ReconciliarAsync(e, enc);
+        (await CargosAsync(e, enc)).Single().Item.ConsultationType.Should().Be(ConsultationType.Emergency);
+    }
+
+    [Fact]
     public async Task VentanaEnCero_nuncaPropone_control()
     {
         var e = await ArrangeAsync();

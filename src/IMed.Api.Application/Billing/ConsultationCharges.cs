@@ -47,6 +47,26 @@ public sealed class SuggestConsultationTypeHandler(
     }
 }
 
+/// <summary>
+/// La especialidad de un médico en la organización: la primera de sus PractitionerRole activos.
+/// Es la que se cobra cuando el encuentro no declara la suya.
+/// </summary>
+public sealed class PractitionerSpecialtyLookup(IHapiFhirClient hapi)
+{
+    public async Task<string?> FindAsync(Guid orgId, string? practitionerId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(practitionerId))
+        {
+            return null;
+        }
+        var roles = await hapi.SearchResourcesAsync(
+            "PractitionerRole", $"practitioner=Practitioner/{practitionerId}&active=true", $"org-{orgId}", ct);
+        return roles
+            .Select(r => r["specialty"]?.AsArray().FirstOrDefault()?["coding"]?.AsArray().FirstOrDefault()?["code"]?.GetValue<string>())
+            .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+    }
+}
+
 /// <summary>Qué hizo la reconciliación de una consulta. Sirve a las pruebas y a la bitácora.</summary>
 public enum ConsultationChargeOutcome
 {
@@ -88,6 +108,7 @@ public sealed class EncounterChargeReconciler(
     IBillingAccountRepository accounts,
     CaptureChargeHandler capture,
     SuggestConsultationTypeHandler suggester,
+    PractitionerSpecialtyLookup specialties,
     ILogger<EncounterChargeReconciler> logger)
 {
     private static readonly HashSet<string> Cobrables = ["in-progress", "on-hold", "completed", "discharged"];
@@ -131,10 +152,13 @@ public sealed class EncounterChargeReconciler(
             .Select(p => RefId(p?["actor"]?["reference"], "Practitioner"))
             .FirstOrDefault(id => id is not null);
         var especialidad = EspecialidadDe(encuentro)
-            ?? await EspecialidadDelMedicoAsync(orgId, medico, ct)
+            ?? await specialties.FindAsync(orgId, medico, ct)
             ?? ConsultationTypeCodes.GeneralPracticeSpecialty;
 
-        var tipo = TipoDe(encuentro) ?? ConsultationTypeCodes.FromCode(
+        // El tipo: el del encuentro; si no, el que se eligió al agendar la cita; si no, el propuesto.
+        var tipo = TipoDe(encuentro)
+            ?? await TipoDeLaCitaAsync(encuentro, particion, ct)
+            ?? ConsultationTypeCodes.FromCode(
             (await suggester.HandleAsync(orgId, paciente, especialidad, encounterFhirId, ct)).Type)!.Value;
 
         var items = await provisioner.EnsureForSpecialtyAsync(orgId, especialidad, ct);
@@ -212,20 +236,6 @@ public sealed class EncounterChargeReconciler(
         return ConsultationChargeOutcome.Reversed;
     }
 
-    private async Task<string?> EspecialidadDelMedicoAsync(Guid orgId, string? practitionerId, CancellationToken ct)
-    {
-        if (practitionerId is null)
-        {
-            return null;
-        }
-        var particion = $"org-{orgId}";
-        var roles = await hapi.SearchResourcesAsync(
-            "PractitionerRole", $"practitioner=Practitioner/{practitionerId}&active=true", particion, ct);
-        return roles
-            .Select(r => r["specialty"]?.AsArray().FirstOrDefault()?["coding"]?.AsArray().FirstOrDefault()?["code"]?.GetValue<string>())
-            .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
-    }
-
     private async Task<string?> NombreDelPacienteAsync(string patientId, string particion, CancellationToken ct)
     {
         try
@@ -239,6 +249,23 @@ public sealed class EncounterChargeReconciler(
             logger.LogDebug(ex, "No se pudo leer el nombre del paciente {Patient}.", patientId);
             return null;
         }
+    }
+
+    private async Task<ConsultationType?> TipoDeLaCitaAsync(JsonObject encuentro, string particion, CancellationToken ct)
+    {
+        var cita = encuentro["appointment"]?.AsArray()
+            .Select(a => RefId(a?["reference"], "Appointment"))
+            .FirstOrDefault(id => id is not null);
+        if (cita is null)
+        {
+            return null;
+        }
+        var recurso = await hapi.ReadResourceAsync("Appointment", cita, particion, ct);
+        var tipo = recurso?["appointmentType"]?["coding"]?.AsArray()
+            .Where(c => c?["system"]?.GetValue<string>() == ConsultationTypeCodes.System)
+            .Select(c => ConsultationTypeCodes.FromCode(c?["code"]?.GetValue<string>()))
+            .FirstOrDefault(t => t is not null);
+        return tipo;
     }
 
     /// <summary>Especialidad declarada en el encuentro (<c>serviceType</c>, R5 CodeableReference).</summary>

@@ -47,8 +47,9 @@ public static class ConsultationBillingEndpoints
     }
 
     private static async Task<IResult> SuggestAsync(
-        string patientId, string? specialty, string? encounterId, ClaimsPrincipal principal,
-        SuggestConsultationTypeHandler handler, CancellationToken ct)
+        string patientId, string? specialty, string? practitionerId, string? encounterId, ClaimsPrincipal principal,
+        SuggestConsultationTypeHandler handler, PractitionerSpecialtyLookup specialties,
+        ILoggerFactory loggers, CancellationToken ct)
     {
         if (OrgOf(principal) is not { } org)
         {
@@ -58,7 +59,22 @@ public static class ConsultationBillingEndpoints
         {
             return Results.Problem(title: "Solicitud inválida", detail: "Falta el paciente.", statusCode: 400);
         }
-        return Results.Ok(await handler.HandleAsync(org, patientId.Trim(), specialty, encounterId, ct));
+        // Al agendar se sabe el médico, no la especialidad: se usa la suya.
+        var especialidad = specialty;
+        if (string.IsNullOrWhiteSpace(especialidad) && !string.IsNullOrWhiteSpace(practitionerId))
+        {
+            try
+            {
+                especialidad = await specialties.FindAsync(org, practitionerId.Trim(), ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Sin HAPI la propuesta cae a Medicina general; es una propuesta, no un cobro.
+                loggers.CreateLogger("ConsultationBilling")
+                    .LogWarning(ex, "No se pudo leer la especialidad del médico {Practitioner}.", practitionerId);
+            }
+        }
+        return Results.Ok(await handler.HandleAsync(org, patientId.Trim(), especialidad, encounterId, ct));
     }
 
     private static async Task<IResult> GetSettingsAsync(
