@@ -127,18 +127,39 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
     {
         var table = section.AddTable();
         table.Borders.Width = 0;
-        table.AddColumn(Unit.FromCentimeter(10.4));
-        table.AddColumn(Unit.FromCentimeter(7.0));
-        var row = table.AddRow();
 
-        AddStyled(row.Cells[0], model.Organization.Name, "OrgTitle");
+        // Con logo, el encabezado pasa a tres columnas: logo, datos del laboratorio, datos de
+        // la orden. El ancho total se mantiene (3.4 + 7.0 + 7.0 = 10.4 + 7.0), así que la
+        // columna derecha sigue alineada con la tabla de resultados de abajo.
+        var logo = model.Organization.Logo;
+        var withLogo = logo is not null;
+        if (withLogo)
+        {
+            table.AddColumn(Unit.FromCentimeter(3.4));
+        }
+        table.AddColumn(Unit.FromCentimeter(withLogo ? 7.0 : 10.4));
+        table.AddColumn(Unit.FromCentimeter(7.0));
+
+        var row = table.AddRow();
+        row.VerticalAlignment = VerticalAlignment.Center;
+
+        // Si los bytes no se pueden decodificar la celda queda vacía y el informe sale igual:
+        // no vale la pena perder el documento por una imagen.
+        var column = 0;
+        if (withLogo)
+        {
+            PdfLogoRenderer.TryDraw(row.Cells[column++], logo);
+        }
+
+        var left = row.Cells[column];
+        AddStyled(left, model.Organization.Name, "OrgTitle");
         if (!string.IsNullOrWhiteSpace(model.Organization.TaxId))
         {
-            AddStyled(row.Cells[0], $"RTN {model.Organization.TaxId}", "Subtle");
+            AddStyled(left, $"RTN {model.Organization.TaxId}", "Subtle");
         }
-        AddStyled(row.Cells[0], "Informe de laboratorio", "DocTitle");
+        AddStyled(left, "Informe de laboratorio", "DocTitle");
 
-        var right = row.Cells[1];
+        var right = row.Cells[column + 1];
         right.Format.Alignment = ParagraphAlignment.Right;
         if (!string.IsNullOrWhiteSpace(model.OrderNumber))
         {

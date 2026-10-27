@@ -44,6 +44,8 @@ public sealed class InvitationLazyProvisionPersistence(
         try
         {
             dbContext.UserPractitionerAssignments.Add(assignment);
+            // El rol recién creado todavía no tiene sedes: se las escribe la sincronización (FAC-9).
+            PractitionerLocationsOutbox.Enqueue(dbContext, assignment.OrganizationId, assignment.KeycloakUserId);
             dbContext.Invitations.Update(invitation);
 
             var outboxEvent = OutboxEvent.Create(

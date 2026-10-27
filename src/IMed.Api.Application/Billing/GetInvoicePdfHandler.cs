@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Organizations;
 using IMed.Api.Domain.Billing.Fiscal;
 using IMed.Api.Domain.Billing.Invoicing;
 
@@ -13,12 +14,20 @@ public sealed record GetInvoicePdfResult(byte[] Bytes, string FileName);
 /// fiscal, que se congelaron al emitir. Es lo que hace que reimprimir dentro de cinco años
 /// produzca el mismo papel —el ítem puede estar borrado, la tasa puede haber cambiado y el CAI
 /// puede no existir en la tabla—.</para>
+///
+/// <para><b>El logo es la única excepción, y es deliberada.</b> Se lee el vigente y no uno
+/// congelado: es identidad visual, no dato fiscal. Nada de lo que respalda legalmente el
+/// documento —número, CAI, rango, tasas, totales— depende de él, y guardar una copia de la
+/// imagen por factura emitida multiplicaría el tamaño de la base sin ganancia alguna.</para>
 /// </summary>
 public sealed class GetInvoicePdfHandler(
     IInvoiceRepository invoices,
     IFiscalRepository fiscal,
     IClinicClock clock,
-    IInvoicePdfRenderer renderer)
+    IInvoicePdfRenderer renderer,
+    IOrganizationBrandingRepository branding,
+    ILocationRepository locations,
+    ILegalEntityRepository legalEntities)
 {
     public async Task<GetInvoicePdfResult?> HandleAsync(
         Guid orgId,
@@ -44,12 +53,22 @@ public sealed class GetInvoicePdfHandler(
         var regimen = await fiscal.GetActiveRegimeAsync(orgId, clock.Today(), ct);
         var tipo = await fiscal.GetDocumentTypeAsync(orgId, documento.DocumentTypeId, ct);
 
+        var logo = await branding.GetLogoAsync(orgId, ct);
+
+        // El emisor sale de lo congelado en el documento (FAC-9): una reimpresión tiene que ser
+        // idéntica al original aunque la razón social o la sede hayan cambiado después. Lo que no
+        // se congeló —documentos anteriores a FAC-9— se completa con la sede y su razón social.
+        var sede = await locations.GetAsync(orgId, documento.LocationId, ct);
+        var razon = sede is null ? null : await legalEntities.GetAsync(orgId, sede.LegalEntityId, ct);
+
         var modelo = new InvoicePdfModel(
             Issuer: new PdfIssuerInfo(
-                regimen?.IssuerLegalName ?? "—",
-                documento.IssuerTaxId ?? regimen?.IssuerTaxId,
-                Address: null,
-                Phone: null),
+                documento.IssuerLegalName ?? razon?.LegalName ?? regimen?.IssuerLegalName ?? "—",
+                documento.IssuerTaxId ?? razon?.TaxId ?? regimen?.IssuerTaxId,
+                Address: documento.EstablishmentAddress ?? documento.IssuerFiscalAddress
+                    ?? sede?.Address ?? razon?.FiscalAddress,
+                Phone: sede?.Phone ?? razon?.Phone,
+                Logo: logo?.ToPdfLogo(orgId)),
             Buyer: new PdfBuyerInfo(documento.BuyerName, documento.BuyerTaxId),
             Fiscal: new PdfFiscalInfo(
                 documento.FullNumber,

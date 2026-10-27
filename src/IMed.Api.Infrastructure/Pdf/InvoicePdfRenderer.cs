@@ -58,6 +58,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         RenderVoidBanner(section, m);
 
         // Emisor
+        PdfLogoRenderer.TryDraw(section, m.Issuer.Logo);
         section.AddParagraph(m.Issuer.LegalName).Style = "OrgTitle";
         if (!string.IsNullOrWhiteSpace(m.Issuer.TaxId))
         {
@@ -138,6 +139,15 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         doc.Styles["Normal"]!.Font.Size = 8;
 
         RenderVoidBanner(section, m);
+
+        // En el ticket el logo va centrado y mucho más chico: el ancho imprimible son 72 mm, y
+        // la impresora térmica rasteriza — un logo grande alarga la impresión sin aportar nada.
+        PdfLogoRenderer.TryDraw(
+            section,
+            m.Issuer.Logo,
+            ParagraphAlignment.Center,
+            maxWidth: Unit.FromMillimeter(40),
+            maxHeight: Unit.FromMillimeter(14));
 
         var org = section.AddParagraph(m.Issuer.LegalName);
         org.Format.Font.Bold = true;

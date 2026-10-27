@@ -46,10 +46,22 @@ public sealed class OrganizationLocation
     /// bodega, caja y punto de emisión cuál de las dos es la buena, y a mantenerlas sincronizadas
     /// a mano.</para>
     ///
-    /// <para>Null mientras la sede no facture. La organización aporta el RTN y la razón social;
-    /// la sede aporta solo este código (FSF-DEC-07: varias sedes, un solo emisor fiscal).</para>
+    /// <para>Null mientras la sede no facture. El RTN y la razón social los aporta
+    /// <see cref="LegalEntityId"/>; la sede aporta solo este código.</para>
     /// </summary>
     public string? FiscalEstablishmentCode { get; private set; }
+
+    /// <summary>
+    /// Razón social a la que pertenece la sede (FAC-9). Es la que emite sus documentos fiscales:
+    /// dos sedes de la misma razón social comparten RTN; dos de razones sociales distintas son,
+    /// para el SAR, dos contribuyentes. Reemplaza a FSF-DEC-07, que suponía un solo emisor.
+    /// </summary>
+    public Guid LegalEntityId { get; private set; }
+
+    /// <summary>Dirección física de la sede. Es la del establecimiento, no el domicilio fiscal.</summary>
+    public string? Address { get; private set; }
+
+    public string? Phone { get; private set; }
 
     public bool Active { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; private set; }
@@ -57,13 +69,28 @@ public sealed class OrganizationLocation
 
     private OrganizationLocation() { }
 
+    /// <summary>
+    /// Id FHIR determinístico del <c>Location</c>. Se calcula y no se espera a que HAPI lo asigne
+    /// para que la sincronización sea un <c>PUT</c> idempotente —reintentarla no crea duplicados— y
+    /// para que el frontend pueda referenciar la sede apenas existe. El prefijo garantiza un id
+    /// alfanumérico, que HAPI acepta en un PUT.
+    /// </summary>
+    public static string FhirIdFor(Guid locationId) => $"sede-{locationId:N}";
+
     public static OrganizationLocation Create(
         Guid organizationId,
         string code,
         string name,
+        Guid legalEntityId,
         bool isDefault = false,
+        string? address = null,
+        string? phone = null,
         TimeProvider? timeProvider = null)
     {
+        if (legalEntityId == Guid.Empty)
+        {
+            throw new ArgumentException("La sede necesita una razón social.", nameof(legalEntityId));
+        }
         if (string.IsNullOrWhiteSpace(code))
         {
             throw new ArgumentException("El código de la sede es obligatorio.", nameof(code));
@@ -80,6 +107,9 @@ public sealed class OrganizationLocation
             OrganizationId = organizationId,
             Code = code.Trim().ToUpperInvariant(),
             Name = name.Trim(),
+            LegalEntityId = legalEntityId,
+            Address = Clean(address),
+            Phone = Clean(phone),
             IsDefault = isDefault,
             Active = true,
             CreatedAt = now,
@@ -121,6 +151,32 @@ public sealed class OrganizationLocation
         }
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
+
+    /// <summary>Actualiza la dirección y el teléfono del establecimiento.</summary>
+    public void UpdateContact(string? address, string? phone, TimeProvider? timeProvider = null)
+    {
+        Address = Clean(address);
+        Phone = Clean(phone);
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
+    /// <summary>
+    /// Pasa la sede a otra razón social. Si se puede o no —una sede con CAI vigentes de la razón
+    /// social anterior no puede cambiar de emisor sin darlos de baja— lo decide el handler, que es
+    /// quien ve las autorizaciones.
+    /// </summary>
+    public void MoveToLegalEntity(Guid legalEntityId, TimeProvider? timeProvider = null)
+    {
+        if (legalEntityId == Guid.Empty)
+        {
+            throw new ArgumentException("La sede necesita una razón social.", nameof(legalEntityId));
+        }
+        LegalEntityId = legalEntityId;
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
+    private static string? Clean(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public void Rename(string name, TimeProvider? timeProvider = null)
     {

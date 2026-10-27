@@ -34,6 +34,14 @@ public static class PermissionCatalog
     /// <summary>Crear y modificar datos del expediente: paciente, encuentro, alergias, recetas.</summary>
     public const string RecordWrite = "record.write";
 
+    /// <summary>
+    /// Capturar preclínica (Épica P-1): signos vitales y alergias de un paciente <b>con cita en la
+    /// fila</b>. Existe aparte de <see cref="RecordReadAny"/> porque la auxiliar necesita ver las
+    /// alergias ya registradas para no duplicarlas, y eso no justifica abrirle el expediente entero:
+    /// el endpoint que lo consume solo lee al paciente de una cita en curso.
+    /// </summary>
+    public const string RecordPreclinic = "record.preclinic";
+
     // --- Facturación (U1 · FAC-1) -------------------------------------------
     // Se declaran los cuatro de una vez aunque FAC-1 no tenga todavía una pantalla que cobre:
     // son los que la consola del módulo y el guard consultan para decidir qué estación mostrar,
@@ -91,6 +99,7 @@ public static class PermissionCatalog
         (LabResultReadOrdered, "lab", "Ver resultados de las órdenes que solicitó"),
         (LabResultReadAny, "lab", "Ver cualquier resultado del laboratorio"),
         (RecordWrite, "record", "Crear y modificar datos del expediente"),
+        (RecordPreclinic, "record", "Capturar preclínica de pacientes con cita en curso"),
 
         (BillingRead, "billing", "Ver el módulo de facturación: cuentas, cargos, documentos"),
         (BillingCharge, "billing", "Abrir cuentas y capturar cargos"),
@@ -112,7 +121,7 @@ public static class PermissionCatalog
         // org_admin administra su organización y puede hacer todo lo operativo.
         ("org_admin", LabRead), ("org_admin", LabOperate), ("org_admin", LabValidate), ("org_admin", LabManage),
         ("org_admin", RecordSearchDemographics), ("org_admin", RecordReadAny), ("org_admin", LabResultReadAny),
-        ("org_admin", RecordWrite),
+        ("org_admin", RecordWrite), ("org_admin", RecordPreclinic),
         ("org_admin", BillingRead), ("org_admin", BillingCharge), ("org_admin", BillingCollect), ("org_admin", BillingSupervise),
         ("org_admin", OrgManage), ("org_admin", OrgTeamManage), ("org_admin", OrgLocationsManage), ("org_admin", OrgPolicyManage),
 
@@ -120,10 +129,12 @@ public static class PermissionCatalog
         // todos los pacientes; la contención real es el registro de accesos, no la restricción.
         ("practitioner", LabRead), ("practitioner", RecordSearchDemographics),
         ("practitioner", RecordReadAny), ("practitioner", LabResultReadOrdered),
-        ("practitioner", RecordWrite),
+        ("practitioner", RecordWrite), ("practitioner", RecordPreclinic),
 
         // Recepción necesita encontrar al paciente para agendar, no leer su historia.
-        ("auxiliar", RecordSearchDemographics), ("auxiliar", RecordWrite),
+        // La preclínica sí necesita las alergias ya registradas, pero solo las del paciente que
+        // tiene enfrente: por eso un permiso propio y no lectura amplia.
+        ("auxiliar", RecordSearchDemographics), ("auxiliar", RecordWrite), ("auxiliar", RecordPreclinic),
 
         ("lab_tech", LabRead), ("lab_tech", LabOperate),
         ("lab_tech", RecordSearchDemographics), ("lab_tech", LabResultReadAny),

@@ -94,8 +94,29 @@ public sealed class ImedApiFixture : IAsyncLifetime
 
         using var scope = Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // El procesador del outbox corre de fondo cada segundo y, desde FAC-9, despacha la
+        // sincronización de cada sede que crea una prueba. Si toma filas justo cuando entra el
+        // TRUNCATE, Postgres corta uno de los dos por deadlock: se reintenta, que es lo que haría
+        // cualquier cliente frente a 40P01.
+        for (var intento = 1; ; intento++)
+        {
+            try
+            {
+                await TruncateAsync(db);
+                return;
+            }
+            catch (Npgsql.PostgresException ex) when (ex.SqlState == "40P01" && intento < 5)
+            {
+                await Task.Delay(100 * intento);
+            }
+        }
+    }
+
+    private static async Task TruncateAsync(AppDbContext db)
+    {
         await db.Database.ExecuteSqlRawAsync("""
             TRUNCATE TABLE app_audit_log,
+                           encounter_history_drafts,
                            outbox_events,
                            invitations,
                            join_requests,

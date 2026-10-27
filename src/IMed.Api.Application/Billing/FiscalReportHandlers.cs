@@ -40,17 +40,29 @@ public sealed record DailyCashCutDto(
     IReadOnlyList<MethodTotalDto> TotalsByMethod,
     decimal TotalCollected,
     decimal TotalDifference,
-    int OpenShifts);
+    int OpenShifts,
+    Guid? LegalEntityId = null,
+    string? LegalName = null,
+    string? TaxId = null);
 
 public sealed class GetDailyCashCutHandler(
-    ICashRepository cash, IFiscalRepository fiscal, IClinicClock clock)
+    ICashRepository cash, IFiscalRepository fiscal, IClinicClock clock, LegalEntityScopeResolver scopes)
 {
+    /// <param name="legalEntityId">Razón social (FAC-9): solo sus cajas. Obligatoria si hay varias.</param>
     public async Task<DailyCashCutDto> HandleAsync(
-        Guid orgId, DateOnly? day, Guid? cashPointId, CancellationToken ct = default)
+        Guid orgId, DateOnly? day, Guid? cashPointId, Guid? legalEntityId = null, CancellationToken ct = default)
     {
         var dia = day ?? clock.Today();
-        var turnos = await cash.ListSessionsAsync(orgId, cashPointId, dia, ct);
-        var cajas = (await fiscal.ListCashPointsAsync(orgId, ct)).ToDictionary(c => c.Id, c => c.Name);
+        var alcance = await scopes.ResolveAsync(orgId, legalEntityId, ct);
+        var todasLasCajas = await fiscal.ListCashPointsAsync(orgId, ct);
+        var cajasDeLaRazon = todasLasCajas
+            .Where(c => alcance.LocationIds.Contains(c.LocationId))
+            .Select(c => c.Id)
+            .ToHashSet();
+        var turnos = (await cash.ListSessionsAsync(orgId, cashPointId, dia, ct))
+            .Where(t => cajasDeLaRazon.Contains(t.CashPointId))
+            .ToList();
+        var cajas = todasLasCajas.ToDictionary(c => c.Id, c => c.Name);
 
         var cortes = new List<ShiftCutDto>(turnos.Count);
         var globalPorMetodo = new Dictionary<PaymentMethod, (int Count, decimal Amount)>();
@@ -99,7 +111,10 @@ public sealed class GetDailyCashCutHandler(
             // Solo los turnos cerrados tienen diferencia; los abiertos suman cero al descuadre.
             TotalDifference: Math.Round(
                 cortes.Sum(c => c.Difference ?? 0m), 2, MidpointRounding.AwayFromZero),
-            OpenShifts: cortes.Count(c => c.Status == nameof(CashSessionStatus.Open)));
+            OpenShifts: cortes.Count(c => c.Status == nameof(CashSessionStatus.Open)),
+            LegalEntityId: alcance.LegalEntity?.Id,
+            LegalName: alcance.LegalEntity?.LegalName,
+            TaxId: alcance.LegalEntity?.TaxId);
     }
 
     private static decimal Sum(IEnumerable<CashMovement> movements, CashMovementKind kind) =>
@@ -130,18 +145,25 @@ public sealed record TaxReportDto(
     decimal SubtotalTaxed18,
     decimal DiscountTotal,
     decimal TaxTotal,
-    decimal GrandTotal);
+    decimal GrandTotal,
+    Guid? LegalEntityId = null,
+    string? LegalName = null,
+    string? TaxId = null);
 
-public sealed class GetTaxReportHandler(IFiscalReportRepository repo, IClinicClock clock)
+public sealed class GetTaxReportHandler(IFiscalReportRepository repo, IClinicClock clock, LegalEntityScopeResolver scopes)
 {
+    /// <param name="legalEntityId">Razón social que declara (FAC-9). Obligatoria si hay varias.</param>
     public async Task<TaxReportDto> HandleAsync(
-        Guid orgId, DateOnly? since, DateOnly? until, CancellationToken ct = default)
+        Guid orgId, DateOnly? since, DateOnly? until, Guid? legalEntityId = null, CancellationToken ct = default)
     {
         var hoy = clock.Today();
         var desde = since ?? new DateOnly(hoy.Year, hoy.Month, 1);
         var hasta = until ?? hoy;
+        var alcance = await scopes.ResolveAsync(orgId, legalEntityId, ct);
 
-        var docs = await repo.ListDocumentsAsync(orgId, desde, hasta, ct);
+        var docs = (await repo.ListDocumentsAsync(orgId, desde, hasta, ct))
+            .Where(d => alcance.Owns(d.LegalEntityId, d.LocationId))
+            .ToList();
         var vigentes = docs.Where(d => d.Status != FiscalDocumentStatus.Voided).ToList();
 
         return new TaxReportDto(
@@ -154,7 +176,10 @@ public sealed class GetTaxReportHandler(IFiscalReportRepository repo, IClinicClo
             SubtotalTaxed18: Round(vigentes.Sum(d => d.SubtotalTaxed18)),
             DiscountTotal: Round(vigentes.Sum(d => d.DiscountTotal)),
             TaxTotal: Round(vigentes.Sum(d => d.TaxTotal)),
-            GrandTotal: Round(vigentes.Sum(d => d.GrandTotal)));
+            GrandTotal: Round(vigentes.Sum(d => d.GrandTotal)),
+            LegalEntityId: alcance.LegalEntity?.Id,
+            LegalName: alcance.LegalEntity?.LegalName,
+            TaxId: alcance.LegalEntity?.TaxId);
     }
 
     private static decimal Round(decimal v) => Math.Round(v, 2, MidpointRounding.AwayFromZero);

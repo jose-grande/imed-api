@@ -79,7 +79,7 @@ public sealed class LabReceptionTests(ImedApiFixture fixture) : IAsyncLifetime
 
         var view = await (await client.GetAsync($"/api/lab/reception/order/{srId}")).Content.ReadFromJsonAsync<ReceptionOrderView>();
         view!.Routing.Should().Be("InHouse", "GLU está en el catálogo y ofrecida");
-        view.FastingHours.Should().BeNull();
+        view.FastingHoursMin.Should().BeNull();
 
         var recResp = await client.PostAsJsonAsync("/api/lab/reception/receive", ReceiveBody(srId));
         recResp.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -129,7 +129,10 @@ public sealed class LabReceptionTests(ImedApiFixture fixture) : IAsyncLifetime
             .Content.ReadFromJsonAsync<ReceptionOrderView>();
 
         view!.Routing.Should().Be("InHouse", "el panel está en el catálogo de la sede");
-        view.FastingHours.Should().Be(12, "manda el ayuno más estricto de las pruebas del panel");
+        // El perfil lipídico se especifica como un rango: 9 a 12 h. Con un solo valor había
+        // que elegir, y en 12 se rechazaba a quien llegaba con 10 h de ayuno válidas.
+        view.FastingHoursMin.Should().Be(9, "manda el mayor de los mínimos del panel");
+        view.FastingHoursMax.Should().Be(12, "y el menor de los máximos");
 
         var result = await (await client.PostAsJsonAsync("/api/lab/reception/receive", ReceiveBody(srId, fastingSatisfied: false)))
             .Content.ReadFromJsonAsync<ReceiveResult>();
@@ -161,7 +164,8 @@ public sealed class LabReceptionTests(ImedApiFixture fixture) : IAsyncLifetime
         var srId = await CreateExternalOrderAsync(client, "pat-3", "1558-6", "Glucosa en ayunas");
 
         var view = await (await client.GetAsync($"/api/lab/reception/order/{srId}")).Content.ReadFromJsonAsync<ReceptionOrderView>();
-        view!.FastingHours.Should().Be(8, "GLU_FAST requiere ayuno de 8h");
+        view!.FastingHoursMin.Should().Be(8, "GLU_FAST requiere al menos 8 h");
+        view.FastingHoursMax.Should().BeNull("una glucosa no tiene cota superior de ayuno");
 
         var result = await (await client.PostAsJsonAsync("/api/lab/reception/receive", ReceiveBody(srId, fastingSatisfied: false)))
             .Content.ReadFromJsonAsync<ReceiveResult>();

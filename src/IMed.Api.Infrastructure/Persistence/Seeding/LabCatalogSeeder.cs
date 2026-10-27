@@ -22,54 +22,54 @@ public sealed class LabCatalogSeeder(
     ILogger<LabCatalogSeeder> logger) : IHostedService
 {
     // (code, name, datatype, loinc, unit, department, fastingHours, collectionType)
-    private static readonly (string Code, string Name, LabTestDatatype Type, string? Loinc, string? Unit, LabDepartment Dept, int? Fasting, string? Collection)[] Tests =
+    private static readonly (string Code, string Name, LabTestDatatype Type, string? Loinc, string? Unit, LabDepartment Dept, int? FastMin, int? FastMax, string? Collection)[] Tests =
     [
         // Hematología (CBC)
-        ("WBC", "Leucocitos (WBC)", LabTestDatatype.Numeric, "6690-2", "10^3/uL", LabDepartment.Hematology, null, "blood"),
-        ("RBC", "Eritrocitos (RBC)", LabTestDatatype.Numeric, "789-8", "10^6/uL", LabDepartment.Hematology, null, "blood"),
-        ("HGB", "Hemoglobina", LabTestDatatype.Numeric, "718-7", "g/dL", LabDepartment.Hematology, null, "blood"),
-        ("HCT", "Hematocrito", LabTestDatatype.Numeric, "4544-3", "%", LabDepartment.Hematology, null, "blood"),
-        ("MCV", "Volumen corpuscular medio (VCM)", LabTestDatatype.Numeric, "787-2", "fL", LabDepartment.Hematology, null, "blood"),
-        ("MCH", "Hemoglobina corpuscular media (HCM)", LabTestDatatype.Numeric, "785-6", "pg", LabDepartment.Hematology, null, "blood"),
-        ("MCHC", "Concentración HCM (CHCM)", LabTestDatatype.Numeric, "786-4", "g/dL", LabDepartment.Hematology, null, "blood"),
-        ("PLT", "Plaquetas", LabTestDatatype.Numeric, "777-3", "10^3/uL", LabDepartment.Hematology, null, "blood"),
-        ("NEU", "Neutrófilos %", LabTestDatatype.Numeric, "770-8", "%", LabDepartment.Hematology, null, "blood"),
-        ("LYM", "Linfocitos %", LabTestDatatype.Numeric, "736-9", "%", LabDepartment.Hematology, null, "blood"),
+        ("WBC", "Leucocitos (WBC)", LabTestDatatype.Numeric, "6690-2", "10^3/uL", LabDepartment.Hematology, null, null, "blood"),
+        ("RBC", "Eritrocitos (RBC)", LabTestDatatype.Numeric, "789-8", "10^6/uL", LabDepartment.Hematology, null, null, "blood"),
+        ("HGB", "Hemoglobina", LabTestDatatype.Numeric, "718-7", "g/dL", LabDepartment.Hematology, null, null, "blood"),
+        ("HCT", "Hematocrito", LabTestDatatype.Numeric, "4544-3", "%", LabDepartment.Hematology, null, null, "blood"),
+        ("MCV", "Volumen corpuscular medio (VCM)", LabTestDatatype.Numeric, "787-2", "fL", LabDepartment.Hematology, null, null, "blood"),
+        ("MCH", "Hemoglobina corpuscular media (HCM)", LabTestDatatype.Numeric, "785-6", "pg", LabDepartment.Hematology, null, null, "blood"),
+        ("MCHC", "Concentración HCM (CHCM)", LabTestDatatype.Numeric, "786-4", "g/dL", LabDepartment.Hematology, null, null, "blood"),
+        ("PLT", "Plaquetas", LabTestDatatype.Numeric, "777-3", "10^3/uL", LabDepartment.Hematology, null, null, "blood"),
+        ("NEU", "Neutrófilos %", LabTestDatatype.Numeric, "770-8", "%", LabDepartment.Hematology, null, null, "blood"),
+        ("LYM", "Linfocitos %", LabTestDatatype.Numeric, "736-9", "%", LabDepartment.Hematology, null, null, "blood"),
 
         // Química clínica
-        ("GLU", "Glucosa", LabTestDatatype.Numeric, "2345-7", "mg/dL", LabDepartment.Chemistry, null, "blood"),
-        ("GLU_FAST", "Glucosa en ayunas", LabTestDatatype.Numeric, "1558-6", "mg/dL", LabDepartment.Chemistry, 8, "blood"),
-        ("BUN", "Nitrógeno ureico (BUN)", LabTestDatatype.Numeric, "3094-0", "mg/dL", LabDepartment.Chemistry, null, "blood"),
-        ("CREAT", "Creatinina", LabTestDatatype.Numeric, "2160-0", "mg/dL", LabDepartment.Chemistry, null, "blood"),
-        ("NA", "Sodio", LabTestDatatype.Numeric, "2951-2", "mmol/L", LabDepartment.Chemistry, null, "blood"),
-        ("K", "Potasio", LabTestDatatype.Numeric, "2823-3", "mmol/L", LabDepartment.Chemistry, null, "blood"),
-        ("CL", "Cloro", LabTestDatatype.Numeric, "2075-0", "mmol/L", LabDepartment.Chemistry, null, "blood"),
-        ("CO2", "Bicarbonato (CO2)", LabTestDatatype.Numeric, "1963-8", "mmol/L", LabDepartment.Chemistry, null, "blood"),
-        ("CA", "Calcio", LabTestDatatype.Numeric, "17861-6", "mg/dL", LabDepartment.Chemistry, null, "blood"),
-        ("ALB", "Albúmina", LabTestDatatype.Numeric, "1751-7", "g/dL", LabDepartment.Chemistry, null, "blood"),
-        ("TP", "Proteína total", LabTestDatatype.Numeric, "2885-2", "g/dL", LabDepartment.Chemistry, null, "blood"),
-        ("ALT", "Alanina aminotransferasa (ALT)", LabTestDatatype.Numeric, "1742-6", "U/L", LabDepartment.Chemistry, null, "blood"),
-        ("AST", "Aspartato aminotransferasa (AST)", LabTestDatatype.Numeric, "1920-8", "U/L", LabDepartment.Chemistry, null, "blood"),
-        ("TBIL", "Bilirrubina total", LabTestDatatype.Numeric, "1975-2", "mg/dL", LabDepartment.Chemistry, null, "blood"),
-        ("ALP", "Fosfatasa alcalina", LabTestDatatype.Numeric, "6768-6", "U/L", LabDepartment.Chemistry, null, "blood"),
+        ("GLU", "Glucosa", LabTestDatatype.Numeric, "2345-7", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
+        ("GLU_FAST", "Glucosa en ayunas", LabTestDatatype.Numeric, "1558-6", "mg/dL", LabDepartment.Chemistry, 8, null, "blood"),
+        ("BUN", "Nitrógeno ureico (BUN)", LabTestDatatype.Numeric, "3094-0", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
+        ("CREAT", "Creatinina", LabTestDatatype.Numeric, "2160-0", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
+        ("NA", "Sodio", LabTestDatatype.Numeric, "2951-2", "mmol/L", LabDepartment.Chemistry, null, null, "blood"),
+        ("K", "Potasio", LabTestDatatype.Numeric, "2823-3", "mmol/L", LabDepartment.Chemistry, null, null, "blood"),
+        ("CL", "Cloro", LabTestDatatype.Numeric, "2075-0", "mmol/L", LabDepartment.Chemistry, null, null, "blood"),
+        ("CO2", "Bicarbonato (CO2)", LabTestDatatype.Numeric, "1963-8", "mmol/L", LabDepartment.Chemistry, null, null, "blood"),
+        ("CA", "Calcio", LabTestDatatype.Numeric, "17861-6", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
+        ("ALB", "Albúmina", LabTestDatatype.Numeric, "1751-7", "g/dL", LabDepartment.Chemistry, null, null, "blood"),
+        ("TP", "Proteína total", LabTestDatatype.Numeric, "2885-2", "g/dL", LabDepartment.Chemistry, null, null, "blood"),
+        ("ALT", "Alanina aminotransferasa (ALT)", LabTestDatatype.Numeric, "1742-6", "U/L", LabDepartment.Chemistry, null, null, "blood"),
+        ("AST", "Aspartato aminotransferasa (AST)", LabTestDatatype.Numeric, "1920-8", "U/L", LabDepartment.Chemistry, null, null, "blood"),
+        ("TBIL", "Bilirrubina total", LabTestDatatype.Numeric, "1975-2", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
+        ("ALP", "Fosfatasa alcalina", LabTestDatatype.Numeric, "6768-6", "U/L", LabDepartment.Chemistry, null, null, "blood"),
 
         // Perfil lipídico (LDL calculado)
-        ("CHOL", "Colesterol total", LabTestDatatype.Numeric, "2093-3", "mg/dL", LabDepartment.Chemistry, 12, "blood"),
-        ("HDL", "Colesterol HDL", LabTestDatatype.Numeric, "2085-9", "mg/dL", LabDepartment.Chemistry, 12, "blood"),
-        ("LDL_CALC", "Colesterol LDL (calculado)", LabTestDatatype.Numeric, "13457-7", "mg/dL", LabDepartment.Chemistry, 12, "blood"),
-        ("TRIG", "Triglicéridos", LabTestDatatype.Numeric, "2571-8", "mg/dL", LabDepartment.Chemistry, 12, "blood"),
+        ("CHOL", "Colesterol total", LabTestDatatype.Numeric, "2093-3", "mg/dL", LabDepartment.Chemistry, 9, 12, "blood"),
+        ("HDL", "Colesterol HDL", LabTestDatatype.Numeric, "2085-9", "mg/dL", LabDepartment.Chemistry, 9, 12, "blood"),
+        ("LDL_CALC", "Colesterol LDL (calculado)", LabTestDatatype.Numeric, "13457-7", "mg/dL", LabDepartment.Chemistry, 9, 12, "blood"),
+        ("TRIG", "Triglicéridos", LabTestDatatype.Numeric, "2571-8", "mg/dL", LabDepartment.Chemistry, 9, 12, "blood"),
 
         // Perfil tiroideo
-        ("TSH", "Hormona estimulante de tiroides (TSH)", LabTestDatatype.Numeric, "3016-3", "mIU/L", LabDepartment.Immunology, null, "blood"),
-        ("FT4", "Tiroxina libre (T4 libre)", LabTestDatatype.Numeric, "3024-7", "ng/dL", LabDepartment.Immunology, null, "blood"),
-        ("T3", "Triyodotironina (T3)", LabTestDatatype.Numeric, "3053-6", "ng/dL", LabDepartment.Immunology, null, "blood"),
+        ("TSH", "Hormona estimulante de tiroides (TSH)", LabTestDatatype.Numeric, "3016-3", "mIU/L", LabDepartment.Immunology, null, null, "blood"),
+        ("FT4", "Tiroxina libre (T4 libre)", LabTestDatatype.Numeric, "3024-7", "ng/dL", LabDepartment.Immunology, null, null, "blood"),
+        ("T3", "Triyodotironina (T3)", LabTestDatatype.Numeric, "3053-6", "ng/dL", LabDepartment.Immunology, null, null, "blood"),
 
         // Examen general de orina
-        ("UA_COLOR", "Color (orina)", LabTestDatatype.Text, "5778-6", null, LabDepartment.Urinalysis, null, "urine-spot"),
-        ("UA_PH", "pH (orina)", LabTestDatatype.Numeric, "5803-2", null, LabDepartment.Urinalysis, null, "urine-spot"),
-        ("UA_SG", "Densidad (orina)", LabTestDatatype.Numeric, "5811-5", null, LabDepartment.Urinalysis, null, "urine-spot"),
-        ("UA_GLU", "Glucosa (orina)", LabTestDatatype.Coded, "5792-7", null, LabDepartment.Urinalysis, null, "urine-spot"),
-        ("UA_PROT", "Proteína (orina)", LabTestDatatype.Coded, "5804-0", null, LabDepartment.Urinalysis, null, "urine-spot"),
+        ("UA_COLOR", "Color (orina)", LabTestDatatype.Text, "5778-6", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
+        ("UA_PH", "pH (orina)", LabTestDatatype.Numeric, "5803-2", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
+        ("UA_SG", "Densidad (orina)", LabTestDatatype.Numeric, "5811-5", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
+        ("UA_GLU", "Glucosa (orina)", LabTestDatatype.Coded, "5792-7", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
+        ("UA_PROT", "Proteína (orina)", LabTestDatatype.Coded, "5804-0", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
     ];
 
     // (panelCode, name, description, testCodes)
@@ -168,9 +168,31 @@ public sealed class LabCatalogSeeder(
     private static readonly (string Code, string Name, string Color, string Additive, decimal? Vol, decimal? Cap, decimal? Dead)[] TubeTypes =
     [
         ("EDTA", "Tubo EDTA (tapa lila)", "lila", "EDTA K2/K3", 3m, 4m, 0.5m),
+        // Suero sin gel. Reportado por los tecnicos en la primera ronda de staging: el
+        // mapeo automatico manda toda quimica e inmunologia a SST, que lleva gel separador,
+        // y para serologia, banco de sangre y varios niveles de farmacos el gel interfiere.
+        ("SERUM_RED", "Tubo de suero sin gel (tapa roja)", "rojo", "Activador de coagulo (sin gel)", 4m, 6m, 0.5m),
         ("SST", "Tubo con gel separador (tapa dorada)", "dorado", "Activador de coágulo + gel (SST)", 5m, 5m, 0.5m),
         ("CIT", "Tubo citrato (tapa celeste)", "celeste", "Citrato de sodio 3.2%", 2.7m, 2.7m, 0.3m),
         ("HEP", "Tubo heparina (tapa verde)", "verde", "Heparina de litio", 4m, 5m, 0.5m),
+        // --- Completando el conjunto estandar de venopuncion -------------------
+        // Reportado en la primera ronda de staging: «nos hizo falta el tubo tapa roja, no
+        // supimos donde crearlo». El catalogo de tubos es GLOBAL y solo se siembra desde
+        // aqui —no hay POST /tube-types—, asi que una falta solo se resuelve con despliegue.
+        // Por eso se completa el conjunto estandar y no solo el tubo reportado.
+        //
+        // Los volumenes son los habituales del mercado; cada laboratorio los ajusta a su
+        // proveedor desde el catalogo.
+        ("FLUOR_GREY", "Tubo fluoruro/oxalato (tapa gris)", "gris",
+            "Fluoruro de sodio + oxalato de potasio", 2m, 4m, 0.3m),
+        ("ESR_BLACK", "Tubo para VSG (tapa negra)", "negro",
+            "Citrato de sodio 3.8%", 1.28m, 1.28m, 0.2m),
+        ("PST_LTGREEN", "Tubo con gel separador de plasma (tapa verde claro)", "verde claro",
+            "Heparina de litio + gel (PST)", 3m, 4.5m, 0.5m),
+        ("EDTA_PINK", "Tubo EDTA para banco de sangre (tapa rosada)", "rosado",
+            "EDTA K2", 6m, 6m, 0.5m),
+        ("TRACE_BLUE", "Tubo para elementos traza (tapa azul real)", "azul real",
+            "Libre de metales (sin aditivo o EDTA)", 6m, 6m, 0.5m),
     ];
 
     // (code, name, requiresNewSample, sortOrder) — R6-F1a, lista completa decisión UX §8.7
@@ -295,7 +317,7 @@ public sealed class LabCatalogSeeder(
             foreach (var t in Tests)
             {
                 var test = LabTestDefinition.Create(
-                    t.Code, t.Name, t.Type, t.Loinc, t.Unit, t.Dept, t.Fasting, t.Collection,
+                    t.Code, t.Name, t.Type, t.Loinc, t.Unit, t.Dept, t.FastMin, t.FastMax, t.Collection,
                     timeProvider: timeProvider);
                 testsByCode[t.Code] = test;
             }
@@ -380,7 +402,16 @@ public sealed class LabCatalogSeeder(
                     defaultBodySite: s.BodySite, containerKind: s.Container, stabilityMinutes: s.Stability,
                     discipline: s.Discipline, timeProvider: timeProvider));
             }
-            foreach (var t in TubeTypes)
+            // En una base nueva las migraciones de datos de tubos (AddRedTopTubeType,
+            // CompleteStandardTubeTypes) corren antes que este sembrador y ya dejaron algunos
+            // tubos globales. Sembrar la lista entera los duplicaba, y el backfill de abajo
+            // reventaba al indexarlos por código: las pruebas quedaban sin tipo de muestra.
+            var tubosExistentes = (await db.TubeTypes
+                    .Where(t => t.OrganizationId == null)
+                    .Select(t => t.Code)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var t in TubeTypes.Where(t => !tubosExistentes.Contains(t.Code)))
             {
                 db.TubeTypes.Add(TubeType.Create(
                     t.Code, t.Name, t.Color, t.Additive, t.Vol, t.Cap, t.Dead, timeProvider: timeProvider));

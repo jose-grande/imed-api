@@ -1,4 +1,5 @@
 using IMed.Api.Domain.Locations;
+using IMed.Api.Domain.Organizations;
 
 namespace IMed.Api.Application.Abstractions;
 
@@ -42,6 +43,34 @@ public interface ILocationRepository
 
     /// <summary>Deja una sola sede marcada como primaria para el usuario.</summary>
     Task SetPrimaryAsync(Guid organizationId, Guid userId, Guid locationId, CancellationToken ct = default);
+
+    /// <summary>Asignaciones del usuario, activas o no las sedes.</summary>
+    Task<IReadOnlyList<UserLocationAssignment>> ListAssignmentsAsync(
+        Guid organizationId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>Asignaciones de toda la organización, para listar el equipo con sus sedes.</summary>
+    Task<IReadOnlyList<UserLocationAssignment>> ListOrganizationAssignmentsAsync(
+        Guid organizationId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reemplaza en una sola transacción las sedes del usuario por <paramref name="locationIds"/>,
+    /// con <paramref name="primaryLocationId"/> como principal. Las reglas las valida el handler.
+    /// </summary>
+    Task ReplaceAssignmentsAsync(
+        Guid organizationId, Guid userId, IReadOnlyList<Guid> locationIds, Guid primaryLocationId,
+        Guid? assignedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// ¿El profesional <paramref name="practitionerFhirId"/> atiende en la sede? Cruza el
+    /// <c>Practitioner</c> con su usuario y sus asignaciones. Null si el profesional no es un
+    /// usuario de la organización (un médico externo, por ejemplo): no hay asignación que mirar.
+    /// </summary>
+    Task<bool?> IsPractitionerAssignedAsync(
+        Guid organizationId, string practitionerFhirId, Guid locationId, CancellationToken ct = default);
+
+    /// <summary>Ids FHIR de los profesionales asignados a la sede.</summary>
+    Task<IReadOnlyList<string>> ListPractitionerIdsAsync(
+        Guid organizationId, Guid locationId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -59,4 +88,18 @@ public interface ILocationProvisioning
     /// </summary>
     Task<OrganizationLocation> EnsureDefaultLocationAsync(
         Guid organizationId, string? organizationName = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Crea la razón social por defecto si la organización no tiene (FAC-9). Idempotente. El RTN
+    /// solo se usa al crearla: si ya existe, no se toca.
+    /// </summary>
+    Task<LegalEntity> EnsureDefaultLegalEntityAsync(
+        Guid organizationId, string? organizationName = null, string? taxId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Garantiza que el usuario tenga al menos una sede (FAC-9): si no tiene ninguna, lo asigna a
+    /// la sede principal como su principal. Idempotente. Devuelve true si tuvo que asignarlo.
+    /// </summary>
+    Task<bool> EnsureUserAssignedAsync(
+        Guid organizationId, Guid userId, Guid? assignedBy = null, CancellationToken ct = default);
 }

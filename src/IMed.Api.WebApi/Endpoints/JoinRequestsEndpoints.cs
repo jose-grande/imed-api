@@ -131,7 +131,8 @@ public static class JoinRequestsEndpoints
                 JoinRequestId: id,
                 OrganizationId: orgId!.Value,
                 ResolvedBy: userId!.Value,
-                Role: role), cancellationToken);
+                Role: role,
+                LocationIds: request?.LocationIds), cancellationToken);
             return Results.Ok(new ApproveJoinRequestResponse(
                 JoinRequestId: result.JoinRequestId,
                 LinkedInvitationId: result.LinkedInvitationId,
@@ -256,7 +257,8 @@ public sealed record SubmitJoinRequestRequest(
 
 public sealed record SubmitJoinRequestResponse(Guid JoinRequestId, bool AdminNotified);
 
-public sealed record ApproveJoinRequestRequest(string? Role);
+/// <param name="LocationIds">Sedes del solicitante; la primera es su principal (FAC-9).</param>
+public sealed record ApproveJoinRequestRequest(string? Role, IReadOnlyList<Guid>? LocationIds = null);
 
 public sealed record ApproveJoinRequestResponse(Guid JoinRequestId, Guid LinkedInvitationId, bool ApplicantNotified);
 

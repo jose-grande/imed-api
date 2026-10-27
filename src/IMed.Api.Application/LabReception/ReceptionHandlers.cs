@@ -48,7 +48,7 @@ internal static class LabRouting
         var expanded = await ExpandOrderAsync(catalog, orgId, codeOrLoinc, ct);
         if (expanded.Count == 0)
         {
-            return new OrderResolution(OrderRouting.SendOut, null, null, null, null);
+            return new OrderResolution(OrderRouting.SendOut, FastingWindow.None, null, null, null);
         }
 
         var tests = expanded.Select(e => e.Test).ToList();
@@ -56,10 +56,13 @@ internal static class LabRouting
             ? OrderRouting.InHouse
             : OrderRouting.SendOut;
 
-        // El ayuno más estricto manda: si una sola prueba del panel exige 8 h, el paciente tiene
-        // que venir con 8 h. Con el panel sin resolver esto quedaba en null y la precondición
+        // El ayuno más estricto manda: si una sola prueba del panel exige 9 h, el paciente tiene
+        // que venir con 9 h. Con el panel sin resolver esto quedaba en null y la precondición
         // no se preguntaba — se recibía la muestra igual.
-        var fasting = tests.Max(t => t.FastingHours);
+        //
+        // Con rangos no basta el máximo: se combina el mayor de los mínimos con el menor de los
+        // máximos, y esa combinación puede quedar vacía (ver FastingWindow.IsImpossible).
+        var fasting = FastingWindow.Combine(tests);
 
         // Tipo de muestra y tipo de colección, solo si todas las pruebas coinciden: un panel de
         // sangre y orina no tiene "el tipo", y estos caminos crean una sola muestra. Elegir uno
@@ -131,7 +134,7 @@ internal static class LabRouting
 /// </summary>
 internal sealed record OrderResolution(
     OrderRouting Routing,
-    int? FastingHours,
+    FastingWindow Fasting,
     string? CollectionType,
     Guid? SpecimenTypeId,
     LabTestDefinition? SingleTest);
@@ -158,7 +161,8 @@ public sealed class ResolveReceptionOrderHandler(
             LoincCode: order.LoincCode,
             CodeText: order.CodeText,
             Routing: resolution.Routing.ToString(),
-            FastingHours: resolution.FastingHours,
+            FastingHoursMin: resolution.Fasting.MinHours,
+            FastingHoursMax: resolution.Fasting.MaxHours,
             AlreadyReceived: existing?.Status == OrderIntakeStatus.Received,
             IntakeStatus: existing?.Status.ToString());
     }
@@ -231,7 +235,7 @@ public sealed class ReceiveSpecimenHandler(
 
         var resolution = await LabRouting.ResolveOrderAsync(catalog, cmd.OrganizationId, order.CatalogCode, ct);
         var priority = LabRouting.ParsePriority(order.Priority);
-        var fastingRequired = resolution.FastingHours is not null;
+        var fastingRequired = resolution.Fasting.Required;
 
         // Send-out: no entra a la worklist; se registra el intake como referido.
         if (resolution.Routing == OrderRouting.SendOut)
@@ -252,7 +256,9 @@ public sealed class ReceiveSpecimenHandler(
                 cmd.OrganizationId, cmd.ServiceRequestId, order.PatientFhirId, OrderRouting.InHouse,
                 priority, fastingRequired: true, cmd.ScheduledFor, cmd.IsWalkIn, timeProvider);
             blocked.DescribeExam(order.LoincCode, order.CodeText, timeProvider);
-            blocked.MarkBlocked($"Precondición no cumplida: requiere ayuno de {resolution.FastingHours}h.", cmd.UserId, timeProvider);
+            blocked.MarkBlocked(
+                $"Precondición no cumplida: requiere ayuno de {resolution.Fasting.Describe()}.",
+                cmd.UserId, timeProvider);
             await ops.AddIntakeAsync(blocked, ct);
             return new ReceiveResult(blocked.Id, blocked.Status.ToString(), "InHouse", null, null, blocked.BlockReason);
         }
@@ -276,7 +282,7 @@ public sealed class ReceiveSpecimenHandler(
             AccessionNumber: accession,
             ReceivedTime: now.ToString("o"),
             CollectedDateTime: cmd.CollectedDateTime,
-            FastingHours: resolution.FastingHours,
+            FastingHours: resolution.Fasting.MinHours,
             Note: cmd.Note), ct);
 
         var intake = OrderIntake.Create(

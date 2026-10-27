@@ -99,6 +99,66 @@ public static class FhirIntentCatalog
         new("allergy.record", "AllergyIntolerance", FhirVerb.Create, PermissionCatalog.RecordWrite),
         new("allergy.amend", "AllergyIntolerance", FhirVerb.Update, PermissionCatalog.RecordWrite),
 
+        // Antecedentes por sección (Épica P §2.2): una lista por paciente y código LOINC de sección.
+        new("patient.historyLists", "List", FhirVerb.Search, PermissionCatalog.RecordReadAny,
+            RequiredAnyOf: P("subject", "patient"),
+            Allowed: P("code", "status")),
+        new("historyList.open", "List", FhirVerb.Read, PermissionCatalog.RecordReadAny),
+        new("historyList.record", "List", FhirVerb.Create, PermissionCatalog.RecordWrite),
+        new("historyList.amend", "List", FhirVerb.Update, PermissionCatalog.RecordWrite),
+
+        // Medicación habitual (Épica P-2). `status` acota recorded/draft/entered-in-error.
+        new("patient.medicationStatements", "MedicationStatement", FhirVerb.Search, PermissionCatalog.RecordReadAny,
+            RequiredAnyOf: P("subject", "patient"),
+            Allowed: P("status", "encounter")),
+        new("medicationStatement.open", "MedicationStatement", FhirVerb.Read, PermissionCatalog.RecordReadAny),
+        new("medicationStatement.record", "MedicationStatement", FhirVerb.Create, PermissionCatalog.RecordWrite),
+        new("medicationStatement.amend", "MedicationStatement", FhirVerb.Update, PermissionCatalog.RecordWrite),
+
+        // Resto de los antecedentes (Épica P-3): siempre de un paciente.
+        new("patient.procedures", "Procedure", FhirVerb.Search, PermissionCatalog.RecordReadAny,
+            RequiredAnyOf: P("subject", "patient"),
+            Allowed: P("status")),
+        new("procedure.open", "Procedure", FhirVerb.Read, PermissionCatalog.RecordReadAny),
+        new("procedure.record", "Procedure", FhirVerb.Create, PermissionCatalog.RecordWrite),
+        new("procedure.amend", "Procedure", FhirVerb.Update, PermissionCatalog.RecordWrite),
+
+        new("patient.familyHistory", "FamilyMemberHistory", FhirVerb.Search, PermissionCatalog.RecordReadAny,
+            RequiredAnyOf: P("patient"),
+            Allowed: P("status")),
+        new("familyHistory.open", "FamilyMemberHistory", FhirVerb.Read, PermissionCatalog.RecordReadAny),
+        new("familyHistory.record", "FamilyMemberHistory", FhirVerb.Create, PermissionCatalog.RecordWrite),
+        new("familyHistory.amend", "FamilyMemberHistory", FhirVerb.Update, PermissionCatalog.RecordWrite),
+
+        new("patient.immunizations", "Immunization", FhirVerb.Search, PermissionCatalog.RecordReadAny,
+            RequiredAnyOf: P("patient"),
+            Allowed: P("status")),
+        new("immunization.open", "Immunization", FhirVerb.Read, PermissionCatalog.RecordReadAny),
+        new("immunization.record", "Immunization", FhirVerb.Create, PermissionCatalog.RecordWrite),
+        new("immunization.amend", "Immunization", FhirVerb.Update, PermissionCatalog.RecordWrite),
+
+        new("patient.devices", "DeviceUsage", FhirVerb.Search, PermissionCatalog.RecordReadAny,
+            RequiredAnyOf: P("patient"),
+            Allowed: P("status")),
+        new("device.open", "DeviceUsage", FhirVerb.Read, PermissionCatalog.RecordReadAny),
+        new("device.record", "DeviceUsage", FhirVerb.Create, PermissionCatalog.RecordWrite),
+        new("device.amend", "DeviceUsage", FhirVerb.Update, PermissionCatalog.RecordWrite),
+
+        // Hábitos, gineco-obstétricos y perinatales: Observations de categoría `social-history`.
+        // La categoría se acota por valor, como en signos vitales: sin eso, esta forma leería
+        // resultados de laboratorio.
+        new("patient.historyObservations", "Observation", FhirVerb.Search, PermissionCatalog.RecordReadAny,
+            RequiredAnyOf: P("subject", "patient"),
+            Allowed: P("date", "status", "code"),
+            RequiredValues: Values(("category", P("social-history")))),
+
+        // Constancia del cierre: qué antecedentes cambió esta consulta.
+        new("history.provenance", "Provenance", FhirVerb.Create, PermissionCatalog.RecordWrite),
+        // La consulta cerrada muestra qué antecedentes cambió (Épica P §3.6): las constancias de
+        // un encuentro. Exige el encuentro: sin él sería la cadena de custodia de toda la clínica.
+        new("encounter.provenance", "Provenance", FhirVerb.Search, PermissionCatalog.RecordReadAny,
+            RequiredAnyOf: P("encounter")),
+
         // Signos vitales. `category` está acotada por valor a propósito: exigir que el parámetro
         // venga sin mirar qué dice dejaría que `category=laboratory` leyera resultados por acá.
         new("patient.vitals", "Observation", FhirVerb.Search, PermissionCatalog.RecordReadAny,

@@ -94,7 +94,8 @@ public static class LabCatalogEndpoints
         {
             var result = await handler.HandleAsync(new CreateLabTestCommand(
                 ParseOrganizationId(principal), request.Code, request.Name, request.Datatype, request.LoincCode,
-                request.Unit, request.Department, request.FastingHours, request.CollectionType, request.PatientInstruction,
+                request.Unit, request.Department, request.FastingHoursMin, request.FastingHoursMax,
+                request.CollectionType, request.PatientInstruction,
                 request.SpecimenTypeId, request.TubeTypeId, request.CollectionMode,
                 request.MinVolumeMl, request.PreferredVolumeMl, request.AnalyzerMinVolumeMl, request.StabilityMinutes),
                 cancellationToken);
@@ -111,7 +112,7 @@ public static class LabCatalogEndpoints
         {
             var result = await handler.HandleAsync(new UpdateLabTestCommand(
                 id, request.Name, request.Datatype, request.LoincCode, request.Unit, request.Department,
-                request.FastingHours, request.CollectionType, request.PatientInstruction,
+                request.FastingHoursMin, request.FastingHoursMax, request.CollectionType, request.PatientInstruction,
                 request.SpecimenTypeId, request.TubeTypeId, request.CollectionMode,
                 request.MinVolumeMl, request.PreferredVolumeMl, request.AnalyzerMinVolumeMl, request.StabilityMinutes),
                 cancellationToken);
@@ -376,13 +377,13 @@ public static class LabCatalogEndpoints
 
 public sealed record CreateLabTestRequest(
     string Code, string Name, string Datatype, string? LoincCode, string? Unit,
-    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction,
+    string Department, int? FastingHoursMin, int? FastingHoursMax, string? CollectionType, string? PatientInstruction,
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
     decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 
 public sealed record UpdateLabTestRequest(
     string Name, string Datatype, string? LoincCode, string? Unit,
-    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction,
+    string Department, int? FastingHoursMin, int? FastingHoursMax, string? CollectionType, string? PatientInstruction,
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
     decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 

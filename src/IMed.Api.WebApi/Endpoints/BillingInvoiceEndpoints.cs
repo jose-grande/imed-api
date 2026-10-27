@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Billing;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Authorization;
 using IMed.Api.WebApi.Http;
 
@@ -47,7 +48,7 @@ public static class BillingInvoiceEndpoints
 
     private static async Task<IResult> IssueAsync(
         IssueInvoiceRequest request, ClaimsPrincipal principal,
-        IssueInvoiceHandler handler, CancellationToken ct)
+        IssueInvoiceHandler handler, ResolveActiveLocationHandler activeLocation, CancellationToken ct)
     {
         var orgId = ParseOrganizationId(principal);
         if (orgId is null)
@@ -55,10 +56,25 @@ public static class BillingInvoiceEndpoints
             return Forbidden();
         }
 
+        // La sede de emisión no se acepta a ciegas del cuerpo (FAC-9, D4): es la sede activa del
+        // usuario, y si pide otra tiene que estar asignado a ella. Con eso nadie emite con el CAI
+        // de una sede donde no trabaja.
+        var userId = ParseSub(principal);
+        Guid sede;
+        try
+        {
+            sede = await activeLocation.HandleAsync(orgId.Value, userId, request.LocationId, ct);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(
+                title: "Sede inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+
         var resultado = await handler.HandleAsync(new IssueInvoiceCommand(
-            orgId.Value, request.AccountId, request.LocationId, request.DocumentTypeId,
+            orgId.Value, request.AccountId, sede, request.DocumentTypeId,
             request.FiscalAuthorizationId, request.BillToPartyId,
-            request.BuyerTaxId, request.BuyerName), ct);
+            request.BuyerTaxId, request.BuyerName, userId), ct);
 
         if (resultado.Rejected is { } r)
         {
@@ -145,13 +161,20 @@ public static class BillingInvoiceEndpoints
             detail: "El token no trae organization_id.",
             statusCode: StatusCodes.Status403Forbidden);
 
+    private static Guid? ParseSub(ClaimsPrincipal principal)
+    {
+        var raw = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub");
+        return Guid.TryParse(raw, out var sub) ? sub : null;
+    }
+
     private static Guid? ParseOrganizationId(ClaimsPrincipal principal) =>
         Guid.TryParse(principal.FindFirstValue("organization_id"), out var id) ? id : null;
 }
 
+/// <param name="LocationId">Opcional. Sin ella se emite en la sede activa del usuario.</param>
 public sealed record IssueInvoiceRequest(
     Guid AccountId,
-    Guid LocationId,
+    Guid? LocationId,
     Guid DocumentTypeId,
     Guid? FiscalAuthorizationId,
     Guid? BillToPartyId,

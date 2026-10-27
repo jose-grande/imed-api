@@ -34,7 +34,7 @@ public sealed class ServiceGateTests(ImedApiFixture fixture) : IAsyncLifetime
         var sp = scope.ServiceProvider;
         var db = sp.GetRequiredService<AppDbContext>();
 
-        var sede = OrganizationLocation.Create(orgId, "CENTRAL", "Sede central", isDefault: true);
+        var sede = TestSedes.Create(db, orgId, "CENTRAL", "Sede central", isDefault: true);
         sede.SetFiscalEstablishmentCode("001");
         db.OrganizationLocations.Add(sede);
         await db.SaveChangesAsync();

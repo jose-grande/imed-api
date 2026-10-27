@@ -7,7 +7,8 @@ public sealed record ReceptionOrderView(
     string? LoincCode,
     string? CodeText,
     string Routing,
-    int? FastingHours,
+    int? FastingHoursMin,
+    int? FastingHoursMax,
     bool AlreadyReceived,
     string? IntakeStatus);
 
@@ -67,7 +68,8 @@ public sealed record RequisitionOrder(
     string? LoincCode,
     string? CodeText,
     string Routing,
-    int? FastingHours,
+    int? FastingHoursMin,
+    int? FastingHoursMax,
     string? IntakeStatus);
 
 public sealed record ReceiveRequisitionCommand(
@@ -137,5 +139,6 @@ public sealed record CollectionQueueItem(
     string SpecimenTypeName,
     string? DefaultMethod,
     string? DefaultBodySite,
-    int? FastingHours,
+    int? FastingHoursMin,
+    int? FastingHoursMax,
     string? Priority);

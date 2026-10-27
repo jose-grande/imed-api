@@ -17,7 +17,7 @@ namespace IMed.Api.IntegrationTests.Infrastructure;
 ///   <item><c>POST /fhir/Organization</c> (con header <c>X-Tenant-Partition</c>)</item>
 /// </list>
 /// </summary>
-public sealed class HapiMockServer : IDisposable
+public sealed partial class HapiMockServer : IDisposable
 {
     private readonly WireMockServer _server;
     private readonly HashSet<string> _createdPartitions = new(StringComparer.Ordinal);
@@ -85,6 +85,7 @@ public sealed class HapiMockServer : IDisposable
         SetupPatientGet();
         SetupObservation();
         SetupDiagnosticReport();
+        SetupDocuments();
     }
 
     public void Reset()
@@ -99,6 +100,7 @@ public sealed class HapiMockServer : IDisposable
         _observations.Clear();
         _diagnosticReports.Clear();
         _provenances.Clear();
+        ResetDocuments();
         _failingCreatePractitionerRemaining = 0;
         CreatePractitionerCallCount = 0;
         CreatePractitionerRoleCallCount = 0;
@@ -299,7 +301,8 @@ public sealed class HapiMockServer : IDisposable
                 }
 
                 var fhirId = $"role-{Guid.NewGuid():N}";
-                var role = new FakePractitionerRole(fhirId, practitionerFhirId, specCode, specDisplay, Active: true);
+                var role = new FakePractitionerRole(
+                    fhirId, practitionerFhirId, specCode, specDisplay, Active: true, OrganizationFhirId: orgFhirId);
                 _rolesById[fhirId] = role;
                 if (!_rolesByOrg.TryGetValue(orgFhirId, out var list))
                 {
@@ -413,13 +416,47 @@ public sealed class HapiMockServer : IDisposable
                     id = r.Id,
                     active = r.Active,
                     practitioner = new { reference = $"Practitioner/{r.PractitionerFhirId}" },
+                    organization = r.OrganizationFhirId is null ? null : new { reference = $"Organization/{r.OrganizationFhirId}" },
+                    location = r.Locations?.Select(l => new { reference = $"Location/{l}" }).ToArray(),
                     specialty = r.SpecialtyCode is null ? null : new[]
                     {
                         new { coding = new[] { new { system = "http://snomed.info/sct", code = r.SpecialtyCode, display = r.SpecialtyDisplay } } }
                     }
                 });
             }));
+
+        // PUT: reemplaza el rol como HAPI, incluidas sus sedes (FAC-9). Una sede que no existe en
+        // el almacén se rechaza igual que HAPI rechaza una referencia rota.
+        _server
+            .Given(Request.Create()
+                .WithPath(new WireMock.Matchers.RegexMatcher("^/fhir/PractitionerRole/[a-zA-Z0-9-]+$"))
+                .UsingPut())
+            .RespondWith(Response.Create().WithCallback(req =>
+            {
+                var id = req.Path.Split('/').Last();
+                if (!_rolesById.TryGetValue(id, out var previo))
+                {
+                    return JsonMessage(HttpStatusCode.NotFound, new { error = "not found" });
+                }
+                using var doc = JsonDocument.Parse(req.Body ?? "{}");
+                var locations = doc.RootElement.TryGetProperty("location", out var locs) && locs.ValueKind == JsonValueKind.Array
+                    ? locs.EnumerateArray()
+                        .Select(l => l.GetProperty("reference").GetString()!["Location/".Length..])
+                        .ToList()
+                    : new List<string>();
+                var faltante = locations.FirstOrDefault(l => GetResource("Location", l) is null);
+                if (faltante is not null)
+                {
+                    return JsonMessage(HttpStatusCode.UnprocessableEntity, new { error = $"HAPI-1094: Location/{faltante} not found" });
+                }
+                _rolesById[id] = previo with { Locations = locations };
+                return JsonMessage(HttpStatusCode.OK, new { resourceType = "PractitionerRole", id, meta = new { versionId = "2" } });
+            }));
     }
+
+    /// <summary>Sedes del PractitionerRole, en el orden en que se escribieron (FAC-9).</summary>
+    public IReadOnlyList<string> PractitionerRoleLocations(string roleId) =>
+        _rolesById.TryGetValue(roleId, out var r) ? r.Locations ?? [] : [];
 
     // ===================== LIS-3: recepción de muestras =====================
 
@@ -578,9 +615,11 @@ public sealed class HapiMockServer : IDisposable
             .RespondWith(Response.Create().WithCallback(req =>
             {
                 var id = req.Path.Split('/').Last();
-                return _encounterStates.TryGetValue(id, out var status)
-                    ? JsonMessage(HttpStatusCode.OK, new { resourceType = "Encounter", id, status })
-                    : JsonMessage(HttpStatusCode.NotFound, new { error = "not found" });
+                if (_encounterStates.TryGetValue(id, out var status))
+                {
+                    return JsonMessage(HttpStatusCode.OK, new { resourceType = "Encounter", id, status });
+                }
+                return ReadDocument("Encounter", id);
             }));
     }
 
@@ -847,6 +886,12 @@ public sealed class HapiMockServer : IDisposable
             .Given(Request.Create().WithPath("/fhir/Observation").UsingGet())
             .RespondWith(Response.Create().WithCallback(req =>
             {
+                // Por encuentro (preclínica, Épica P): se sirven del almacén genérico, que es donde
+                // escriben las transacciones.
+                if (req.Query?.ContainsKey("encounter") == true)
+                {
+                    return SearchDocuments("Observation", req);
+                }
                 var subj = req.Query?.TryGetValue("subject", out var sv) == true ? sv.FirstOrDefault() : null;
                 var patient = subj?.StartsWith("Patient/", StringComparison.Ordinal) == true ? subj["Patient/".Length..] : subj;
                 var codeParam = req.Query?.TryGetValue("code", out var cv) == true ? cv.FirstOrDefault() : null;
@@ -1199,5 +1244,7 @@ public sealed class HapiMockServer : IDisposable
         string PractitionerFhirId,
         string? SpecialtyCode,
         string? SpecialtyDisplay,
-        bool Active);
+        bool Active,
+        string? OrganizationFhirId = null,
+        IReadOnlyList<string>? Locations = null);
 }

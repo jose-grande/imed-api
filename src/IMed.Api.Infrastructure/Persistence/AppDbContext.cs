@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Encounters;
 using System.Text.Json;
 using IMed.Api.Domain.Auditing;
 using IMed.Api.Domain.Authorization;
@@ -15,6 +16,7 @@ using IMed.Api.Domain.Lab;
 using IMed.Api.Domain.Invitations;
 using IMed.Api.Domain.JoinRequests;
 using IMed.Api.Domain.Locations;
+using IMed.Api.Domain.Organizations;
 using IMed.Api.Domain.Outbox;
 using IMed.Api.Domain.Practitioners;
 using IMed.Api.Domain.Subscriptions;
@@ -27,6 +29,7 @@ namespace IMed.Api.Infrastructure.Persistence;
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<OrganizationSubscription> OrganizationSubscriptions => Set<OrganizationSubscription>();
+    public DbSet<OrganizationBranding> OrganizationBranding => Set<OrganizationBranding>();
     public DbSet<UserTierAssignment> UserTierAssignments => Set<UserTierAssignment>();
     public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
     public DbSet<AppAuditLogEntry> AppAuditLog => Set<AppAuditLogEntry>();
@@ -83,6 +86,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     // Eje de sede (ADR-008)
     public DbSet<OrganizationLocation> OrganizationLocations => Set<OrganizationLocation>();
     public DbSet<UserLocationAssignment> UserLocations => Set<UserLocationAssignment>();
+    public DbSet<LegalEntity> LegalEntities => Set<LegalEntity>();
     public DbSet<Party> Parties => Set<Party>();
     public DbSet<UserAuthorizationLimit> UserAuthorizationLimits => Set<UserAuthorizationLimit>();
     public DbSet<FiscalRegime> FiscalRegimes => Set<FiscalRegime>();
@@ -104,6 +108,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<PaymentAllocation> PaymentAllocations => Set<PaymentAllocation>();
     public DbSet<ServiceWaiver> ServiceWaivers => Set<ServiceWaiver>();
 
+    // Antecedentes pendientes de la consulta (Épica P, P-D3)
+    public DbSet<EncounterHistoryDraft> EncounterHistoryDrafts => Set<EncounterHistoryDraft>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -117,6 +124,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureInvoicing(modelBuilder);
         ConfigureCash(modelBuilder);
         ConfigureOrganizationSubscription(modelBuilder);
+        ConfigureOrganizationBranding(modelBuilder);
+        ConfigureEncounterHistoryDraft(modelBuilder);
         ConfigureUserTierAssignment(modelBuilder);
         ConfigureOutboxEvent(modelBuilder);
         ConfigureAppAuditLog(modelBuilder);
@@ -177,6 +186,46 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.SeatsBasic).IsRequired();
             e.Property(x => x.SeatsPremium).IsRequired();
             e.Property(x => x.SeatsPlatinum).IsRequired();
+        });
+    }
+
+    private static void ConfigureOrganizationBranding(ModelBuilder b)
+    {
+        b.Entity<OrganizationBranding>(e =>
+        {
+            e.ToTable("organization_branding");
+            e.HasKey(x => x.OrganizationId);
+
+            // `bytea`. No hay `HasMaxLength` acá a propósito: el tope lo impone el dominio
+            // (OrganizationBranding.MaxLogoBytes) y lo verifica el endpoint antes de llegar
+            // hasta acá, con un mensaje que el usuario entiende. Un límite en la columna
+            // devolvería un error de base de datos.
+            e.Property(x => x.LogoBytes).HasColumnType("bytea");
+            e.Property(x => x.LogoContentType).HasMaxLength(64);
+            e.Property(x => x.LogoFileName).HasMaxLength(255);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.UpdatedBy);
+
+            // Sin FK a organization_subscriptions: ese registro lo crea el bootstrap de la
+            // organización y esta tabla se escribe desde una pantalla, en otro momento. Una FK
+            // acoplaría la carga del logo al orden de creación sin ganar nada — la clave ya es
+            // el OrganizationId que viene del token.
+        });
+    }
+
+    private static void ConfigureEncounterHistoryDraft(ModelBuilder b)
+    {
+        b.Entity<EncounterHistoryDraft>(e =>
+        {
+            e.ToTable("encounter_history_drafts");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.EncounterFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.PatientFhirId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.ProvenanceFhirId).HasMaxLength(64);
+            // Un borrador por encuentro: una consulta se cierra una sola vez.
+            e.HasIndex(x => new { x.OrganizationId, x.EncounterFhirId }).IsUnique();
         });
     }
 
@@ -242,6 +291,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.LocationFhirId).HasMaxLength(64);
             // Código de establecimiento fiscal (FSF): 3 dígitos, nulo mientras la sede no facture.
             e.Property(x => x.FiscalEstablishmentCode).HasMaxLength(3);
+            // Razón social que emite por esta sede (FAC-9). FK real: una sede apuntando a una
+            // razón social inexistente emitiría sin RTN, y eso no se descubre hasta la auditoría.
+            e.Property(x => x.LegalEntityId).IsRequired();
+            e.HasOne<LegalEntity>().WithMany().HasForeignKey(x => x.LegalEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.LegalEntityId).HasDatabaseName("ix_organization_location_legal_entity");
+            e.Property(x => x.Address).HasMaxLength(500);
+            e.Property(x => x.Phone).HasMaxLength(50);
             e.Property(x => x.IsDefault).IsRequired();
             e.Property(x => x.Active).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
@@ -258,6 +315,36 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .IsUnique()
                 .HasFilter("is_default")
                 .HasDatabaseName("ux_organization_location_org_default");
+        });
+
+        // Razón social (FAC-9). Una por defecto por organización, mismo patrón de índice filtrado
+        // que la sede principal; el RTN es único dentro de la organización porque dos razones
+        // sociales con el mismo RTN son la misma persona jurídica registrada dos veces.
+        b.Entity<LegalEntity>(e =>
+        {
+            e.ToTable("legal_entity");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.LegalName).HasMaxLength(300).IsRequired();
+            e.Property(x => x.TradeName).HasMaxLength(300);
+            e.Property(x => x.TaxId).HasMaxLength(32);
+            e.Property(x => x.FiscalAddress).HasMaxLength(500);
+            e.Property(x => x.Phone).HasMaxLength(50);
+            e.Property(x => x.Email).HasMaxLength(200);
+            e.Property(x => x.IsDefault).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.OrganizationFhirId).HasMaxLength(64);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => x.OrganizationId)
+                .IsUnique()
+                .HasFilter("is_default")
+                .HasDatabaseName("ux_legal_entity_org_default");
+            e.HasIndex(x => new { x.OrganizationId, x.TaxId })
+                .IsUnique()
+                .HasFilter("tax_id IS NOT NULL")
+                .HasDatabaseName("ux_legal_entity_org_tax_id");
         });
 
         b.Entity<UserLocationAssignment>(e =>
@@ -463,6 +550,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("billing_invoice");
             e.HasKey(x => x.Id);
             e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.LocationId);
+            e.Property(x => x.LegalEntityId);
             e.Property(x => x.AccountId).IsRequired();
             e.Property(x => x.BillToPartyId).IsRequired();
             e.Property(x => x.BillToKind).HasConversion<string>().HasMaxLength(20).IsRequired();
@@ -532,6 +621,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.IssuedAt).IsRequired();
 
             e.Property(x => x.IssuerTaxId).HasMaxLength(32);
+            e.Property(x => x.LegalEntityId);
+            e.Property(x => x.IssuerLegalName).HasMaxLength(300);
+            e.Property(x => x.IssuerTradeName).HasMaxLength(300);
+            e.Property(x => x.IssuerFiscalAddress).HasMaxLength(500);
+            e.Property(x => x.EstablishmentAddress).HasMaxLength(500);
             e.Property(x => x.BuyerPartyId);
             e.Property(x => x.BuyerTaxId).HasMaxLength(32);
             e.Property(x => x.BuyerName).HasMaxLength(300).IsRequired();
@@ -617,6 +711,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.OrganizationId).IsRequired();
             e.Property(x => x.AccountId).IsRequired();
             e.Property(x => x.BillableItemId).IsRequired();
+            e.Property(x => x.LocationId).IsRequired();
             e.Property(x => x.DescriptionSnapshot).HasMaxLength(300).IsRequired();
             e.Property(x => x.Quantity).HasPrecision(19, 4).IsRequired();
             e.Property(x => x.UnitPrice).HasPrecision(19, 4).IsRequired();
@@ -832,9 +927,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.UpdatedAt).IsRequired();
 
             // Un CAI es una autorización distinta por cada tipo de documento y punto de emisión.
-            e.HasIndex(x => new { x.OrganizationId, x.Cai, x.DocumentTypeId, x.EmissionPointCode })
+            // Lleva la sede (FAC-9, D6): sin ella, dos sucursales del mismo RTN con el mismo CAI y
+            // el mismo punto de emisión —el establecimiento es lo que las distingue en el número—
+            // no se podían registrar las dos.
+            e.HasIndex(x => new { x.OrganizationId, x.LocationId, x.Cai, x.DocumentTypeId, x.EmissionPointCode })
                 .IsUnique()
-                .HasDatabaseName("ux_fiscal_authorization_org_cai_type_point");
+                .HasDatabaseName("ux_fiscal_authorization_org_location_cai_type_point");
             // La consulta de la caja: la autorización vigente de esta sede para este documento.
             e.HasIndex(x => new { x.OrganizationId, x.LocationId, x.DocumentTypeId, x.Status })
                 .HasDatabaseName("ix_fiscal_authorization_org_location_type_status");
@@ -1269,7 +1367,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Datatype).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.Unit).HasMaxLength(40);
             e.Property(x => x.Department).HasConversion<string>().HasMaxLength(20).IsRequired();
-            e.Property(x => x.FastingHours);
+            e.Property(x => x.FastingHoursMin);
+            e.Property(x => x.FastingHoursMax);
             e.Property(x => x.CollectionType).HasMaxLength(40);
             e.Property(x => x.PatientInstruction).HasMaxLength(1000);
             e.Property(x => x.SpecimenTypeId);

@@ -1,6 +1,7 @@
 using System.Globalization;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.LabReception;
+using IMed.Api.Application.Organizations;
 using IMed.Api.Application.Profile;
 
 namespace IMed.Api.Application.LabResults;
@@ -26,6 +27,7 @@ public sealed class GetLabReportPdfHandler(
     IHapiFhirClient hapi,
     ILabOperationsRepository ops,
     IOrganizationProfileRepository orgRepo,
+    IOrganizationBrandingRepository branding,
     ILabReportPdfRenderer renderer,
     TimeProvider timeProvider)
 {
@@ -47,6 +49,7 @@ public sealed class GetLabReportPdfHandler(
         }
 
         var orgProfile = await orgRepo.GetByIdAsync(query.OrganizationId, ct);
+        var logo = await branding.GetLogoAsync(query.OrganizationId, ct);
         var patient = await hapi.GetPatientAsync(report.PatientFhirId, partition, ct);
 
         OrderIntakeContext intakeCtx = default;
@@ -70,7 +73,10 @@ public sealed class GetLabReportPdfHandler(
         var isFinal = string.Equals(report.Status, "final", StringComparison.OrdinalIgnoreCase);
 
         var model = new LabReportPdfModel(
-            Organization: new PdfOrgInfo(orgProfile?.Name ?? "Laboratorio", TaxId: null),
+            Organization: new PdfOrgInfo(
+                orgProfile?.Name ?? "Laboratorio",
+                TaxId: null,
+                Logo: logo?.ToPdfLogo(query.OrganizationId)),
             Patient: new PdfPatientInfo(
                 DisplayName: patient?.DisplayName ?? $"Paciente {report.PatientFhirId}",
                 BirthDate: patient?.BirthDate,

@@ -41,7 +41,7 @@ public sealed class InvoiceIssuanceTests(ImedApiFixture fixture) : IAsyncLifetim
         var sp = scope.ServiceProvider;
         var db = sp.GetRequiredService<AppDbContext>();
 
-        var sede = OrganizationLocation.Create(orgId, "CENTRAL", "Sede central", isDefault: true);
+        var sede = TestSedes.Create(db, orgId, "CENTRAL", "Sede central", isDefault: true);
         if (!string.IsNullOrEmpty(establecimiento))
         {
             sede.SetFiscalEstablishmentCode(establecimiento);
@@ -77,11 +77,11 @@ public sealed class InvoiceIssuanceTests(ImedApiFixture fixture) : IAsyncLifetim
     }
 
     private static async Task CobrarAsync(
-        IServiceProvider sp, Escenario e, Guid itemId, string sourceId, decimal cantidad = 1m)
+        IServiceProvider sp, Escenario e, Guid itemId, string sourceId, decimal cantidad = 1m, Guid? sede = null)
     {
         var r = await sp.GetRequiredService<CaptureChargeHandler>().HandleAsync(
             new CaptureChargeCommand(
-                e.OrgId, e.AccountId, itemId, ChargeSourceKind.LabOrder, sourceId, cantidad));
+                e.OrgId, e.AccountId, itemId, ChargeSourceKind.LabOrder, sourceId, cantidad, LocationId: sede));
         r.Succeeded.Should().BeTrue(r.Rejected);
     }
 
@@ -414,5 +414,46 @@ public sealed class InvoiceIssuanceTests(ImedApiFixture fixture) : IAsyncLifetim
             .HandleAsync(Guid.NewGuid(), emitida.Invoice!.Id);
 
         deOtra.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UnaSedeDeOtraRazonSocial_emiteConSuPropioRtn()
+    {
+        // FAC-9: una cadena con dos personas jurídicas. El RTN de la factura es el de la razón
+        // social de la sede que emite, no el del régimen de la organización.
+        var e = await ArrangeAsync();
+        using var scope = fixture.Factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+        var db = sp.GetRequiredService<AppDbContext>();
+
+        var razonNorte = IMed.Api.Domain.Organizations.LegalEntity.Create(
+            e.OrgId, "Clínica del Norte S.A.", "08011999123456", "Col. Kennedy", tradeName: "Clínica del Norte");
+        db.LegalEntities.Add(razonNorte);
+        var norte = OrganizationLocation.Create(
+            e.OrgId, "NORTE", "Sede Norte", razonNorte.Id, address: "Bulevar Kennedy");
+        norte.SetFiscalEstablishmentCode("002");
+        db.OrganizationLocations.Add(norte);
+        await db.SaveChangesAsync();
+
+        // Mismo CAI y mismo punto de emisión que la sede central: lo que distingue los números
+        // es el establecimiento. Antes de FAC-9 el índice único lo impedía (D6).
+        await sp.GetRequiredService<RegisterFiscalAuthorizationHandler>().HandleAsync(
+            new RegisterFiscalAuthorizationCommand(
+                e.OrgId, norte.Id, e.FacturaTypeId, "A1B2C3-D4E5F6-A7B8C9", "002",
+                1, 500, new DateOnly(2027, 12, 31)));
+
+        // El servicio se prestó en Norte: lo factura Norte.
+        await CobrarAsync(sp, e, e.ExentoItemId, "sr-norte", sede: norte.Id);
+        var r = await sp.GetRequiredService<IssueInvoiceHandler>().HandleAsync(
+            new IssueInvoiceCommand(e.OrgId, e.AccountId, norte.Id, e.FacturaTypeId));
+
+        r.Succeeded.Should().BeTrue(r.Rejected?.Message);
+        r.Invoice!.FiscalDocument!.FullNumber.Should().Be("002-002-01-00000001");
+
+        var doc = db.FiscalDocuments.Single(d => d.Id == r.Invoice.FiscalDocument.Id);
+        doc.IssuerTaxId.Should().Be("08011999123456", "emite la razón social de la sede, no la de la organización");
+        doc.IssuerLegalName.Should().Be("Clínica del Norte S.A.");
+        doc.LegalEntityId.Should().Be(razonNorte.Id);
+        doc.EstablishmentAddress.Should().Be("Bulevar Kennedy");
     }
 }

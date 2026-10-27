@@ -36,6 +36,8 @@ public sealed class UpsertPractitionerProfilePersistence(
                     practitionerRoleFhirId: input.PractitionerRoleFhirId,
                     timeProvider: timeProvider);
                 dbContext.UserPractitionerAssignments.Add(assignment);
+                // Rol nuevo: sus sedes las escribe la sincronización (FAC-9).
+                PractitionerLocationsOutbox.Enqueue(dbContext, input.OrganizationId, input.KeycloakUserId);
             }
             else
             {

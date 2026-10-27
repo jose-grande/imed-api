@@ -115,18 +115,8 @@ public sealed class LocationsTests(ImedApiFixture fixture) : IAsyncLifetime
             "desactivar la única sede dejaría a la organización sin dónde operar");
     }
 
-    [Fact]
-    public async Task SinAsignaciones_elUsuarioVeTodasLasSedesDeSuOrganizacion()
-    {
-        var (client, _, _) = await AuthedOrgAsync();
-        await client.PostAsJsonAsync("/api/locations", new { code = "SUR", name = "Sucursal Sur" });
-
-        var mias = await (await client.GetAsync("/api/locations/mine")).Content.ReadFromJsonAsync<List<MyLocationDto>>();
-
-        mias.Should().HaveCount(2,
-            "en una clínica de una sede nadie asigna a nadie; exigirlo convertiría el eje en un trámite");
-        mias!.Where(l => l.IsPrimary).Should().ContainSingle().Which.IsDefault.Should().BeTrue();
-    }
+    // FAC-9: "sin asignaciones ve todas" dejó de ser cierto. Un usuario sin sede queda asignado a
+    // la principal; lo cubre UserLocationsTests.UnUsuarioSinSede_quedaAsignadoALaPrincipal_yNoVeLasDemas.
 
     [Fact]
     public async Task ConAsignacion_elUsuarioSoloVeSusSedes()
@@ -155,16 +145,19 @@ public sealed class LocationsTests(ImedApiFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task LaSedeDeclaradaEnElHeader_mandaSobreLaInferida()
     {
-        var (client, _, _) = await AuthedOrgAsync("lab_tech", "org_admin");
+        var (client, _, userId) = await AuthedOrgAsync("lab_tech", "org_admin");
         var sur = await (await client.PostAsJsonAsync("/api/locations", new { code = "SUR", name = "Sucursal Sur" }))
             .Content.ReadFromJsonAsync<LocationDto>();
+        // Desde FAC-9 el usuario solo declara sedes donde está asignado: el fundador nace en la
+        // principal y hay que habilitarlo en la Sur.
+        await client.PostAsJsonAsync($"/api/locations/{sur!.Id}/users/{userId}", new { makePrimary = false });
 
         var enc = $"enc-{Guid.NewGuid():N}";
         fixture.Hapi.SeedServiceRequest("pat-sede-1", "CMP", "Perfil metabolico completo", encounter: enc, requisition: enc);
 
         // El usuario declara que está parado en la Sucursal Sur. Es lo que hace que el selector
         // de sede signifique algo: sin esto el backend inferiría siempre la principal.
-        client.DefaultRequestHeaders.Add("X-IMed-Location", sur!.Id.ToString());
+        client.DefaultRequestHeaders.Add("X-IMed-Location", sur.Id.ToString());
 
         await client.PostAsJsonAsync("/api/lab/reception/check-in", new { requisition = enc });
         await client.PostAsJsonAsync("/api/lab/reception/collection-plan", new { requisition = enc });

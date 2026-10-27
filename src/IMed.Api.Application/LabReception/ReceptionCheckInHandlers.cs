@@ -86,7 +86,7 @@ public sealed class CheckInOrderHandler(
         // Último y aparte: el cargo. `CaptureLabOrderChargesHandler` no propaga excepciones, así
         // que la admisión que acaba de ocurrir no se deshace por un problema de facturación.
         var cobro = cobrables.Count > 0
-            ? await billing.HandleAsync(orgId, cobrables, ct)
+            ? await billing.HandleAsync(orgId, cobrables, locationId, ct)
             : null;
 
         return new CheckInResult(

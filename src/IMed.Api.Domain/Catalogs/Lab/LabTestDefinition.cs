@@ -34,8 +34,27 @@ public sealed class LabTestDefinition
 
     public LabDepartment Department { get; private set; } = LabDepartment.Other;
 
-    /// <summary>Horas de ayuno requeridas. Null = no requiere ayuno.</summary>
-    public int? FastingHours { get; private set; }
+    /// <summary>
+    /// Mínimo de horas de ayuno requeridas. Null = la prueba no requiere ayuno.
+    /// </summary>
+    public int? FastingHoursMin { get; private set; }
+
+    /// <summary>
+    /// Máximo de horas de ayuno admitidas. Null = sin cota superior.
+    /// </summary>
+    /// <remarks>
+    /// Es un rango y no un número porque así lo especifican los laboratorios: un perfil
+    /// lipídico pide <b>9 a 12 horas</b>, y un ayuno de 20 h altera los triglicéridos tanto
+    /// como uno de 4. Con un solo valor había que elegir: puesto en 12 se rechazaba a quien
+    /// llegaba con 10; puesto en 9 pasaba quien llegaba con 20.
+    ///
+    /// <para>Una glucosa, en cambio, pide «al menos 8 h» y no tiene cota superior: por eso
+    /// el máximo es opcional y no se asume igual al mínimo.</para>
+    /// </remarks>
+    public int? FastingHoursMax { get; private set; }
+
+    /// <summary>¿Esta prueba exige ayuno?</summary>
+    public bool RequiresFasting => FastingHoursMin is > 0;
 
     /// <summary>Tipo de recolección. Ej: "blood", "urine-spot", "urine-24h", "swab".</summary>
     public string? CollectionType { get; private set; }
@@ -85,7 +104,8 @@ public sealed class LabTestDefinition
         string? loincCode = null,
         string? unit = null,
         LabDepartment department = LabDepartment.Other,
-        int? fastingHours = null,
+        int? fastingHoursMin = null,
+        int? fastingHoursMax = null,
         string? collectionType = null,
         string? patientInstruction = null,
         Guid? organizationId = null,
@@ -101,6 +121,15 @@ public sealed class LabTestDefinition
             throw new ArgumentException("Name es obligatorio.", nameof(name));
         }
 
+        // Un rango invertido no es un dato raro, es un dato imposible: ninguna hora de
+        // ayuno lo satisface, y la prueba quedaría inrecibible sin que nada lo explique.
+        if (fastingHoursMin is int min && fastingHoursMax is int max && max < min)
+        {
+            throw new ArgumentException(
+                $"El máximo de ayuno ({max} h) no puede ser menor que el mínimo ({min} h).",
+                nameof(fastingHoursMax));
+        }
+
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         return new LabTestDefinition
         {
@@ -112,7 +141,8 @@ public sealed class LabTestDefinition
             Datatype = datatype,
             Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim(),
             Department = department,
-            FastingHours = fastingHours,
+            FastingHoursMin = fastingHoursMin,
+            FastingHoursMax = fastingHoursMax,
             CollectionType = string.IsNullOrWhiteSpace(collectionType) ? null : collectionType.Trim(),
             PatientInstruction = string.IsNullOrWhiteSpace(patientInstruction) ? null : patientInstruction.Trim(),
             Active = active,
@@ -127,7 +157,8 @@ public sealed class LabTestDefinition
         string? loincCode,
         string? unit,
         LabDepartment department,
-        int? fastingHours,
+        int? fastingHoursMin,
+        int? fastingHoursMax,
         string? collectionType,
         string? patientInstruction,
         TimeProvider? timeProvider = null)
@@ -136,12 +167,23 @@ public sealed class LabTestDefinition
         {
             throw new ArgumentException("Name es obligatorio.", nameof(name));
         }
+
+        // Un rango invertido no es un dato raro, es un dato imposible: ninguna hora de
+        // ayuno lo satisface, y la prueba quedaría inrecibible sin que nada lo explique.
+        if (fastingHoursMin is int min && fastingHoursMax is int max && max < min)
+        {
+            throw new ArgumentException(
+                $"El máximo de ayuno ({max} h) no puede ser menor que el mínimo ({min} h).",
+                nameof(fastingHoursMax));
+        }
+
         Name = name.Trim();
         Datatype = datatype;
         LoincCode = string.IsNullOrWhiteSpace(loincCode) ? null : loincCode.Trim();
         Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim();
         Department = department;
-        FastingHours = fastingHours;
+        FastingHoursMin = fastingHoursMin;
+        FastingHoursMax = fastingHoursMax;
         CollectionType = string.IsNullOrWhiteSpace(collectionType) ? null : collectionType.Trim();
         PatientInstruction = string.IsNullOrWhiteSpace(patientInstruction) ? null : patientInstruction.Trim();
         Touch(timeProvider);

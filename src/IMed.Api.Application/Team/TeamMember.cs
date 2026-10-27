@@ -23,4 +23,10 @@ public sealed record TeamMember
     public string? SpecialtyCode { get; init; }
     public string? SpecialtyDisplay { get; init; }
     public bool IsActive { get; init; }
+
+    /// <summary>Sedes donde trabaja, la principal primero (FAC-9). Nunca vacía para un miembro activo.</summary>
+    public IReadOnlyList<TeamMemberLocation> Locations { get; init; } = [];
 }
+
+/// <summary>Sede de un miembro del equipo.</summary>
+public sealed record TeamMemberLocation(Guid Id, string Code, string Name, bool IsPrimary);

@@ -44,23 +44,42 @@ public static class BillingReportEndpoints
     }
 
     private static async Task<IResult> CashCutAsync(
-        DateOnly? day, Guid? cashPointId, ClaimsPrincipal principal,
+        DateOnly? day, Guid? cashPointId, Guid? legalEntityId, ClaimsPrincipal principal,
         GetDailyCashCutHandler handler, CancellationToken ct)
     {
         var orgId = ParseOrganizationId(principal);
-        return orgId is null
-            ? Forbidden()
-            : Results.Ok(await handler.HandleAsync(orgId.Value, day, cashPointId, ct));
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(orgId.Value, day, cashPointId, legalEntityId, ct));
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Falta la razón social", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     private static async Task<IResult> TaxAsync(
-        DateOnly? since, DateOnly? until, ClaimsPrincipal principal,
+        DateOnly? since, DateOnly? until, Guid? legalEntityId, ClaimsPrincipal principal,
         GetTaxReportHandler handler, CancellationToken ct)
     {
         var orgId = ParseOrganizationId(principal);
-        return orgId is null
-            ? Forbidden()
-            : Results.Ok(await handler.HandleAsync(orgId.Value, since, until, ct));
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        // Un reporte de ISV por razón social (FAC-9): cada RTN declara por separado.
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(orgId.Value, since, until, legalEntityId, ct));
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Falta la razón social", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     private static async Task<IResult> LedgerAsync(

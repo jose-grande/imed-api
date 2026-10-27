@@ -21,7 +21,8 @@ public sealed record ApproveJoinRequestCommand(
     Guid JoinRequestId,
     Guid OrganizationId,
     Guid ResolvedBy,
-    InvitationRole Role = InvitationRole.Practitioner);
+    InvitationRole Role = InvitationRole.Practitioner,
+    IReadOnlyList<Guid>? LocationIds = null);
 
 public sealed record ApproveJoinRequestResult(
     Guid JoinRequestId,

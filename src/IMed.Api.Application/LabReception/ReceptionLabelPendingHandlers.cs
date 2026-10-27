@@ -107,7 +107,8 @@ public sealed class GetCollectionQueueHandler(
             items.Add(new CollectionQueueItem(
                 o.Id, o.PatientFhirId, o.EncounterFhirId, o.LoincCode, o.CodeText,
                 st?.Code ?? "UNKNOWN", st?.Name ?? "Sin clasificar",
-                st?.DefaultMethod, st?.DefaultBodySite, resolution.FastingHours, o.Priority));
+                st?.DefaultMethod, st?.DefaultBodySite,
+                resolution.Fasting.MinHours, resolution.Fasting.MaxHours, o.Priority));
         }
         return items;
     }

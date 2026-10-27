@@ -22,7 +22,7 @@ namespace IMed.Api.Application.FhirGateway;
 /// es una de las formas que declaramos?" y sale de SEC-4. Se marcan con etapas distintas para que
 /// la segunda pueda correr en sombra mientras la primera bloquea.</para>
 /// </summary>
-public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
+public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules, FhirLocationGuard locationGuard)
 {
     /// <summary>Tope de entradas de un Bundle. Más que eso no es una transacción, es una carga masiva.</summary>
     private const int MaxBundleEntries = 200;
@@ -37,7 +37,9 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
     /// </summary>
     public static bool RequiresBody(FhirRequestDescriptor request) =>
         request.IsBundle
-        || (IsWrite(request.Verb) && request.ResourceType == FhirAccessCatalog.ObservationResource);
+        || (IsWrite(request.Verb) && request.ResourceType == FhirAccessCatalog.ObservationResource)
+        || (IsWrite(request.Verb) && request.ResourceType == FhirAccessCatalog.ProvenanceResource)
+        || FhirLocationGuard.Applies(request);
 
     public Task<FhirAccessDecision> EvaluateAsync(
         FhirCallerContext caller,
@@ -92,7 +94,14 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
         // 4. Recursos con circuito de negocio: lectura sí, escritura jamás por acá.
         if (IsWrite(request.Verb))
         {
-            if (FhirAccessCatalog.WriteProtectedResources.Contains(request.ResourceType))
+            // Única excepción, y vive en código como el resto de los invariantes: el cierre de consulta
+            // deja constancia de qué antecedentes cambió (Épica P). Solo alta y solo sobre
+            // antecedentes; cualquier otra Provenance sigue siendo del circuito de laboratorio.
+            var signsHistory = request.ResourceType == FhirAccessCatalog.ProvenanceResource
+                && request.Verb == FhirVerb.Create
+                && CheckProvenanceTargets(body).Allowed;
+
+            if (FhirAccessCatalog.WriteProtectedResources.Contains(request.ResourceType) && !signsHistory)
             {
                 return FhirAccessDecision.Deny(
                     $"'{request.ResourceType}' solo se escribe por los endpoints de negocio, que validan estado y rol.",
@@ -107,6 +116,13 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
                     return category;
                 }
             }
+
+            // Citas y encuentros ocurren en una sede donde el médico trabaja (FAC-9).
+            if (await locationGuard.CheckAsync(caller, request, body, ct) is { } sinSede)
+            {
+                return sinSede;
+            }
+
         }
 
         // 5. Acotado de la búsqueda antes de mirar permisos: una consulta mal formada se rechaza
@@ -169,6 +185,68 @@ public sealed class FhirAccessEvaluator(IFhirAccessRuleRepository rules)
 
     private static bool IsWrite(FhirVerb verb) =>
         verb is FhirVerb.Create or FhirVerb.Update or FhirVerb.Delete;
+
+    /// <summary>
+    /// Deja escribir una <c>Provenance</c> solo si firma antecedentes.
+    ///
+    /// <para>El laboratorio usa <c>Provenance</c> como cadena de custodia; una escrita desde el
+    /// navegador sobre un resultado sería una firma de validación fabricada. El motivo largo está en
+    /// <see cref="FhirAccessCatalog.PublicProvenanceTargets"/>.</para>
+    ///
+    /// <para>Las referencias <c>urn:uuid</c> apuntan a otras entradas del mismo Bundle, que se
+    /// evalúan con estas mismas reglas: lo que no se puede escribir por acá no llega a existir como
+    /// destino.</para>
+    /// </summary>
+    private static FhirAccessDecision CheckProvenanceTargets(string? body)
+    {
+        const string resource = FhirAccessCatalog.ProvenanceResource;
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return FhirAccessDecision.Deny("No se pudo leer el cuerpo de la Provenance.", resource);
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(body);
+        }
+        catch (JsonException)
+        {
+            return FhirAccessDecision.Deny("La Provenance no es JSON válido.", resource);
+        }
+
+        using (document)
+        {
+            if (!document.RootElement.TryGetProperty("target", out var targets)
+                || targets.ValueKind != JsonValueKind.Array
+                || targets.GetArrayLength() == 0)
+            {
+                return FhirAccessDecision.Deny("Una Provenance sin destino no firma nada.", resource);
+            }
+
+            foreach (var target in targets.EnumerateArray())
+            {
+                var reference = target.TryGetProperty("reference", out var r) ? r.GetString() : null;
+                if (string.IsNullOrWhiteSpace(reference))
+                {
+                    return FhirAccessDecision.Deny("Un destino de la Provenance no tiene referencia.", resource);
+                }
+                if (reference.StartsWith("urn:uuid:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var type = reference.Split('/')[0];
+                if (!FhirAccessCatalog.PublicProvenanceTargets.Contains(type))
+                {
+                    return FhirAccessDecision.Deny(
+                        $"Una Provenance sobre '{type}' solo se escribe desde su circuito; por acá se firman antecedentes.",
+                        resource);
+                }
+            }
+        }
+
+        return FhirAccessDecision.Allow();
+    }
 
     /// <summary>
     /// Deja escribir una <c>Observation</c> según su categoría.

@@ -16,7 +16,12 @@ public sealed class MeStreamTests(ImedApiFixture fixture) : IAsyncLifetime
     {
         // Arrange: usuario que va a hacer bootstrap. Forzamos KC fail 1 vez para que el dispatch
         // pase por el worker (ese es el path que publica al bus).
-        fixture.Keycloak.EnableFailing(putUserCalls: 1);
+        // Dos fallos y no uno: el procesador corre cada segundo y puede tomar el evento antes de
+        // que el hot-path llegue a Keycloak (el alta aprovisiona razón social y sedes en el medio,
+        // FAC-9). Con un solo fallo, el que llega primero lo consume y el otro sincroniza bien; si
+        // el que sincroniza es el hot-path, nadie publica. Con dos, el despacho exitoso es siempre
+        // el del procesador, que es el camino que esta prueba verifica.
+        fixture.Keycloak.EnableFailing(putUserCalls: 2);
         var userId = Guid.NewGuid();
         fixture.Keycloak.RegisterUser(userId, "stream.user");
         var token = fixture.Keycloak.IssueUserToken(userId, preferredUsername: "stream.user");

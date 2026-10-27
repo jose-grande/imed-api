@@ -73,7 +73,9 @@ public sealed class BootstrapHappyPathTests(ImedApiFixture fixture) : IAsyncLife
         // No lo exigimos en el happy path porque el evento se marca dispatched ANTES de que el
         // worker lo procese — el worker no lo verá pendiente.
 
-        var outbox = await db.OutboxEvents.SingleAsync();
+        // Solo el evento del alta: desde FAC-9 el alta también encola la proyección de la sede
+        // principal y de las sedes del fundador, que no son lo que esta prueba mira.
+        var outbox = await db.OutboxEvents.SingleAsync(e => e.Type == "organization.bootstrapped");
         outbox.DispatchedAt.Should().NotBeNull("el hot-path marcó el evento dispatched");
         outbox.AttemptCount.Should().Be(0);
     }

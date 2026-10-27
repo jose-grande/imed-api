@@ -2,6 +2,7 @@ using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Abstractions.Email;
 using IMed.Api.Application.Abstractions.Terminology;
 using IMed.Api.Application.Allergies;
+using IMed.Api.Application.Preclinic;
 using IMed.Api.Application.Authorization;
 using IMed.Api.Application.Billing;
 using IMed.Api.Application.Catalogs;
@@ -33,6 +34,7 @@ using IMed.Api.Infrastructure.Billing;
 using IMed.Api.Infrastructure.Email;
 using IMed.Api.Infrastructure.Hapi;
 using IMed.Api.Infrastructure.Identifiers;
+using IMed.Api.Infrastructure.Imaging;
 using IMed.Api.Infrastructure.Keycloak;
 using IMed.Api.Infrastructure.Notifications;
 using IMed.Api.Infrastructure.Lab;
@@ -145,6 +147,10 @@ public static class DependencyInjection
         services.AddSingleton<IInvoicePdfRenderer, InvoicePdfRenderer>();
         services.AddSingleton<ILabReportPdfRenderer, LabReportPdfRenderer>();
         services.AddSingleton<ISpecimenLabelPdfRenderer, SpecimenLabelPdfRenderer>();
+
+        // Identifica el logo que sube la organización por su contenido. Sin estado y sin
+        // dependencias: singleton.
+        services.AddSingleton<IImageInspector, ImageSharpImageInspector>();
         return services;
     }
 
@@ -216,6 +222,9 @@ public static class DependencyInjection
         services.AddScoped<IOutboxDispatcher, InvitationEmailPendingDispatcher>();
         services.AddScoped<IOutboxDispatcher, InvitationLazyProvisionPendingDispatcher>();
         services.AddScoped<IOutboxDispatcher, TeamRoleChangedDispatcher>();
+        services.AddScoped<IOutboxDispatcher, LocationFhirSyncDispatcher>();
+        services.AddScoped<IOutboxDispatcher, PractitionerLocationsSyncDispatcher>();
+        services.AddScoped<LocationFhirProjector>();
 
         services.AddHostedService<OutboxProcessor>();
 
@@ -223,6 +232,11 @@ public static class DependencyInjection
         // navegador después del cierre, fuera de la transacción: si se pierde, la orden nunca llega
         // al laboratorio y nadie se entera. Esto la repara sin importar la causa.
         services.AddHostedService<LabOrderReconciliation>();
+
+        // Encuentros de preclínica que nadie atendió (Épica P, P-D2).
+        services.Configure<IMed.Api.Infrastructure.Encounters.PlannedEncounterSweepOptions>(
+            configuration.GetSection(IMed.Api.Infrastructure.Encounters.PlannedEncounterSweepOptions.SectionName));
+        services.AddHostedService<IMed.Api.Infrastructure.Encounters.PlannedEncounterSweep>();
         return services;
     }
 
@@ -243,6 +257,7 @@ public static class DependencyInjection
 
         services.AddScoped<IBootstrapOrganizationPersistence, BootstrapOrganizationPersistence>();
         services.AddScoped<IOrganizationProfileRepository, OrganizationProfileRepository>();
+        services.AddScoped<IOrganizationBrandingRepository, OrganizationBrandingRepository>();
         services.AddScoped<IAppAuditLog, AppAuditLog>();
         services.AddScoped<IFormDefinitionRepository, FormDefinitionRepository>();
         services.AddScoped<ISpecialtyRepository, SpecialtyRepository>();
@@ -261,10 +276,12 @@ public static class DependencyInjection
         services.AddScoped<IPermissionMatrixRepository, PermissionMatrixRepository>();
         services.AddScoped<IFhirAccessRuleRepository, FhirAccessRuleRepository>();
         services.AddScoped<FhirAccessEvaluator>();
+        services.AddScoped<FhirLocationGuard>();
         services.AddScoped<GetPermissionMatrixHandler>();
         services.AddScoped<SetPermissionGrantHandler>();
         services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<ILocationProvisioning, LocationProvisioning>();
+        services.AddScoped<ILegalEntityRepository, LegalEntityRepository>();
 
         // Motor fiscal (FAC-2). El adaptador se registra en la colección y se resuelve por
         // `regime_code`: agregar facturación electrónica u otro país es sumar una línea acá, no
@@ -337,6 +354,9 @@ public static class DependencyInjection
     private static IServiceCollection AddUseCases(this IServiceCollection services)
     {
         services.AddScoped<BootstrapOrganizationHandler>();
+        services.AddScoped<SetOrganizationLogoHandler>();
+        services.AddScoped<GetOrganizationLogoHandler>();
+        services.AddScoped<RemoveOrganizationLogoHandler>();
         services.AddScoped<GetMyProfileHandler>();
 
         // Forms
@@ -393,6 +413,11 @@ public static class DependencyInjection
         // Lab orders PDF (Épica L5)
         services.AddScoped<GetLabOrderPdfHandler>();
 
+        // Preclínica (Épica P-1): contexto acotado a la cita + envío en una transacción
+        services.AddScoped<GetPreclinicContextHandler>();
+        services.AddScoped<SubmitPreclinicHandler>();
+        services.AddScoped<AllergyDedupeHandler>();
+
         // Lab orders gateway del médico (LIS-RD-09): create/update/get/list por imed-api
         services.AddScoped<UpsertLabOrderHandler>();
         services.AddScoped<AllocateOrderNumberHandler>();
@@ -438,10 +463,16 @@ public static class DependencyInjection
         services.AddScoped<ListLocationsHandler>();
         services.AddScoped<ListMyLocationsHandler>();
         services.AddScoped<CreateLocationHandler>();
+        services.AddScoped<LegalEntityChoice>();
+        services.AddScoped<ListLegalEntitiesHandler>();
+        services.AddScoped<UpdateLegalEntityHandler>();
         services.AddScoped<UpdateLocationHandler>();
         services.AddScoped<SetEstablishmentCodeHandler>();
         services.AddScoped<AssignUserToLocationHandler>();
         services.AddScoped<UnassignUserFromLocationHandler>();
+        services.AddScoped<SetUserLocationsHandler>();
+        services.AddScoped<ListLocationPractitionersHandler>();
+        services.AddScoped<LegalEntityScopeResolver>();
 
         // Motor fiscal (FAC-2).
         services.AddScoped<GetFiscalSetupHandler>();

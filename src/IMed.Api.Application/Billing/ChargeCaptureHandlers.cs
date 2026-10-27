@@ -2,6 +2,7 @@ using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Billing;
 using IMed.Api.Domain.Billing.Accounts;
 using IMed.Api.Domain.Billing.Catalog;
+using IMed.Api.Application.Locations;
 
 namespace IMed.Api.Application.Billing;
 
@@ -25,7 +26,8 @@ public sealed record ChargeDto(
     string SourceId,
     string? SourceFhirRef,
     string? Reason,
-    DateTimeOffset PerformedAt);
+    DateTimeOffset PerformedAt,
+    Guid LocationId);
 
 /// <summary>
 /// Qué pasó al intentar capturar un cargo.
@@ -51,7 +53,7 @@ public static class ChargeMapper
         new(c.Id, c.AccountId, c.BillableItemId, c.DescriptionSnapshot, c.Quantity, c.UnitPrice,
             c.PriceSource.ToString(), priceListName, c.DiscountAmount, c.DiscountAuthorizedBy,
             c.TaxRate, c.NetAmount, c.TaxAmount, c.Total, c.Status.ToString(),
-            c.SourceKind.ToString(), c.SourceId, c.SourceFhirRef, c.Reason, c.PerformedAt);
+            c.SourceKind.ToString(), c.SourceId, c.SourceFhirRef, c.Reason, c.PerformedAt, c.LocationId);
 }
 
 public sealed record CaptureChargeCommand(
@@ -68,7 +70,8 @@ public sealed record CaptureChargeCommand(
     string? PerformerPractitionerId = null,
     string? SourceFhirRef = null,
     string? Reason = null,
-    Guid? PayerContractId = null);
+    Guid? PayerContractId = null,
+    Guid? LocationId = null);
 
 /// <summary>
 /// Captura un cargo en una cuenta (FAC-4).
@@ -87,7 +90,8 @@ public sealed class CaptureChargeHandler(
     IBillingCatalogRepository catalog,
     IFiscalRepository fiscal,
     IAuthorizationLimitRepository limits,
-    IClinicClock clock)
+    IClinicClock clock,
+    ResolveActiveLocationHandler activeLocation)
 {
     public async Task<ChargeCaptureResult> HandleAsync(
         CaptureChargeCommand cmd, CancellationToken ct = default)
@@ -138,6 +142,11 @@ public sealed class CaptureChargeHandler(
             }
         }
 
+        // Sede del servicio (FAC-9): la que diga el origen —la orden de laboratorio sabe dónde se
+        // admitió— o la sede activa de quien registra el cargo, que es donde está atendiendo.
+        var sede = cmd.LocationId
+            ?? await activeLocation.HandleAsync(cmd.OrganizationId, cmd.RequestedByUserId, null, ct);
+
         var cargo = BillingCharge.Capture(
             cmd.OrganizationId, cuenta.Id, item.Id, item.Name,
             cmd.Quantity, precio.Price, precio.Source, tributo.Id, tributo.Rate,
@@ -149,7 +158,8 @@ public sealed class CaptureChargeHandler(
             performedAt: cmd.PerformedAt,
             performerPractitionerId: cmd.PerformerPractitionerId,
             sourceFhirRef: cmd.SourceFhirRef,
-            reason: cmd.Reason);
+            reason: cmd.Reason,
+            locationId: sede);
 
         // Segunda capa: la base decide si dos caminos llegaron a la vez.
         if (await accounts.TryAddChargeAsync(cargo, ct))

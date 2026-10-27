@@ -37,6 +37,33 @@ public sealed class FormDefinitionsTests(ImedApiFixture fixture) : IAsyncLifetim
     }
 
     [Fact]
+    public async Task LaVersionNueva_seSuma_sinRetirarLaAnterior_yEsLaQueSeResuelve()
+    {
+        // Épica P-4: pediatría y prenatal 1.1.0 llevan los antecedentes al widget. La 1.0.0 sigue
+        // publicada porque los QR históricos apuntan a ella.
+        await Task.Delay(500);
+
+        using var scope = fixture.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pediatria = await db.FormDefinitions
+            .Where(x => x.OrganizationId == null && x.Code == "pediatria" && x.Status == FormStatus.Published)
+            .Select(x => x.Version)
+            .ToListAsync();
+        pediatria.Should().BeEquivalentTo(["1.0.0", "1.1.0"]);
+
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId, "med.test");
+        var client = fixture.CreateClientWithToken(fixture.Keycloak.IssueUserToken(
+            userId, organizationId: Guid.NewGuid().ToString(), preferredUsername: "med.test"));
+
+        var dto = await client.GetFromJsonAsync<FormDefinitionResponseDto>("/api/forms/by-specialty/394537008");
+        dto!.Version.Should().Be("1.1.0");
+        var schema = System.Text.Json.JsonSerializer.Serialize(dto.SchemaJson);
+        schema.Should().Contain("\"type\":\"history\"").And.Contain("\"section\":\"immunizations\"");
+        schema.Should().NotContain("vaccinations", "la vacunación ya no se pregunta como texto");
+    }
+
+    [Fact]
     public async Task GetBySpecialty_general_devuelveElPresetGlobal()
     {
         await Task.Delay(500); // esperar seeders

@@ -344,6 +344,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("discount_authorized_by");
 
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
@@ -1049,12 +1053,12 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OrganizationId", "Cai", "DocumentTypeId", "EmissionPointCode")
-                        .IsUnique()
-                        .HasDatabaseName("ux_fiscal_authorization_org_cai_type_point");
-
                     b.HasIndex("OrganizationId", "LocationId", "DocumentTypeId", "Status")
                         .HasDatabaseName("ix_fiscal_authorization_org_location_type_status");
+
+                    b.HasIndex("OrganizationId", "LocationId", "Cai", "DocumentTypeId", "EmissionPointCode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_fiscal_authorization_org_location_cai_type_point");
 
                     b.ToTable("fiscal_authorization", (string)null);
                 });
@@ -1338,6 +1342,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(3)")
                         .HasColumnName("emission_point_code");
 
+                    b.Property<string>("EstablishmentAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("establishment_address");
+
                     b.Property<string>("EstablishmentCode")
                         .IsRequired()
                         .HasMaxLength(3)
@@ -1367,10 +1376,29 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("issued_at");
 
+                    b.Property<string>("IssuerFiscalAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("issuer_fiscal_address");
+
+                    b.Property<string>("IssuerLegalName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("issuer_legal_name");
+
                     b.Property<string>("IssuerTaxId")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("issuer_tax_id");
+
+                    b.Property<string>("IssuerTradeName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("issuer_trade_name");
+
+                    b.Property<Guid?>("LegalEntityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("legal_entity_id");
 
                     b.Property<DateOnly>("LimitDateSnapshot")
                         .HasColumnType("date")
@@ -1511,6 +1539,14 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly>("IssueDate")
                         .HasColumnType("date")
                         .HasColumnName("issue_date");
+
+                    b.Property<Guid?>("LegalEntityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("legal_entity_id");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
 
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
@@ -2313,9 +2349,13 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("department");
 
-                    b.Property<int?>("FastingHours")
+                    b.Property<int?>("FastingHoursMax")
                         .HasColumnType("integer")
-                        .HasColumnName("fasting_hours");
+                        .HasColumnName("fasting_hours_max");
+
+                    b.Property<int?>("FastingHoursMin")
+                        .HasColumnType("integer")
+                        .HasColumnName("fasting_hours_min");
 
                     b.Property<string>("LoincCode")
                         .HasMaxLength(20)
@@ -2934,6 +2974,71 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("DisplayEs"), new[] { "gin_trgm_ops" });
 
                     b.ToTable("specialty_catalog", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Encounters.EncounterHistoryDraft", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CommittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("committed_at");
+
+                    b.Property<Guid?>("CommittedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("committed_by");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EncounterFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("encounter_fhir_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("PatientFhirId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("patient_fhir_id");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload_json");
+
+                    b.Property<string>("ProvenanceFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("provenance_fhir_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "EncounterFhirId")
+                        .IsUnique();
+
+                    b.ToTable("encounter_history_drafts", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Forms.FormDefinition", b =>
@@ -3814,6 +3919,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("active");
 
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("address");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -3833,6 +3943,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_default");
 
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("legal_entity_id");
+
                     b.Property<string>("LocationFhirId")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
@@ -3848,11 +3962,19 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
 
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("phone");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("ix_organization_location_legal_entity");
 
                     b.HasIndex("OrganizationId")
                         .IsUnique()
@@ -3901,6 +4023,122 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_user_location_org_user");
 
                     b.ToTable("user_location", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Organizations.LegalEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("FiscalAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("fiscal_address");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_default");
+
+                    b.Property<string>("LegalName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("legal_name");
+
+                    b.Property<string>("OrganizationFhirId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("organization_fhir_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("phone");
+
+                    b.Property<string>("TaxId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("tax_id");
+
+                    b.Property<string>("TradeName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("trade_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_legal_entity_org_default")
+                        .HasFilter("is_default");
+
+                    b.HasIndex("OrganizationId", "TaxId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_legal_entity_org_tax_id")
+                        .HasFilter("tax_id IS NOT NULL");
+
+                    b.ToTable("legal_entity", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Organizations.OrganizationBranding", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<byte[]>("LogoBytes")
+                        .HasColumnType("bytea")
+                        .HasColumnName("logo_bytes");
+
+                    b.Property<string>("LogoContentType")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("logo_content_type");
+
+                    b.Property<string>("LogoFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("logo_file_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("OrganizationId");
+
+                    b.ToTable("organization_branding", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Outbox.OutboxEvent", b =>
@@ -4143,6 +4381,15 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .WithMany("UnavailableItems")
                         .HasForeignKey("CollectionPlanId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Locations.OrganizationLocation", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Organizations.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

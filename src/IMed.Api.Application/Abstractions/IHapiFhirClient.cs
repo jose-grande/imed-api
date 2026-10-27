@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 namespace IMed.Api.Application.Abstractions;
 
 /// <summary>
@@ -22,6 +23,18 @@ public interface IHapiFhirClient
     /// </summary>
     /// <returns>El id server-assigned por HAPI.</returns>
     Task<string> CreateOrganizationAsync(CreateOrganizationRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Crea o reemplaza (PUT, id determinístico) el <c>Organization</c> de una razón social,
+    /// <c>partOf</c> la organización tenant (FAC-9). Idempotente.
+    /// </summary>
+    Task UpsertLegalEntityOrganizationAsync(UpsertLegalEntityOrganizationRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Crea o reemplaza (PUT, id determinístico) el <c>Location</c> de una sede, gestionado por su
+    /// razón social (FAC-9). Idempotente.
+    /// </summary>
+    Task UpsertLocationAsync(UpsertLocationRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Crea un Practitioner FHIR en la partición indicada. Devuelve el id server-assigned.
@@ -357,7 +370,58 @@ public interface IHapiFhirClient
     /// <summary>Histórico numérico de un paciente para un LOINC (tendencia, LIS-6). Más reciente primero.</summary>
     Task<IReadOnlyList<ObservationHistoryPoint>> GetObservationHistoryAsync(
         string patientFhirId, string loincCode, string partitionName, int count, CancellationToken cancellationToken = default);
+
+    // ---- Acceso genérico (Épica P) ----------------------------------------------------------
+    // Los métodos tipados de arriba cubren un recurso cada uno. Estos tres existen para los flujos
+    // que tienen que reescribir un recurso preservando todo lo que no tocan —un PUT en FHIR
+    // reemplaza el recurso entero, y un snapshot tipado perdería los campos que no modela— y para
+    // armar transacciones de varios recursos.
+
+    /// <summary>Lee un recurso tal como lo guarda HAPI. <c>null</c> si no existe.</summary>
+    Task<JsonObject?> ReadResourceAsync(
+        string resourceType, string id, string partitionName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Busca recursos con una query FHIR ya armada (sin el <c>?</c>), siempre sin caché de HAPI:
+    /// quien llama acá va a decidir qué escribir según lo que encuentre.
+    /// </summary>
+    Task<IReadOnlyList<JsonObject>> SearchResourcesAsync(
+        string resourceType, string query, string partitionName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ejecuta un Bundle <c>transaction</c>: o se escribe todo o nada. Devuelve el resultado de
+    /// cada entrada en el mismo orden. Un conflicto de versión (<c>ifMatch</c>) se reporta como
+    /// <see cref="FhirVersionConflictException"/> para distinguirlo de un fallo.
+    /// </summary>
+    Task<IReadOnlyList<FhirTransactionEntryResult>> ExecuteTransactionAsync(
+        JsonObject bundle, string partitionName, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Resultado de una entrada de transacción: estado HTTP y ubicación del recurso escrito.</summary>
+public sealed record FhirTransactionEntryResult(string Status, string? Location)
+{
+    /// <summary>Id lógico extraído de <c>Location</c> (<c>Encounter/123/_history/1</c> → <c>123</c>).</summary>
+    public string? ResourceId => Part(0);
+
+    /// <summary>Tipo de recurso extraído de <c>Location</c>.</summary>
+    public string? ResourceType => Part(1);
+
+    private string? Part(int offsetFromId)
+    {
+        if (string.IsNullOrWhiteSpace(Location)) { return null; }
+        var parts = Location.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var history = Array.IndexOf(parts, "_history");
+        var idIndex = history > 0 ? history - 1 : parts.Length - 1;
+        var index = idIndex - offsetFromId;
+        return index >= 0 && idIndex >= 1 ? parts[index] : null;
+    }
+}
+
+/// <summary>
+/// HAPI rechazó una escritura porque el recurso cambió desde que se leyó (HTTP 409 o 412). No es un
+/// fallo del servidor sino una carrera entre dos personas: el llamador decide si reaplica o pregunta.
+/// </summary>
+public sealed class FhirVersionConflictException(string message) : Exception(message);
 
 /// <summary>
 /// Datos para crear/reemplazar un MedicationRequest FHIR R5 (Épica K).
@@ -499,6 +563,12 @@ public sealed record LabOrderSnapshot(
 /// Datos para crear un <c>Specimen</c> FHIR R5 (recepción, LIS-3).
 /// <c>AccessionNumber</c> va en <c>Specimen.accessionIdentifier</c>;
 /// <c>FastingHours</c> (si aplica) en <c>collection.fastingStatusDuration</c>.
+///
+/// <para>⚠️ Acá va el <b>mínimo requerido</b> por el catálogo, no cuánto ayunó el paciente.
+/// FHIR define <c>fastingStatusDuration</c> como la duración del ayuno <b>real</b>, así que hoy
+/// el recurso afirma algo que no sabemos: nadie registra las horas efectivas, solo un sí/no en
+/// recepción. Se conserva para no perder el dato que ya se venía escribiendo; se corrige cuando
+/// la recepción capture las horas reales.</para>
 /// </summary>
 public sealed record UpsertSpecimenRequest(
     string PartitionName,
@@ -739,11 +809,41 @@ public sealed record UpsertPractitionerRequest(
     string? Gender,
     bool Active = true);
 
+/// <summary>Razón social como <c>Organization</c> FHIR (FAC-9).</summary>
+public sealed record UpsertLegalEntityOrganizationRequest(
+    string PartitionName,
+    string FhirId,
+    string TenantOrganizationFhirId,
+    string LegalName,
+    string? TradeName,
+    string? TaxId,
+    string? FiscalAddress,
+    string? Phone,
+    string? Email,
+    bool Active);
+
+/// <summary>Sede como <c>Location</c> FHIR (FAC-9).</summary>
+public sealed record UpsertLocationRequest(
+    string PartitionName,
+    string FhirId,
+    string ManagingOrganizationFhirId,
+    string Code,
+    string Name,
+    string? FiscalEstablishmentCode,
+    string? Address,
+    string? Phone,
+    bool Active);
+
 /// <summary>
 /// Datos para crear/reemplazar un PractitionerRole FHIR R5. Vincula un
 /// Practitioner con la Organization y opcionalmente declara una especialidad
 /// (SNOMED CT).
 /// </summary>
+/// <param name="LocationFhirIds">
+/// Sedes donde atiende (FAC-9), como ids de <c>Location</c>. <c>null</c> = no tocarlas: un
+/// <c>PUT</c> conserva las que el recurso ya tenía. Las escribe solo la sincronización de sedes del
+/// profesional, para que editar el perfil no las borre.
+/// </param>
 public sealed record UpsertPractitionerRoleRequest(
     string PartitionName,
     string PractitionerFhirId,
@@ -751,7 +851,8 @@ public sealed record UpsertPractitionerRoleRequest(
     string? SpecialtyCode,
     string? SpecialtyDisplay,
     string SpecialtySystem = "http://snomed.info/sct",
-    bool Active = true);
+    bool Active = true,
+    IReadOnlyList<string>? LocationFhirIds = null);
 
 /// <summary>Snapshot de lectura de un Practitioner FHIR. Solo expone lo que el caso de uso necesita.</summary>
 public sealed record PractitionerSnapshot(
@@ -774,7 +875,10 @@ public sealed record PractitionerRoleSnapshot(
     string? SpecialtyCode,
     string? SpecialtyDisplay,
     string? SpecialtySystem,
-    bool Active);
+    bool Active,
+    string? PractitionerFhirId = null,
+    string? OrganizationFhirId = null,
+    IReadOnlyList<string>? LocationFhirIds = null);
 
 /// <summary>
 /// Item del listado de PractitionerRoles por organización (Épica F2). Más

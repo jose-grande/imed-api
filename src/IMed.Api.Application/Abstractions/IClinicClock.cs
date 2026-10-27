@@ -18,4 +18,7 @@ public interface IClinicClock
 {
     /// <summary>El día en curso en la zona de la clínica.</summary>
     DateOnly Today();
+
+    /// <summary>El día de la clínica al que pertenece un instante (para comparar con <see cref="Today"/>).</summary>
+    DateOnly DateOf(DateTimeOffset instant);
 }

@@ -103,7 +103,7 @@ public sealed class BillingFoundationsTests
         // Se valida en el dominio y no en la pantalla porque un código mal formado no se descubre
         // al guardarlo: se descubre cuando el primer documento sale con un número que la
         // autoridad fiscal no reconoce.
-        var sede = OrganizationLocation.Create(Org, "CENTRAL", "Sede central");
+        var sede = OrganizationLocation.Create(Org, "CENTRAL", "Sede central", Guid.NewGuid());
 
         var dosDigitos = () => sede.SetFiscalEstablishmentCode("01");
         var conLetras = () => sede.SetFiscalEstablishmentCode("00A");

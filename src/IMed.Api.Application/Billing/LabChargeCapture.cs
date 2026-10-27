@@ -39,8 +39,9 @@ public sealed class CaptureLabOrderChargesHandler(
         string PatientFhirId,
         string? EncounterFhirId);
 
+    /// <param name="locationId">Sede donde se admitieron las órdenes: ahí se presta el servicio (FAC-9).</param>
     public async Task<LabChargeSummary> HandleAsync(
-        Guid orgId, IReadOnlyList<LabOrderCharge> orders, CancellationToken ct = default)
+        Guid orgId, IReadOnlyList<LabOrderCharge> orders, Guid? locationId = null, CancellationToken ct = default)
     {
         var capturados = 0;
         var yaCobrados = 0;
@@ -67,7 +68,8 @@ public sealed class CaptureLabOrderChargesHandler(
                 var r = await capture.HandleAsync(new CaptureChargeCommand(
                     orgId, cuenta.Value, cobrable.Id,
                     ChargeSourceKind.LabOrder, orden.ServiceRequestId,
-                    SourceFhirRef: $"ServiceRequest/{orden.ServiceRequestId}"), ct);
+                    SourceFhirRef: $"ServiceRequest/{orden.ServiceRequestId}",
+                    LocationId: locationId), ct);
 
                 if (r.AlreadyCharged)
                 {

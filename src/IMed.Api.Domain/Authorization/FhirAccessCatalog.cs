@@ -26,6 +26,7 @@ public static class FhirAccessCatalog
             "Specimen",
             "ServiceRequest",
             "AuditEvent",
+            "Location",
         };
 
     /// <summary>Nombre del recurso cuya escritura se decide por categoría.</summary>
@@ -50,6 +51,34 @@ public static class FhirAccessCatalog
     /// </summary>
     public static IReadOnlySet<string> WriteProtectedObservationCategories { get; } =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "laboratory" };
+
+    /// <summary>Nombre del recurso cuya escritura se decide por sus destinos.</summary>
+    public const string ProvenanceResource = "Provenance";
+
+    /// <summary>
+    /// Tipos de recurso que una <c>Provenance</c> escrita desde el lado público puede firmar
+    /// (Épica P: el cierre de consulta deja constancia de qué antecedentes cambió).
+    ///
+    /// <para><b>Por qué una lista y no el recurso abierto.</b> El laboratorio usa <c>Provenance</c>
+    /// como cadena de custodia: quién recibió la muestra, quién validó el informe. Abrir la escritura
+    /// sin mirar a qué apunta permitiría fabricar una firma de validación sobre un resultado. Los
+    /// antecedentes no tienen circuito que proteger; los resultados sí.</para>
+    ///
+    /// <para>Se amplía por fase: cada sección de antecedentes nueva agrega su recurso acá en la
+    /// misma fase que lo empieza a escribir.</para>
+    /// </summary>
+    public static IReadOnlySet<string> PublicProvenanceTargets { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "AllergyIntolerance", "List",
+            // P-2: problemas activos y medicación habitual.
+            "Condition", "MedicationStatement",
+            // P-3: quirúrgicos, familiares, vacunas y dispositivos. Los hábitos y los datos
+            // gineco-obstétricos son Observations y NO entran: desde una referencia no se puede
+            // saber la categoría, y Observation incluye resultados de laboratorio. Esas viajan en
+            // la misma transacción con su encuentro y su autor.
+            "Procedure", "FamilyMemberHistory", "Immunization", "DeviceUsage",
+        };
 
     /// <summary>
     /// Operaciones <c>$…</c> permitidas. Todo lo demás se rechaza: <c>$expunge</c> borra sin
@@ -108,6 +137,22 @@ public static class FhirAccessCatalog
         ..Reads("ServiceRequest", PermissionCatalog.LabRead),
         ..Reads("Specimen", PermissionCatalog.LabRead),
         ..Reads("Provenance", PermissionCatalog.LabRead),
+        ..Reads("Provenance", PermissionCatalog.RecordReadAny),
+        // Solo alta y solo sobre antecedentes: el evaluador la deja pasar por encima de
+        // WriteProtectedResources únicamente en ese caso (ver PublicProvenanceTargets). Una
+        // constancia no se corrige: si estuvo mal, se escribe otra.
+        ("Provenance", FhirVerb.Create, PermissionCatalog.RecordWrite),
+
+        // Listas de antecedentes por sección (Épica P §2.2): quién revisó la sección y cuándo, y
+        // si está vacía a propósito ("ninguno conocido").
+        ..Crud("List", PermissionCatalog.RecordReadAny, PermissionCatalog.RecordWrite),
+        // Medicación habitual (Épica P-2): lo que el paciente toma, no lo que se le receta.
+        ..Crud("MedicationStatement", PermissionCatalog.RecordReadAny, PermissionCatalog.RecordWrite),
+        // Resto de los antecedentes (Épica P-3).
+        ..Crud("Procedure", PermissionCatalog.RecordReadAny, PermissionCatalog.RecordWrite),
+        ..Crud("FamilyMemberHistory", PermissionCatalog.RecordReadAny, PermissionCatalog.RecordWrite),
+        ..Crud("Immunization", PermissionCatalog.RecordReadAny, PermissionCatalog.RecordWrite),
+        ..Crud("DeviceUsage", PermissionCatalog.RecordReadAny, PermissionCatalog.RecordWrite),
 
         // --- Directorio y catálogo: no son PHI --------------------------------
         ..Reads("Practitioner", PermissionCatalog.RecordSearchDemographics, PermissionCatalog.LabRead),
@@ -123,7 +168,10 @@ public static class FhirAccessCatalog
 
         // El diseñador de formularios administra sus propias definiciones.
         ..Crud("Questionnaire", PermissionCatalog.LabManage, PermissionCatalog.LabManage),
-        ..Crud("Location", PermissionCatalog.OrgLocationsManage, PermissionCatalog.OrgLocationsManage),
+        // La sede se escribe solo por /api/locations (FAC-9): el Location es la proyección de
+        // organization_location, con id determinístico y su razón social. Uno escrito a mano desde
+        // el cliente sería una sede que el backend no conoce.
+        ..Reads("Location", PermissionCatalog.OrgLocationsManage),
         ..Crud("PractitionerRole", PermissionCatalog.OrgTeamManage, PermissionCatalog.OrgTeamManage),
     ];
 

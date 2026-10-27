@@ -60,11 +60,11 @@ public sealed class ResolveRequisitionHandler(
             var tests = await LabRouting.ExpandOrderAsync(catalog, orgId, o.CatalogCode, ct);
             if (tests.Count == 0)
             {
-                AddOrder("UNKNOWN", null, null, o, "SendOut", null, intakeStatus);
+                AddOrder("UNKNOWN", null, null, o, "SendOut", FastingWindow.None, intakeStatus);
                 continue;
             }
 
-            var byType = new Dictionary<string, (SpecimenType? St, TubeType? Tt, bool AnyInHouse, int? Fasting)>(StringComparer.Ordinal);
+            var byType = new Dictionary<string, (SpecimenType? St, TubeType? Tt, bool AnyInHouse, FastingWindow Fasting)>(StringComparer.Ordinal);
             foreach (var (test, routing) in tests)
             {
                 SpecimenType? st = test.SpecimenTypeId is Guid sid && specimenTypes.TryGetValue(sid, out var s) ? s : null;
@@ -72,11 +72,13 @@ public sealed class ResolveRequisitionHandler(
                 var key = st?.Code ?? "UNKNOWN";
                 var cur = byType.TryGetValue(key, out var v)
                     ? v
-                    : (St: st, Tt: tt, AnyInHouse: false, Fasting: (int?)null);
+                    : (St: st, Tt: tt, AnyInHouse: false, Fasting: FastingWindow.None);
                 cur.St ??= st;
                 cur.Tt ??= tt;
                 cur.AnyInHouse = cur.AnyInHouse || routing == OrderRouting.InHouse;
-                cur.Fasting = MaxNullable(cur.Fasting, test.FastingHours);
+                cur.Fasting = FastingWindow.Combine(
+                    [(cur.Fasting.MinHours, cur.Fasting.MaxHours),
+                     (test.FastingHoursMin, test.FastingHoursMax)]);
                 byType[key] = cur;
             }
 
@@ -86,7 +88,7 @@ public sealed class ResolveRequisitionHandler(
             }
         }
 
-        void AddOrder(string key, SpecimenType? st, TubeType? tt, LabOrderSnapshot o, string routing, int? fasting, string? intakeStatus)
+        void AddOrder(string key, SpecimenType? st, TubeType? tt, LabOrderSnapshot o, string routing, FastingWindow fasting, string? intakeStatus)
         {
             if (!orderLists.TryGetValue(key, out var list))
             {
@@ -97,11 +99,10 @@ public sealed class ResolveRequisitionHandler(
                     (st?.CollectionMode ?? CollectionMode.OnSite).ToString(),
                     tt?.Code, tt?.Name, tt?.Color);
             }
-            list.Add(new RequisitionOrder(o.Id, o.LoincCode, o.CodeText, routing, fasting, intakeStatus));
+            list.Add(new RequisitionOrder(
+                o.Id, o.LoincCode, o.CodeText, routing,
+                fasting.MinHours, fasting.MaxHours, intakeStatus));
         }
-
-        static int? MaxNullable(int? a, int? b) =>
-            a is null ? b : b is null ? a : Math.Max(a.Value, b.Value);
 
         var groups = orderLists.Select(kv => new RequisitionGroup(
             kv.Key, meta[kv.Key].Name, meta[kv.Key].CollectionMode,
@@ -184,13 +185,17 @@ public sealed class ReceiveRequisitionHandler(
             }
 
             // Precondición de ayuno no cumplida → bloquear el grupo (sin crear muestra).
-            var fastingRequired = snaps.Any(s => s.Resolution.FastingHours is not null);
+            var groupFasting = FastingWindow.Combine(
+                snaps.Select(s => (s.Resolution.Fasting.MinHours, s.Resolution.Fasting.MaxHours)));
+            var fastingRequired = groupFasting.Required;
             if (fastingRequired && group.FastingSatisfied == false)
             {
                 foreach (var (ord, resolution) in snaps)
                 {
                     var intake = NewIntake(cmd, ord, resolution, group);
-                    intake.MarkBlocked("Precondición no cumplida: requiere ayuno.", cmd.UserId, timeProvider);
+                    intake.MarkBlocked(
+                        $"Precondición no cumplida: requiere ayuno de {groupFasting.Describe()}.",
+                        cmd.UserId, timeProvider);
                     await ops.AddIntakeAsync(intake, ct);
                 }
                 results.Add(new ReceiveGroupResult(group.SpecimenTypeCode, "Blocked", null, null, "Ayuno no cumplido."));
@@ -205,12 +210,6 @@ public sealed class ReceiveRequisitionHandler(
             var accession = LabAccession.Build(cmd.OrganizationId, locationCode, day, seq);
 
             var srIds = snaps.Select(s => s.Order.Id).ToList();
-            var maxFasting = snaps
-                .Select(s => s.Resolution.FastingHours)
-                .Where(h => h is not null)
-                .Select(h => h!.Value)
-                .DefaultIfEmpty(0)
-                .Max();
 
             var specimenId = await hapi.CreateSpecimenAsync(new UpsertSpecimenRequest(
                 PartitionName: partition,
@@ -221,7 +220,7 @@ public sealed class ReceiveRequisitionHandler(
                 AccessionNumber: accession,
                 ReceivedTime: now.ToString("o"),
                 CollectedDateTime: group.CollectedDateTime,
-                FastingHours: maxFasting == 0 ? null : maxFasting,
+                FastingHours: groupFasting.MinHours,
                 Note: null,
                 AdditionalServiceRequestFhirIds: srIds.Skip(1).ToList(),
                 CollectorPractitionerId: collectorRef,
@@ -248,7 +247,7 @@ public sealed class ReceiveRequisitionHandler(
     {
         var intake = OrderIntake.Create(
             cmd.OrganizationId, ord.Id, ord.PatientFhirId, OrderRouting.InHouse,
-            LabRouting.ParsePriority(ord.Priority), resolution.FastingHours is not null, timeProvider: timeProvider);
+            LabRouting.ParsePriority(ord.Priority), resolution.Fasting.Required, timeProvider: timeProvider);
         intake.Classify(cmd.Requisition, group.SpecimenTypeCode, group.TubeCode, timeProvider);
         intake.DescribeExam(ord.LoincCode, ord.CodeText, timeProvider);
         return intake;

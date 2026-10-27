@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Infrastructure.Keycloak;
@@ -65,7 +66,9 @@ public sealed class HapiFhirClient(
         {
             var body = await resp.Content.ReadAsStringAsync(cancellationToken);
             // Si la particion ya existe, HAPI devuelve 400 con mensaje. Idempotente: lo tratamos como OK.
-            if (body.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+            // HAPI 8 dice "is already defined" (HAPI-1309); versiones anteriores, "already exists".
+            if (body.Contains("already exists", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("already defined", StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogInformation("Particion '{Name}' ya existe; continuando.", partitionName);
                 return partitionName;
@@ -255,7 +258,12 @@ public sealed class HapiFhirClient(
         }
         await EnsureBearerAsync(cancellationToken);
 
-        var payload = BuildPractitionerRolePayload(request, idForPut: practitionerRoleFhirId);
+        // Sin sedes en el request se conservan las del recurso: un PUT reemplaza todo, y editar la
+        // especialidad desde el perfil no puede dejar al médico sin sede en FHIR (FAC-9).
+        var locations = request.LocationFhirIds
+            ?? (await GetPractitionerRoleAsync(practitionerRoleFhirId, request.PartitionName, cancellationToken))
+                ?.LocationFhirIds;
+        var payload = BuildPractitionerRolePayload(request, idForPut: practitionerRoleFhirId, locations);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Put, $"PractitionerRole/{practitionerRoleFhirId}")
         {
             Content = JsonContent.Create(payload, options: FhirJson)
@@ -307,6 +315,142 @@ public sealed class HapiFhirClient(
 
         var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
         return ParsePractitionerRoleSnapshot(doc);
+    }
+
+    private const string LocationCodeSystem = "https://imed.app/identifiers/location-code";
+    private const string EstablishmentSystem = "https://imed.app/identifiers/hn/establecimiento";
+    private const string RtnSystem = "https://imed.app/identifiers/hn/rtn";
+
+    public async Task UpsertLegalEntityOrganizationAsync(
+        UpsertLegalEntityOrganizationRequest request, CancellationToken cancellationToken = default)
+    {
+        var telecom = Telecom(request.Phone, request.Email);
+        var payload = new Dictionary<string, object?>
+        {
+            ["resourceType"] = "Organization",
+            ["id"] = request.FhirId,
+            ["active"] = request.Active,
+            ["name"] = request.LegalName,
+            ["alias"] = string.IsNullOrWhiteSpace(request.TradeName) ? null : new[] { request.TradeName },
+            ["identifier"] = string.IsNullOrWhiteSpace(request.TaxId)
+                ? null
+                : new[] { new { system = RtnSystem, value = request.TaxId } },
+            ["type"] = new[]
+            {
+                new
+                {
+                    coding = new[]
+                    {
+                        new
+                        {
+                            system = "http://terminology.hl7.org/CodeSystem/organization-type",
+                            code = "prov",
+                            display = "Healthcare Provider",
+                        },
+                    },
+                },
+            },
+            ["partOf"] = new { reference = $"Organization/{request.TenantOrganizationFhirId}" },
+            // R5: la dirección y los teléfonos de la organización van en `contact` (ExtendedContactDetail).
+            ["contact"] = string.IsNullOrWhiteSpace(request.FiscalAddress) && telecom is null
+                ? null
+                : new[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["address"] = string.IsNullOrWhiteSpace(request.FiscalAddress)
+                            ? null : new { use = "billing", text = request.FiscalAddress },
+                        ["telecom"] = telecom,
+                    },
+                },
+        };
+        await PutAsync("Organization", request.FhirId, request.PartitionName, payload, cancellationToken);
+    }
+
+    public async Task UpsertLocationAsync(UpsertLocationRequest request, CancellationToken cancellationToken = default)
+    {
+        var identifier = new List<object> { new { system = LocationCodeSystem, value = request.Code } };
+        if (!string.IsNullOrWhiteSpace(request.FiscalEstablishmentCode))
+        {
+            identifier.Add(new { system = EstablishmentSystem, value = request.FiscalEstablishmentCode });
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["resourceType"] = "Location",
+            ["id"] = request.FhirId,
+            ["status"] = request.Active ? "active" : "inactive",
+            ["mode"] = "instance",
+            ["name"] = request.Name,
+            ["identifier"] = identifier,
+            // La sede es el establecimiento entero, no un consultorio: `bu` (building).
+            ["form"] = new
+            {
+                coding = new[]
+                {
+                    new
+                    {
+                        system = "http://terminology.hl7.org/CodeSystem/location-physical-type",
+                        code = "bu",
+                        display = "Building",
+                    },
+                },
+            },
+            ["address"] = string.IsNullOrWhiteSpace(request.Address) ? null : new { text = request.Address },
+            ["contact"] = string.IsNullOrWhiteSpace(request.Phone)
+                ? null
+                : new[] { new { telecom = new[] { new { system = "phone", value = request.Phone } } } },
+            ["managingOrganization"] = new { reference = $"Organization/{request.ManagingOrganizationFhirId}" },
+        };
+        await PutAsync("Location", request.FhirId, request.PartitionName, payload, cancellationToken);
+    }
+
+    /// <summary>
+    /// Quita las entradas nulas de los diccionarios. <c>WhenWritingNull</c> solo aplica a
+    /// propiedades, no a claves de diccionario, y FHIR rechaza <c>"campo": null</c>.
+    /// </summary>
+    private static object? Compact(object? value) => value switch
+    {
+        Dictionary<string, object?> dict => dict
+            .Where(kv => kv.Value is not null)
+            .ToDictionary(kv => kv.Key, kv => Compact(kv.Value)),
+        object[] array => array.Select(Compact).ToArray(),
+        _ => value,
+    };
+
+    private static object[]? Telecom(string? phone, string? email)
+    {
+        var list = new List<object>();
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            list.Add(new { system = "phone", value = phone });
+        }
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            list.Add(new { system = "email", value = email });
+        }
+        return list.Count == 0 ? null : list.ToArray();
+    }
+
+    private async Task PutAsync(
+        string resourceType, string id, string partitionName, object payload, CancellationToken cancellationToken)
+    {
+        await EnsureBearerAsync(cancellationToken);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Put, $"{resourceType}/{id}")
+        {
+            Content = JsonContent.Create(Compact(payload), options: FhirJson)
+        };
+        httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError(
+                "PUT /fhir/{Type}/{Id} fallo. Status={Status}, Body={Body}",
+                resourceType, id, (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
     }
 
     private async Task EnsureBearerAsync(CancellationToken cancellationToken)
@@ -376,34 +520,46 @@ public sealed class HapiFhirClient(
         };
     }
 
-    private static object BuildPractitionerRolePayload(UpsertPractitionerRoleRequest req, string? idForPut = null)
+    private static Dictionary<string, object?> BuildPractitionerRolePayload(
+        UpsertPractitionerRoleRequest req, string? idForPut = null, IReadOnlyList<string>? locationFhirIds = null)
     {
-        object[]? specialty = null;
+        // Diccionario y no objeto anónimo para poder omitir las claves vacías: FHIR rechaza
+        // `"campo": null`, y `WhenWritingNull` no aplica a diccionarios.
+        var payload = new Dictionary<string, object?>
+        {
+            ["resourceType"] = "PractitionerRole",
+            ["active"] = req.Active,
+            ["practitioner"] = new { reference = $"Practitioner/{req.PractitionerFhirId}" },
+            ["organization"] = new { reference = $"Organization/{req.OrganizationFhirId}" },
+        };
+        if (idForPut is not null)
+        {
+            payload["id"] = idForPut;
+        }
         if (!string.IsNullOrWhiteSpace(req.SpecialtyCode))
         {
-            specialty = [new
+            payload["specialty"] = new[]
             {
-                coding = new[]
+                new
                 {
-                    new
+                    coding = new[]
                     {
-                        system = req.SpecialtySystem,
-                        code = req.SpecialtyCode,
-                        display = req.SpecialtyDisplay
+                        new
+                        {
+                            system = req.SpecialtySystem,
+                            code = req.SpecialtyCode,
+                            display = req.SpecialtyDisplay
+                        }
                     }
                 }
-            }];
+            };
         }
-
-        return new
+        var locations = locationFhirIds ?? req.LocationFhirIds;
+        if (locations is { Count: > 0 })
         {
-            resourceType = "PractitionerRole",
-            id = idForPut,
-            active = req.Active,
-            practitioner = new { reference = $"Practitioner/{req.PractitionerFhirId}" },
-            organization = new { reference = $"Organization/{req.OrganizationFhirId}" },
-            specialty = specialty
-        };
+            payload["location"] = locations.Select(id => new { reference = $"Location/{id}" }).ToArray();
+        }
+        return payload;
     }
 
     private static PractitionerSnapshot ParsePractitionerSnapshot(JsonElement doc)
@@ -531,7 +687,28 @@ public sealed class HapiFhirClient(
             SpecialtyCode: code,
             SpecialtyDisplay: display,
             SpecialtySystem: system,
-            Active: active);
+            Active: active,
+            PractitionerFhirId: RefId(doc, "practitioner", "Practitioner/"),
+            OrganizationFhirId: RefId(doc, "organization", "Organization/"),
+            LocationFhirIds: doc.TryGetProperty("location", out var locEl) && locEl.ValueKind == JsonValueKind.Array
+                ? locEl.EnumerateArray()
+                    .Select(l => l.ValueKind == JsonValueKind.Object && l.TryGetProperty("reference", out var r) ? r.GetString() : null)
+                    .Where(r => r is not null && r.StartsWith("Location/", StringComparison.Ordinal))
+                    .Select(r => r!["Location/".Length..])
+                    .ToList()
+                : []);
+    }
+
+    private static string? RefId(JsonElement doc, string property, string prefix)
+    {
+        if (!doc.TryGetProperty(property, out var el)
+            || el.ValueKind != JsonValueKind.Object
+            || !el.TryGetProperty("reference", out var r))
+        {
+            return null;
+        }
+        var value = r.GetString();
+        return value is not null && value.StartsWith(prefix, StringComparison.Ordinal) ? value[prefix.Length..] : value;
     }
 
     public async Task<IReadOnlyList<PractitionerRoleListItem>> SearchPractitionerRolesByOrganizationAsync(
@@ -3487,6 +3664,128 @@ public sealed class HapiFhirClient(
             Requisition: requisition,
             LocalCode: localCode,
             LocalSystem: localSystem);
+    }
+
+    // ---- Acceso genérico (Épica P) ----------------------------------------------------------
+
+    public async Task<JsonObject?> ReadResourceAsync(
+        string resourceType, string id, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(resourceType) || string.IsNullOrWhiteSpace(id))
+        {
+            throw new ArgumentException("resourceType e id son obligatorios.");
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Get, $"{resourceType}/{Uri.EscapeDataString(id)}");
+        AddPartition(httpRequest, partitionName);
+        httpRequest.Headers.Add("Accept", "application/fhir+json");
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (resp.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone)
+        {
+            return null;
+        }
+        await ThrowIfFailedAsync(resp, $"GET /fhir/{resourceType}/{{id}}", cancellationToken);
+        return JsonNode.Parse(await resp.Content.ReadAsStringAsync(cancellationToken)) as JsonObject;
+    }
+
+    public async Task<IReadOnlyList<JsonObject>> SearchResourcesAsync(
+        string resourceType, string query, string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(resourceType))
+        {
+            throw new ArgumentException("resourceType es obligatorio.", nameof(resourceType));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{resourceType}?{query}");
+        AddPartition(httpRequest, partitionName);
+        httpRequest.Headers.Add("Accept", "application/fhir+json");
+        // Lectura para decidir una escritura: con la caché de búsquedas de HAPI se decidiría sobre
+        // un conjunto viejo (ver SearchLabOrdersAsync, donde eso perdía órdenes).
+        httpRequest.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        await ThrowIfFailedAsync(resp, $"GET /fhir/{resourceType}?...", cancellationToken);
+
+        var bundle = JsonNode.Parse(await resp.Content.ReadAsStringAsync(cancellationToken)) as JsonObject;
+        if (bundle?["entry"] is not JsonArray entries)
+        {
+            return Array.Empty<JsonObject>();
+        }
+        var items = new List<JsonObject>();
+        foreach (var entry in entries)
+        {
+            // Con `_include` vienen recursos de otro tipo; quien llama pidió este.
+            if (entry?["resource"] is JsonObject resource
+                && (string?)resource["resourceType"] == resourceType)
+            {
+                items.Add(resource);
+            }
+        }
+        return items;
+    }
+
+    public async Task<IReadOnlyList<FhirTransactionEntryResult>> ExecuteTransactionAsync(
+        JsonObject bundle, string partitionName, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(bundle);
+        await EnsureBearerAsync(cancellationToken);
+
+        // El Bundle se manda a la raíz del servidor, no a un tipo de recurso.
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, string.Empty)
+        {
+            Content = new StringContent(bundle.ToJsonString(), System.Text.Encoding.UTF8, "application/fhir+json")
+        };
+        AddPartition(httpRequest, partitionName);
+        httpRequest.Headers.Add("Accept", "application/fhir+json");
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        // HAPI reporta un `ifMatch` vencido como 409 (ResourceVersionConflictException); 412 es lo que
+        // dice la especificación para If-Match. Se aceptan los dos para no depender de cuál use.
+        if (resp.StatusCode is System.Net.HttpStatusCode.PreconditionFailed or System.Net.HttpStatusCode.Conflict)
+        {
+            var conflict = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogWarning("Transacción rechazada por conflicto de versión. Body={Body}", conflict);
+            throw new FhirVersionConflictException(
+                "Otro usuario modificó un recurso de esta transacción desde que se leyó.");
+        }
+        await ThrowIfFailedAsync(resp, "POST /fhir (transaction)", cancellationToken);
+
+        var response = JsonNode.Parse(await resp.Content.ReadAsStringAsync(cancellationToken)) as JsonObject;
+        var results = new List<FhirTransactionEntryResult>();
+        if (response?["entry"] is JsonArray entries)
+        {
+            foreach (var entry in entries)
+            {
+                var r = entry?["response"];
+                results.Add(new FhirTransactionEntryResult(
+                    (string?)r?["status"] ?? string.Empty,
+                    (string?)r?["location"]));
+            }
+        }
+        return results;
+    }
+
+    private static void AddPartition(HttpRequestMessage request, string partitionName)
+    {
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            request.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+    }
+
+    private async Task ThrowIfFailedAsync(HttpResponseMessage resp, string operation, CancellationToken ct)
+    {
+        if (resp.IsSuccessStatusCode)
+        {
+            return;
+        }
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        logger.LogError("{Operation} falló. Status={Status}, Body={Body}", operation, (int)resp.StatusCode, body);
+        resp.EnsureSuccessStatusCode();
     }
 
     /// <summary>

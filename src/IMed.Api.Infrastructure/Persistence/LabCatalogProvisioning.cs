@@ -50,7 +50,8 @@ public sealed class LabCatalogProvisioning(
         {
             var clone = LabTestDefinition.Create(
                 t.Code, t.Name, t.Datatype, t.LoincCode, t.Unit, t.Department,
-                t.FastingHours, t.CollectionType, t.PatientInstruction, organizationId, t.Active, timeProvider);
+                t.FastingHoursMin, t.FastingHoursMax, t.CollectionType, t.PatientInstruction,
+                organizationId, t.Active, timeProvider);
             // Tipos de muestra/tubos son referencia compartida → se conservan los ids.
             clone.SetSpecimenMapping(t.SpecimenTypeId, t.TubeTypeId, t.CollectionMode, timeProvider);
             clone.SetCollectionRequirements(t.MinVolumeMl, t.PreferredVolumeMl, t.AnalyzerMinVolumeMl, t.StabilityMinutes, timeProvider);

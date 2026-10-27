@@ -24,6 +24,13 @@ public sealed class BillingCharge
     public Guid AccountId { get; private set; }
     public Guid BillableItemId { get; private set; }
 
+    /// <summary>
+    /// Sede donde se prestó el servicio (FAC-9, D3). Decide qué razón social lo factura: una
+    /// cuenta puede juntar cargos de dos sedes, y si son de personas jurídicas distintas no pueden
+    /// salir en el mismo documento.
+    /// </summary>
+    public Guid LocationId { get; private set; }
+
     public decimal Quantity { get; private set; }
 
     /// <summary>Precio unitario congelado al capturar.</summary>
@@ -98,8 +105,15 @@ public sealed class BillingCharge
         string? performerPractitionerId = null,
         string? sourceFhirRef = null,
         string? reason = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Guid? locationId = null)
     {
+        if (locationId is not { } sede || sede == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "El cargo necesita la sede donde se prestó: sin ella no se sabe quién lo factura.",
+                nameof(locationId));
+        }
         if (quantity <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(quantity), "La cantidad tiene que ser positiva.");
@@ -146,6 +160,7 @@ public sealed class BillingCharge
             OrganizationId = organizationId,
             AccountId = accountId,
             BillableItemId = billableItemId,
+            LocationId = sede,
             DescriptionSnapshot = descriptionSnapshot.Trim(),
             Quantity = quantity,
             UnitPrice = unitPrice,

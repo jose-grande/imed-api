@@ -57,7 +57,17 @@ public sealed record InvoiceDto(
     decimal Balance,
     string Status,
     IReadOnlyList<InvoiceLineDto> Lines,
-    FiscalDocumentDto? FiscalDocument);
+    FiscalDocumentDto? FiscalDocument,
+    Guid? LocationId = null,
+    Guid? LegalEntityId = null,
+    IReadOnlyList<PendingIssuerDto>? PendingOtherIssuers = null);
+
+/// <summary>
+/// Cargos de la cuenta que quedaron sin facturar porque se prestaron en una sede de otra razón
+/// social (FAC-9, §4.3). Se facturan en una sede de esa razón social: un documento fiscal nunca
+/// mezcla dos RTN.
+/// </summary>
+public sealed record PendingIssuerDto(Guid LegalEntityId, string LegalName, int ChargeCount, decimal Total);
 
 /// <summary>Por qué no se pudo emitir. Cada motivo manda al usuario a un lado distinto.</summary>
 public sealed record IssueRejection(string Code, string Message);
@@ -78,7 +88,8 @@ public sealed record IssueInvoiceCommand(
     Guid? FiscalAuthorizationId = null,
     Guid? BillToPartyId = null,
     string? BuyerTaxId = null,
-    string? BuyerName = null);
+    string? BuyerName = null,
+    Guid? UserId = null);
 
 /// <summary>
 /// Emite una factura a partir de los cargos sin facturar de una cuenta (FAC-5).
@@ -99,7 +110,10 @@ public sealed class IssueInvoiceHandler(
     IFiscalRepository fiscal,
     IPartyRepository parties,
     IFiscalAdapterResolver adapters,
-    IClinicClock clock)
+    IClinicClock clock,
+    ILocationRepository locations,
+    ILegalEntityRepository legalEntities,
+    ICashRepository cash)
 {
     public async Task<IssueInvoiceResult> HandleAsync(
         IssueInvoiceCommand cmd, CancellationToken ct = default)
@@ -120,6 +134,56 @@ public sealed class IssueInvoiceHandler(
         {
             return IssueInvoiceResult.Reject(
                 "sin_cargos", "La cuenta no tiene cargos pendientes de facturar.");
+        }
+
+        // ── Quién emite (FAC-9): la sede y su razón social ──
+        var sedes = (await locations.ListAsync(cmd.OrganizationId, activeOnly: false, ct)).ToDictionary(l => l.Id);
+        if (!sedes.TryGetValue(cmd.LocationId, out var sedeEmisora) || !sedeEmisora.Active)
+        {
+            return IssueInvoiceResult.Reject("sede_invalida", "La sede de emisión no existe o está inactiva.");
+        }
+        var razon = await legalEntities.GetAsync(cmd.OrganizationId, sedeEmisora.LegalEntityId, ct);
+        if (razon is null)
+        {
+            return IssueInvoiceResult.Reject("sede_sin_razon_social", "La sede no tiene razón social.");
+        }
+
+        // Quien tiene un turno abierto factura con la sede de su caja: la factura y el dinero
+        // tienen que quedar en la misma razón social, y el arqueo de esa caja tiene que cuadrar.
+        if (cmd.UserId is { } usuario
+            && await cash.FindOpenSessionByCashierAsync(cmd.OrganizationId, usuario, ct) is { } turno
+            && await fiscal.GetCashPointAsync(cmd.OrganizationId, turno.CashPointId, ct) is { } caja
+            && caja.LocationId != sedeEmisora.Id)
+        {
+            var sedeCaja = sedes.GetValueOrDefault(caja.LocationId)?.Name ?? "otra sede";
+            return IssueInvoiceResult.Reject(
+                "sede_distinta_caja",
+                $"Tu turno está abierto en la caja {caja.Name} de {sedeCaja}. " +
+                "Cambiá la sede activa a esa sede o cerrá el turno para facturar desde esta.");
+        }
+
+        // Solo los cargos de esta razón social (§4.3). Un cargo de una sede que se desactivó
+        // después sigue siendo de la razón social de esa sede.
+        var propios = cargos
+            .Where(c => sedes.TryGetValue(c.LocationId, out var s) && s.LegalEntityId == razon.Id)
+            .ToList();
+        var ajenos = cargos.Except(propios).ToList();
+        var pendientes = new List<PendingIssuerDto>();
+        foreach (var grupo in ajenos.GroupBy(c => sedes.GetValueOrDefault(c.LocationId)?.LegalEntityId))
+        {
+            var otra = grupo.Key is { } id ? await legalEntities.GetAsync(cmd.OrganizationId, id, ct) : null;
+            pendientes.Add(new PendingIssuerDto(
+                otra?.Id ?? Guid.Empty, otra?.LegalName ?? "Razón social desconocida",
+                grupo.Count(), Math.Round(grupo.Sum(c => c.Total), 2, MidpointRounding.AwayFromZero)));
+        }
+
+        if (propios.Count == 0)
+        {
+            return IssueInvoiceResult.Reject(
+                "cargos_de_otro_emisor",
+                "Los cargos pendientes de esta cuenta se prestaron en sedes de " +
+                string.Join(", ", pendientes.Select(p => p.LegalName)) +
+                ". Se facturan desde una sede de esa razón social.");
         }
 
         // ── Régimen y adaptador ──
@@ -150,7 +214,7 @@ public sealed class IssueInvoiceHandler(
         var factura = Invoice.Draft(cmd.OrganizationId, cuenta.Id, partyId, today);
 
         var linea = 1;
-        foreach (var c in cargos)
+        foreach (var c in propios)
         {
             var tributo = await fiscal.GetTaxCodeAsync(cmd.OrganizationId, c.TaxCodeId, ct);
             factura.AddLine(InvoiceLine.FromCharge(
@@ -172,20 +236,14 @@ public sealed class IssueInvoiceHandler(
             return IssueInvoiceResult.Reject("comprador_incompleto", problema);
         }
 
-        // El emisor sin RTN produce un documento que la autoridad no reconoce. Se verifica antes
-        // de reservar el correlativo: fallar después ya habría consumido un número.
-        if (string.IsNullOrWhiteSpace(regimen.IssuerTaxId))
-        {
-            return IssueInvoiceResult.Reject(
-                "emisor_sin_rtn",
-                "El régimen fiscal no tiene el RTN de la clínica: el documento saldría sin emisor.");
-        }
-
         // ── La sede tiene que tener código de establecimiento ──
         var todas = await fiscal.ListAuthorizationsAsync(cmd.OrganizationId, ct);
-        var candidatas = cmd.FiscalAuthorizationId is { } authId
-            ? todas.Where(a => a.Id == authId).ToList()
-            : todas.Where(a => a.LocationId == cmd.LocationId && a.DocumentTypeId == tipo.Id).ToList();
+        // Siempre de la sede emisora: una autorización elegida a mano de otra sede numeraría con el
+        // CAI de otro establecimiento —o de otra persona jurídica—.
+        var candidatas = todas
+            .Where(a => a.LocationId == sedeEmisora.Id && a.DocumentTypeId == tipo.Id)
+            .Where(a => cmd.FiscalAuthorizationId is not { } authId || a.Id == authId)
+            .ToList();
 
         // Se prefiere una que pueda emitir; si ninguna puede, se toma igual la más reciente para
         // poder decir POR QUÉ. Filtrar por `CanIssueOn` y quedarse sin candidatas le contestaría
@@ -204,6 +262,21 @@ public sealed class IssueInvoiceHandler(
         {
             return IssueInvoiceResult.Reject(
                 "autorizacion_bloqueada", DescribirBloqueo(bloqueo, autorizacion));
+        }
+
+        // ── Emisor: la razón social de la sede que emite (FAC-9) ──
+        // No el régimen de la organización: en una cadena con varias personas jurídicas, cada
+        // sede factura con su propio RTN. El régimen solo aporta el RTN de respaldo para la
+        // razón social por defecto de organizaciones anteriores a FAC-9.
+        var rtnEmisor = razon.TaxId ?? (razon.IsDefault ? regimen.IssuerTaxId : null);
+
+        // El emisor sin RTN produce un documento que la autoridad no reconoce. Se verifica antes
+        // de reservar el correlativo: fallar después ya habría consumido un número.
+        if (string.IsNullOrWhiteSpace(rtnEmisor))
+        {
+            return IssueInvoiceResult.Reject(
+                "emisor_sin_rtn",
+                "La razón social de la sede no tiene RTN: el documento saldría sin emisor.");
         }
 
         var establecimiento = await invoices.GetEstablishmentCodeAsync(
@@ -244,19 +317,27 @@ public sealed class IssueInvoiceHandler(
             taxTotal: factura.TaxTotal,
             grandTotal: factura.GrandTotal,
             amountInWords: adapter.AmountInWords(factura.GrandTotal),
-            issuerTaxId: regimen.IssuerTaxId,
+            issuerTaxId: rtnEmisor,
             buyerPartyId: partyId,
-            buyerTaxId: rtnComprador);
+            buyerTaxId: rtnComprador,
+            issuer: new IssuerSnapshot(
+                razon.Id,
+                razon.LegalName,
+                razon.TradeName,
+                razon.FiscalAddress,
+                sedeEmisora.Address));
 
+        factura.AssignIssuer(sedeEmisora.Id, razon.Id);
         factura.MarkIssued(documento.Id);
 
-        foreach (var c in cargos)
+        foreach (var c in propios)
         {
             c.MarkInvoiced();
         }
 
-        await invoices.SaveIssuedAsync(factura, documento, cargos, ct);
-        return IssueInvoiceResult.Ok(InvoiceMapper.ToDto(factura, documento));
+        await invoices.SaveIssuedAsync(factura, documento, propios, ct);
+        return IssueInvoiceResult.Ok(
+            InvoiceMapper.ToDto(factura, documento) with { PendingOtherIssuers = pendientes });
     }
 
     private static string DescribirBloqueo(FiscalReservationFailure motivo, FiscalAuthorization a) =>
@@ -372,7 +453,9 @@ public static class InvoiceMapper
                 l.LineNumber, l.ChargeId, l.DescriptionSnapshot, l.TaxCodeSnapshot,
                 l.TaxTreatment.ToString(), l.TaxRate, l.Quantity, l.UnitPrice,
                 l.DiscountAmount, l.NetAmount, l.TaxAmount, l.Total)).ToList(),
-            d is null ? null : ToDto(d));
+            d is null ? null : ToDto(d),
+            i.LocationId ?? d?.LocationId,
+            i.LegalEntityId ?? d?.LegalEntityId);
 
     public static FiscalDocumentDto ToDto(FiscalDocument d) =>
         new(d.Id, d.FullNumber, d.EstablishmentCode, d.EmissionPointCode, d.DocumentTypeCode,

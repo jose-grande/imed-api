@@ -11,8 +11,14 @@ namespace IMed.Api.Infrastructure.Persistence.Seeding;
 
 /// <summary>
 /// Seeder de <see cref="FormDefinition"/> con presets globales (organization_id = null)
-/// que cualquier organización puede usar como fallback. Solo siembra si NO hay
-/// definiciones globales todavía.
+/// que cualquier organización puede usar como fallback.
+///
+/// <para><b>Versiones (Épica P-4).</b> Agrega cada par <c>(code, version)</c> de los presets que
+/// todavía no exista, y nunca toca ni retira los publicados: un QuestionnaireResponse histórico
+/// apunta a <c>code|version</c>, y la consulta cerrada se muestra con el schema con que se llenó.
+/// La consulta nueva toma la versión más alta (<c>FormDefinitionRepository.BestMatchAsync</c>).
+/// Antes sembraba solo si no había ninguno, así que una versión nueva nunca llegaba a una base
+/// existente.</para>
 ///
 /// <para>El <c>schema_json</c> sigue el formato nativo de <c>@constellation/craft-system</c>
 /// (FormSchema con <c>fields[]</c>, widgets con <c>id/type/name/label</c>).
@@ -54,36 +60,43 @@ public sealed class FormDefinitionsSeeder(
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
             // Tolerar tabla aún no existente (caso de tests donde MigrateAsync corre tarde).
-            bool hasGlobalPresets;
+            List<string> existing;
             try
             {
-                hasGlobalPresets = await db.FormDefinitions
-                    .AnyAsync(x => x.OrganizationId == null, cancellationToken);
+                existing = await db.FormDefinitions
+                    .Where(x => x.OrganizationId == null)
+                    .Select(x => x.Code + "|" + x.Version)
+                    .ToListAsync(cancellationToken);
             }
             catch (Exception)
             {
                 logger.LogWarning("Tabla form_definitions aún no existe; ejecutando migrate y reintentando.");
                 await db.Database.MigrateAsync(cancellationToken);
-                hasGlobalPresets = await db.FormDefinitions
-                    .AnyAsync(x => x.OrganizationId == null, cancellationToken);
+                existing = await db.FormDefinitions
+                    .Where(x => x.OrganizationId == null)
+                    .Select(x => x.Code + "|" + x.Version)
+                    .ToListAsync(cancellationToken);
             }
 
-            if (hasGlobalPresets)
+            var known = new HashSet<string>(existing, StringComparer.Ordinal);
+            var missing = BuildPresets().Where(p => !known.Contains($"{p.Code}|{p.Version}")).ToList();
+            if (missing.Count == 0)
             {
-                logger.LogDebug("Presets globales de FormDefinition ya existen; skip seed.");
+                logger.LogDebug("Presets globales de FormDefinition al día; nada que sembrar.");
                 return;
             }
 
-            var presets = BuildPresets();
-            foreach (var preset in presets)
+            foreach (var preset in missing)
             {
                 preset.Publish(SystemSeederId, timeProvider);
             }
 
-            db.FormDefinitions.AddRange(presets);
+            db.FormDefinitions.AddRange(missing);
             await db.SaveChangesAsync(cancellationToken);
 
-            logger.LogInformation("FormDefinitions seed cargado con {Count} presets globales.", presets.Length);
+            logger.LogInformation(
+                "FormDefinitions: +{Count} preset(s) global(es): {Presets}.",
+                missing.Count, string.Join(", ", missing.Select(p => $"{p.Code}@{p.Version}")));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -133,6 +146,35 @@ public sealed class FormDefinitionsSeeder(
                 specialtyCode: "394585009",
                 organizationId: null,
                 version: "1.0.0",
+                timeProvider: timeProvider),
+
+            // ── 1.1.0 (Épica P-4): los antecedentes salen del QR y van a sus recursos ──────
+            // Lo que era texto o números sueltos dentro del formulario —vacunación, G/P/A, FUM,
+            // antecedentes obstétricos— pasa a ser el widget de antecedentes, que escribe en
+            // Immunization / Observation y que cualquier otra consulta ve.
+
+            FormDefinition.CreateDraft(
+                code: "pediatria",
+                title: "Consulta pediátrica",
+                description: "Formulario específico para pediatría: antropometría, alimentación, vacunas y antecedentes perinatales como antecedentes del paciente.",
+                schemaJson: PediatriaFormSchemaV11,
+                fhirMappingJson: PediatriaFormFhirMapping,
+                createdBy: SystemSeederId,
+                specialtyCode: "394537008",
+                organizationId: null,
+                version: "1.1.0",
+                timeProvider: timeProvider),
+
+            FormDefinition.CreateDraft(
+                code: "prenatal",
+                title: "Control prenatal",
+                description: "Control de embarazo: antecedentes gineco-obstétricos como antecedentes del paciente, semanas de gestación, antropometría materna, signos vitales y plan.",
+                schemaJson: PrenatalFormSchemaV11,
+                fhirMappingJson: PrenatalFormFhirMapping,
+                createdBy: SystemSeederId,
+                specialtyCode: "394585009",
+                organizationId: null,
+                version: "1.1.0",
                 timeProvider: timeProvider),
         ];
     }
@@ -217,6 +259,21 @@ public sealed class FormDefinitionsSeeder(
         type = "date",
         name = linkId,
         label,
+    };
+
+    /// <summary>
+    /// Widget de antecedentes (Épica P-4): renderiza dentro del formulario la misma sección del
+    /// panel de antecedentes. Lo que se carga ahí va a su recurso FHIR (Immunization, Observation…),
+    /// no al QR; el QR solo guarda la constancia de que la sección se mostró y qué se hizo.
+    /// <c>section</c> es la clave de la sección (<c>immunizations</c>, <c>obstetric</c>…).
+    /// </summary>
+    private static object History(string linkId, string section, string label) => new
+    {
+        id = $"widget-{linkId}",
+        type = "history",
+        name = linkId,
+        label,
+        section,
     };
 
     // ─── Helpers para construir items del fhir_mapping_json ──────────────
@@ -356,6 +413,64 @@ public sealed class FormDefinitionsSeeder(
                     Number("para", "Partos (P)", minimum: 0, maximum: 20),
                     Number("abortions", "Abortos (A)", minimum: 0, maximum: 20),
                     Textarea("obstetricHistory", "Antecedentes obstétricos relevantes", rows: 4)
+                ),
+                Tab("vitals", "Antropometría y signos vitales",
+                    Number("weightKg", "Peso (kg)", step: 0.1),
+                    Number("heightCm", "Talla (cm)", step: 0.1),
+                    Number("systolicBp", "Presión sistólica (mmHg)", minimum: 60, maximum: 250),
+                    Number("diastolicBp", "Presión diastólica (mmHg)", minimum: 40, maximum: 150),
+                    Number("fetalHeartRate", "Frecuencia cardíaca fetal (lpm)", minimum: 60, maximum: 220),
+                    Number("fundalHeightCm", "Altura uterina (cm)", step: 0.1)
+                ),
+                Tab("physical", "Examen físico",
+                    Textarea("physicalExam", "Hallazgos del examen físico", rows: 5),
+                    Text("fetalMovements", "Movimientos fetales (sí / no / no aplica)")
+                ),
+                Tab("plan", "Diagnósticos y plan",
+                    Textarea("plan", "Plan (controles, suplementación, exámenes, signos de alarma)", rows: 5)
+                )
+            )
+        ),
+        JsonOpts);
+
+    // Pediatría 1.1.0: la vacunación deja de ser "sí/no/parcial" en texto y pasa a ser el registro
+    // de vacunas del paciente; se suman los antecedentes perinatales.
+    private static readonly string PediatriaFormSchemaV11 = JsonSerializer.Serialize(
+        FormSchema("pediatria", "Consulta pediátrica",
+            Tabs("layoutTabs",
+                Tab("anamnesis", "Anamnesis",
+                    Text("chiefComplaint", "Motivo de consulta", required: true, maxLength: 200),
+                    Textarea("history", "Historia de la enfermedad actual", rows: 5),
+                    Text("feeding", "Alimentación / lactancia")
+                ),
+                Tab("antecedentes", "Vacunas y perinatales",
+                    History("antecedentesVacunas", "immunizations", "Vacunas"),
+                    History("antecedentesPerinatales", "perinatal", "Antecedentes perinatales")
+                ),
+                Tab("anthropometry", "Antropometría",
+                    Number("weightKg", "Peso (kg)", step: 0.1),
+                    Number("heightCm", "Talla (cm)", step: 0.1),
+                    Number("headCircumferenceCm", "Perímetro cefálico (cm)", step: 0.1)
+                ),
+                Tab("physical", "Examen físico",
+                    Textarea("physicalExam", "Hallazgos del examen físico", rows: 5)
+                ),
+                Tab("plan", "Diagnósticos y plan",
+                    Textarea("plan", "Plan terapéutico", rows: 4)
+                )
+            )
+        ),
+        JsonOpts);
+
+    // Prenatal 1.1.0: G/P/A, FUM y "antecedentes obstétricos" en texto pasan a la sección
+    // gineco-obstétrica del paciente. Las semanas de gestación quedan: son de esta visita.
+    private static readonly string PrenatalFormSchemaV11 = JsonSerializer.Serialize(
+        FormSchema("prenatal", "Control prenatal",
+            Tabs("layoutTabs",
+                Tab("anamnesis", "Anamnesis obstétrica",
+                    Text("chiefComplaint", "Motivo de consulta", required: true, maxLength: 200),
+                    Number("gestationalWeeks", "Semanas de gestación", minimum: 0, maximum: 45),
+                    History("antecedentesGineco", "obstetric", "Antecedentes gineco-obstétricos")
                 ),
                 Tab("vitals", "Antropometría y signos vitales",
                     Number("weightKg", "Peso (kg)", step: 0.1),

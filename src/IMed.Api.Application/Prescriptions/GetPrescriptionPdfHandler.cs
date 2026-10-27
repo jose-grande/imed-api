@@ -1,5 +1,6 @@
 using System.Globalization;
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Organizations;
 using IMed.Api.Application.Profile;
 using Microsoft.Extensions.Logging;
 
@@ -35,6 +36,7 @@ public sealed record GetPrescriptionPdfResult(
 public sealed class GetPrescriptionPdfHandler(
     IHapiFhirClient hapi,
     IOrganizationProfileRepository orgRepo,
+    IOrganizationBrandingRepository branding,
     IUserPractitionerAssignmentRepository assignmentRepo,
     ISpecialtyRepository specialtyRepo,
     IPrescriptionPdfRenderer renderer,
@@ -222,7 +224,9 @@ public sealed class GetPrescriptionPdfHandler(
             }
         }
 
-        var orgInfo = new PdfOrgInfo(Name: orgProfile.Name, TaxId: null);
+        var logo = await branding.GetLogoAsync(organizationId, cancellationToken);
+        var orgInfo = new PdfOrgInfo(
+            Name: orgProfile.Name, TaxId: null, Logo: logo?.ToPdfLogo(organizationId));
 
         var practName = practitionerSnapshot is not null
             ? string.Join(" ", practitionerSnapshot.Given.Append(practitionerSnapshot.Family ?? string.Empty)).Trim()

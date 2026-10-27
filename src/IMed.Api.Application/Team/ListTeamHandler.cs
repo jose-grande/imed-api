@@ -27,7 +27,8 @@ public sealed class ListTeamHandler(
     IUserPractitionerAssignmentRepository assignmentRepo,
     IHapiFhirClient hapi,
     IKeycloakAdminClient keycloak,
-    ILogger<ListTeamHandler> logger)
+    ILogger<ListTeamHandler> logger,
+    ILocationRepository locations)
 {
     private static readonly string[] RolePriority = ["org_admin", "practitioner", "auxiliar"];
 
@@ -61,10 +62,29 @@ public sealed class ListTeamHandler(
             a => a,
             StringComparer.Ordinal);
 
+        // Sedes de toda la organización en dos lecturas, antes del tramo paralelo: mismo motivo
+        // que los assignments, el DbContext no se comparte entre tareas.
+        var sedes = (await locations.ListAsync(query.OrganizationId, activeOnly: true, cancellationToken))
+            .ToDictionary(l => l.Id);
+        var sedesPorUsuario = (await locations.ListOrganizationAssignmentsAsync(query.OrganizationId, cancellationToken))
+            .Where(a => sedes.ContainsKey(a.LocationId))
+            .GroupBy(a => a.UserId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<TeamMemberLocation>)g
+                    .OrderByDescending(a => a.IsPrimary)
+                    .ThenBy(a => sedes[a.LocationId].Name)
+                    .Select(a => new TeamMemberLocation(
+                        a.LocationId, sedes[a.LocationId].Code, sedes[a.LocationId].Name, a.IsPrimary))
+                    .ToList());
+
         var tasks = roles.Select(role => BuildTeamMemberAsync(
             role, assignmentsByPractitionerId, partitionName, cancellationToken));
         var results = await Task.WhenAll(tasks);
-        return results.Where(m => m is not null).Select(m => m!).ToList();
+        return results
+            .Where(m => m is not null)
+            .Select(m => m! with { Locations = sedesPorUsuario.GetValueOrDefault(m!.KeycloakUserId) ?? [] })
+            .ToList();
     }
 
     private async Task<TeamMember?> BuildTeamMemberAsync(

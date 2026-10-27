@@ -12,7 +12,8 @@ public sealed record LabTestDto(
     string Datatype,
     string? Unit,
     string Department,
-    int? FastingHours,
+    int? FastingHoursMin,
+    int? FastingHoursMax,
     string? CollectionType,
     string? PatientInstruction,
     Guid? SpecimenTypeId,
@@ -27,7 +28,7 @@ public sealed record LabTestDto(
     public static LabTestDto FromDomain(LabTestDefinition t) => new(
         t.Id, t.OrganizationId, t.Code, t.LoincCode, t.Name,
         t.Datatype.ToString(), t.Unit, t.Department.ToString(),
-        t.FastingHours, t.CollectionType, t.PatientInstruction,
+        t.FastingHoursMin, t.FastingHoursMax, t.CollectionType, t.PatientInstruction,
         t.SpecimenTypeId, t.TubeTypeId, t.CollectionMode?.ToString(),
         t.MinVolumeMl, t.PreferredVolumeMl, t.AnalyzerMinVolumeMl, t.StabilityMinutes, t.Active);
 }

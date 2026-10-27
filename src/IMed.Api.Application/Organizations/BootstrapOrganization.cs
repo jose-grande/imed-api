@@ -106,8 +106,16 @@ public sealed class BootstrapOrganizationHandler(
         //     el LocationBackfill de arranque la crea si esto falla.
         try
         {
+            // La razón social por defecto va primero y con el RTN del alta (FAC-9): si la sede la
+            // creara por su cuenta, nacería sin RTN y el primer intento de facturar lo pediría de
+            // nuevo.
+            await locationProvisioning.EnsureDefaultLegalEntityAsync(
+                organizationId, command.OrganizationName, command.NationalTaxId, cancellationToken);
             await locationProvisioning.EnsureDefaultLocationAsync(
                 organizationId, command.OrganizationName, cancellationToken);
+            // El fundador trabaja en la sede principal: nadie opera sin sede (FAC-9).
+            await locationProvisioning.EnsureUserAssignedAsync(
+                organizationId, command.KeycloakUserId, command.KeycloakUserId, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

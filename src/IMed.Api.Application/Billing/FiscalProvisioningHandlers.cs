@@ -17,18 +17,24 @@ public sealed record FiscalSetupDto(
     IReadOnlyList<FiscalDocumentTypeDto> DocumentTypes,
     IReadOnlyList<TaxCodeDto> TaxCodes);
 
-public sealed class GetFiscalSetupHandler(IFiscalRepository repo, IClinicClock clock)
+/// <summary>
+/// Configuración fiscal de la organización. El emisor que devuelve es la razón social <b>por
+/// defecto</b> (FAC-9): el régimen —tipos de documento, tributos, reglas del país— es de la
+/// organización, pero el RTN es de cada razón social.
+/// </summary>
+public sealed class GetFiscalSetupHandler(IFiscalRepository repo, ILegalEntityRepository legalEntities, IClinicClock clock)
 {
     public async Task<FiscalSetupDto> HandleAsync(Guid orgId, CancellationToken ct = default)
     {
         var regime = await repo.GetActiveRegimeAsync(orgId, clock.Today(), ct);
+        var razon = await legalEntities.GetDefaultAsync(orgId, ct);
         var tipos = await repo.ListDocumentTypesAsync(orgId, ct);
         var tributos = await repo.ListTaxCodesAsync(orgId, ct);
 
         return new FiscalSetupDto(
             regime?.RegimeCode,
-            regime?.IssuerTaxId,
-            regime?.IssuerLegalName,
+            razon?.TaxId ?? regime?.IssuerTaxId,
+            razon?.LegalName ?? regime?.IssuerLegalName,
             tipos.Select(t => new FiscalDocumentTypeDto(
                 t.Id, t.Code, t.Name, t.DocumentCode, t.AffectsReceivable, t.Sign, t.Active)).ToList(),
             tributos.Select(t => new TaxCodeDto(
@@ -48,7 +54,12 @@ public sealed class GetFiscalSetupHandler(IFiscalRepository repo, IClinicClock c
 /// que está se deja. Un botón de configuración que rompe al segundo clic es un botón que la gente
 /// no vuelve a tocar.</para>
 /// </summary>
-public sealed class ProvisionFiscalRegimeHandler(IFiscalRepository repo, IClinicClock clock)
+public sealed class ProvisionFiscalRegimeHandler(
+    IFiscalRepository repo,
+    ILegalEntityRepository legalEntities,
+    ILocationProvisioning provisioning,
+    IClinicClock clock,
+    TimeProvider timeProvider)
 {
     /// <summary>Tipos de documento del SAR: (código, nombre, dígitos, mueve saldo, signo).</summary>
     private static readonly (string Code, string Name, string DocumentCode, bool Receivable, short Sign)[] HnDocumentTypes =
@@ -108,6 +119,22 @@ public sealed class ProvisionFiscalRegimeHandler(IFiscalRepository repo, IClinic
             await repo.UpdateRegimeAsync(regimen, ct);
         }
 
+        // El emisor vive en la razón social (FAC-9). Los datos que llegan acá son los de la razón
+        // social por defecto: es la única que existe hasta que una sede declare otra.
+        if (!string.IsNullOrWhiteSpace(issuerTaxId) || !string.IsNullOrWhiteSpace(issuerLegalName))
+        {
+            var razon = await provisioning.EnsureDefaultLegalEntityAsync(orgId, issuerLegalName, issuerTaxId, ct);
+            if (razon.WouldChangeTaxId(issuerTaxId ?? razon.TaxId)
+                || (!string.IsNullOrWhiteSpace(issuerLegalName) && issuerLegalName.Trim() != razon.LegalName))
+            {
+                razon.Update(
+                    string.IsNullOrWhiteSpace(issuerLegalName) ? razon.LegalName : issuerLegalName,
+                    issuerTaxId ?? razon.TaxId,
+                    razon.FiscalAddress, razon.TradeName, razon.Phone, razon.Email, timeProvider);
+                await legalEntities.UpdateAsync(razon, ct);
+            }
+        }
+
         var tiposExistentes = (await repo.ListDocumentTypesAsync(orgId, ct))
             .Select(t => t.Code)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -135,6 +162,6 @@ public sealed class ProvisionFiscalRegimeHandler(IFiscalRepository repo, IClinic
             await repo.AddTaxCodeAsync(TaxCode.Create(orgId, code, name, rate, treatment), ct);
         }
 
-        return await new GetFiscalSetupHandler(repo, clock).HandleAsync(orgId, ct);
+        return await new GetFiscalSetupHandler(repo, legalEntities, clock).HandleAsync(orgId, ct);
     }
 }

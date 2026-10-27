@@ -31,7 +31,15 @@ public sealed class FiscalDocument
     public DateTimeOffset IssuedAt { get; private set; }
 
     // ── Emisor y comprador, congelados ──
+    // El emisor se congela entero —no solo el RTN— porque la razón social, su domicilio y la
+    // dirección de la sede pueden cambiar después, y una reimpresión tiene que salir idéntica
+    // al original (FAC-9).
+    public Guid? LegalEntityId { get; private set; }
     public string? IssuerTaxId { get; private set; }
+    public string? IssuerLegalName { get; private set; }
+    public string? IssuerTradeName { get; private set; }
+    public string? IssuerFiscalAddress { get; private set; }
+    public string? EstablishmentAddress { get; private set; }
     public Guid? BuyerPartyId { get; private set; }
     public string? BuyerTaxId { get; private set; }
     public string BuyerName { get; private set; } = string.Empty;
@@ -95,7 +103,8 @@ public sealed class FiscalDocument
         Guid? buyerPartyId = null,
         string? buyerTaxId = null,
         Guid? replacesDocumentId = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IssuerSnapshot? issuer = null)
     {
         if (string.IsNullOrWhiteSpace(fullNumber))
         {
@@ -123,6 +132,11 @@ public sealed class FiscalDocument
             FullNumber = fullNumber,
             IssuedAt = now,
             IssuerTaxId = issuerTaxId,
+            LegalEntityId = issuer?.LegalEntityId,
+            IssuerLegalName = issuer?.LegalName,
+            IssuerTradeName = issuer?.TradeName,
+            IssuerFiscalAddress = issuer?.FiscalAddress,
+            EstablishmentAddress = issuer?.EstablishmentAddress,
             BuyerPartyId = buyerPartyId,
             BuyerTaxId = buyerTaxId,
             BuyerName = buyerName.Trim(),
@@ -164,3 +178,14 @@ public sealed class FiscalDocument
         VoidReason = reason.Trim();
     }
 }
+
+/// <summary>
+/// Emisor tal como queda congelado en el documento: la razón social de la sede que emitió, con su
+/// domicilio fiscal y la dirección del establecimiento (FAC-9).
+/// </summary>
+public sealed record IssuerSnapshot(
+    Guid LegalEntityId,
+    string LegalName,
+    string? TradeName,
+    string? FiscalAddress,
+    string? EstablishmentAddress);

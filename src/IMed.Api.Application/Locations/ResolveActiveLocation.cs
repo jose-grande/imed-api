@@ -16,8 +16,8 @@ namespace IMed.Api.Application.Locations;
 ///   <item>La sede principal de la organización.</item>
 /// </list>
 ///
-/// <para>Un usuario sin asignaciones cae en la sede principal en vez de quedar bloqueado: en una
-/// clínica de una sola sede nadie va a asignar a nadie, y exigirlo convertiría el eje en un trámite.</para>
+/// <para>Un usuario sin asignaciones queda asignado a la sede principal en el acto (FAC-9): nunca
+/// opera "en todas".</para>
 /// </summary>
 public sealed class ResolveActiveLocationHandler(
     ILocationRepository locations,
@@ -38,6 +38,15 @@ public sealed class ResolveActiveLocationHandler(
             ? []
             : await locations.ListForUserAsync(organizationId, userId.Value, ct);
 
+        // Todo usuario tiene sede (FAC-9). Uno que llega sin ninguna queda en la principal antes de
+        // decidir nada: si no, "sin asignaciones" equivalía a "todas", y la sede decide con qué
+        // razón social se factura lo que atiende.
+        if (userId is { } usuario && assignments.Count == 0
+            && await provisioning.EnsureUserAssignedAsync(organizationId, usuario, null, ct))
+        {
+            assignments = await locations.ListForUserAsync(organizationId, usuario, ct);
+        }
+
         if (requestedLocationId is { } requested && requested != Guid.Empty)
         {
             var target = await locations.GetAsync(organizationId, requested, ct)
@@ -46,10 +55,8 @@ public sealed class ResolveActiveLocationHandler(
             {
                 throw new ArgumentException("La sede indicada está desactivada.", nameof(requestedLocationId));
             }
-            // Sin asignaciones el usuario puede operar en cualquier sede de su organización; con
-            // asignaciones, solo en las suyas. Así el eje no estorba a la clínica de una sede y
-            // sí limita a quien tiene un ámbito definido.
-            if (assignments.Count > 0 && !assignments.Any(a => a.Location.Id == requested))
+            // Solo en sus sedes. (Sin usuario —procesos internos— no hay a quién restringir.)
+            if (userId is not null && !assignments.Any(a => a.Location.Id == requested))
             {
                 throw new ArgumentException("No tenés asignada esa sede.", nameof(requestedLocationId));
             }

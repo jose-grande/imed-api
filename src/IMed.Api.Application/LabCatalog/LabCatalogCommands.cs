@@ -29,7 +29,7 @@ internal static class LabCatalogParsing
 
 public sealed record CreateLabTestCommand(
     Guid? OrganizationId, string Code, string Name, string Datatype, string? LoincCode, string? Unit,
-    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction,
+    string Department, int? FastingHoursMin, int? FastingHoursMax, string? CollectionType, string? PatientInstruction,
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
     decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 
@@ -43,7 +43,7 @@ public sealed class CreateLabTestHandler(ILabCatalogRepository repo, TimeProvide
         }
         var test = LabTestDefinition.Create(
             cmd.Code, cmd.Name, LabCatalogParsing.Datatype(cmd.Datatype), cmd.LoincCode, cmd.Unit,
-            LabCatalogParsing.Department(cmd.Department), cmd.FastingHours, cmd.CollectionType,
+            LabCatalogParsing.Department(cmd.Department), cmd.FastingHoursMin, cmd.FastingHoursMax, cmd.CollectionType,
             cmd.PatientInstruction, cmd.OrganizationId, active: true, timeProvider: timeProvider);
         test.SetSpecimenMapping(
             cmd.SpecimenTypeId, cmd.TubeTypeId, LabCatalogParsing.CollectionModeOrNull(cmd.CollectionMode), timeProvider);
@@ -56,7 +56,7 @@ public sealed class CreateLabTestHandler(ILabCatalogRepository repo, TimeProvide
 
 public sealed record UpdateLabTestCommand(
     Guid Id, string Name, string Datatype, string? LoincCode, string? Unit,
-    string Department, int? FastingHours, string? CollectionType, string? PatientInstruction,
+    string Department, int? FastingHoursMin, int? FastingHoursMax, string? CollectionType, string? PatientInstruction,
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
     decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
 
@@ -67,7 +67,7 @@ public sealed class UpdateLabTestHandler(ILabCatalogRepository repo, TimeProvide
         var test = await repo.GetTestByIdAsync(cmd.Id, cancellationToken)
             ?? throw new KeyNotFoundException($"Prueba '{cmd.Id}' no existe.");
         test.Edit(cmd.Name, LabCatalogParsing.Datatype(cmd.Datatype), cmd.LoincCode, cmd.Unit,
-            LabCatalogParsing.Department(cmd.Department), cmd.FastingHours, cmd.CollectionType,
+            LabCatalogParsing.Department(cmd.Department), cmd.FastingHoursMin, cmd.FastingHoursMax, cmd.CollectionType,
             cmd.PatientInstruction, timeProvider);
         test.SetSpecimenMapping(
             cmd.SpecimenTypeId, cmd.TubeTypeId, LabCatalogParsing.CollectionModeOrNull(cmd.CollectionMode), timeProvider);

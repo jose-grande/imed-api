@@ -34,6 +34,8 @@ public sealed class ClinicClock : IClinicClock
         _zone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
     }
 
-    public DateOnly Today() =>
-        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_timeProvider.GetUtcNow(), _zone).DateTime);
+    public DateOnly Today() => DateOf(_timeProvider.GetUtcNow());
+
+    public DateOnly DateOf(DateTimeOffset instant) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, _zone).DateTime);
 }

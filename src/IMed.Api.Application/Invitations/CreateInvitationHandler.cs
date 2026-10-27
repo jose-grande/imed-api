@@ -28,7 +28,9 @@ public sealed class CreateInvitationHandler(
     IAppAuditLog auditLog,
     InvitationKeycloakOptions kcInviteOptions,
     ILogger<CreateInvitationHandler> logger,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    ILocationRepository locations,
+    ILocationProvisioning locationProvisioning)
 {
     public async Task<CreateInvitationResult> HandleAsync(
         CreateInvitationCommand command,
@@ -53,6 +55,19 @@ public sealed class CreateInvitationHandler(
                     $"SpecialtyHint '{command.SpecialtyHint}' no existe en el catálogo.",
                     nameof(command));
             _ = specialty;
+        }
+
+        // Las sedes se validan antes de crear nada en Keycloak: una sede ajena o inactiva no puede
+        // descubrirse con el usuario ya creado (FAC-9).
+        var sedesPedidas = (command.LocationIds ?? []).Distinct().ToList();
+        if (sedesPedidas.Count > 0)
+        {
+            var activas = (await locations.ListAsync(command.OrganizationId, activeOnly: true, cancellationToken))
+                .Select(l => l.Id).ToHashSet();
+            if (sedesPedidas.Any(id => !activas.Contains(id)))
+            {
+                throw new ArgumentException("Alguna de las sedes no existe o está inactiva.", nameof(command));
+            }
         }
 
         // 1. Idempotency: ¿ya hay invitación pending para este email en esta org?
@@ -129,6 +144,20 @@ public sealed class CreateInvitationHandler(
         invitation.AttachKeycloakUser(keycloakUserId);
 
         await persistence.CreatePendingAsync(invitation, command.CreatedBy, cancellationToken);
+
+        // 5.5 Sedes (FAC-9). Se asignan ya, con el usuario de Keycloak recién creado: cuando acepte
+        //     y entre por primera vez, su selector de sede ya sabe dónde trabaja.
+        if (sedesPedidas.Count > 0)
+        {
+            await locations.ReplaceAssignmentsAsync(
+                command.OrganizationId, keycloakUserId, sedesPedidas, sedesPedidas[0],
+                command.CreatedBy, cancellationToken);
+        }
+        else
+        {
+            await locationProvisioning.EnsureUserAssignedAsync(
+                command.OrganizationId, keycloakUserId, command.CreatedBy, cancellationToken);
+        }
 
         // 6. Hot-path: disparar email via KC. Si falla, escribimos outbox event
         //    para retry idempotente (KC genera un token nuevo cada vez que se invoca).

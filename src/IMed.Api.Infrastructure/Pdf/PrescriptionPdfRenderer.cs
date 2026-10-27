@@ -105,18 +105,35 @@ public sealed class PrescriptionPdfRenderer : IPrescriptionPdfRenderer
     {
         var table = section.AddTable();
         table.Borders.Width = 0;
-        table.AddColumn(Unit.FromCentimeter(9));
-        table.AddColumn(Unit.FromCentimeter(7.6));
-        var row = table.AddRow();
 
-        var left = row.Cells[0];
+        // Con logo el encabezado pasa a tres columnas —logo, clínica, profesional— sin cambiar
+        // el ancho total (3.4 + 5.6 + 7.6 = 9 + 7.6).
+        var logo = model.Organization.Logo;
+        var withLogo = logo is not null;
+        if (withLogo)
+        {
+            table.AddColumn(Unit.FromCentimeter(3.4));
+        }
+        table.AddColumn(Unit.FromCentimeter(withLogo ? 5.6 : 9));
+        table.AddColumn(Unit.FromCentimeter(7.6));
+
+        var row = table.AddRow();
+        row.VerticalAlignment = VerticalAlignment.Center;
+
+        var column = 0;
+        if (withLogo)
+        {
+            PdfLogoRenderer.TryDraw(row.Cells[column++], logo);
+        }
+
+        var left = row.Cells[column];
         AddStyledParagraph(left, model.Organization.Name, "OrgTitle");
         if (!string.IsNullOrWhiteSpace(model.Organization.TaxId))
         {
             AddStyledParagraph(left, $"RTN: {model.Organization.TaxId}", "Subtle");
         }
 
-        var right = row.Cells[1];
+        var right = row.Cells[column + 1];
         right.Format.Alignment = ParagraphAlignment.Right;
         var practName = FormatPractitionerName(model.Practitioner);
         AddStyledParagraph(right, practName, "RxTitle").Format.Alignment = ParagraphAlignment.Right;

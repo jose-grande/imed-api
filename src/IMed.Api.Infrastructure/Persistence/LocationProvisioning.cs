@@ -1,5 +1,6 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Locations;
+using IMed.Api.Domain.Organizations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -54,10 +55,12 @@ public sealed class LocationProvisioning(
         }
 
         var name = string.IsNullOrWhiteSpace(organizationName) ? "Sede principal" : organizationName!.Trim();
+        var legalEntity = await EnsureDefaultLegalEntityAsync(organizationId, organizationName, null, ct);
         var location = OrganizationLocation.Create(
-            organizationId, DefaultCode, name, isDefault: true, timeProvider);
+            organizationId, DefaultCode, name, legalEntity.Id, isDefault: true, timeProvider: timeProvider);
 
         db.OrganizationLocations.Add(location);
+        LocationFhirSyncOutbox.EnqueueLocation(db, organizationId, location.Id);
         try
         {
             await db.SaveChangesAsync(ct);
@@ -78,5 +81,81 @@ public sealed class LocationProvisioning(
 
         logger.LogInformation("Sede principal creada para la org {OrgId}.", organizationId);
         return location;
+    }
+
+    public async Task<LegalEntity> EnsureDefaultLegalEntityAsync(
+        Guid organizationId, string? organizationName = null, string? taxId = null, CancellationToken ct = default)
+    {
+        if (organizationId == Guid.Empty)
+        {
+            throw new ArgumentException("organizationId es obligatorio.", nameof(organizationId));
+        }
+
+        var existing = await db.LegalEntities
+            .FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.IsDefault, ct);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        // El nombre sale, en orden, del que pasó el llamador, del registrado al contratar, o de
+        // un genérico que la pantalla invita a corregir. Ninguno es la razón social legal con
+        // certeza: por eso la emisión exige el RTN y no se conforma con que exista la fila.
+        var name = organizationName;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = await db.OrganizationSubscriptions.AsNoTracking()
+                .Where(x => x.OrganizationId == organizationId)
+                .Select(x => x.Name)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        var entity = LegalEntity.CreateDefault(
+            organizationId, string.IsNullOrWhiteSpace(name) ? "Razón social principal" : name!, taxId, timeProvider);
+        db.LegalEntities.Add(entity);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Misma carrera que la sede principal: el índice único filtrado deja ganar a una.
+            db.Entry(entity).State = EntityState.Detached;
+            return await db.LegalEntities
+                .FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.IsDefault, ct)
+                ?? throw new InvalidOperationException("No se pudo crear la razón social por defecto.");
+        }
+
+        logger.LogInformation("Razón social por defecto creada para la org {OrgId}.", organizationId);
+        return entity;
+    }
+
+    public async Task<bool> EnsureUserAssignedAsync(
+        Guid organizationId, Guid userId, Guid? assignedBy = null, CancellationToken ct = default)
+    {
+        if (await db.UserLocations.AnyAsync(x => x.OrganizationId == organizationId && x.UserId == userId, ct))
+        {
+            return false;
+        }
+
+        var principal = await EnsureDefaultLocationAsync(organizationId, null, ct);
+        db.UserLocations.Add(UserLocationAssignment.Create(
+            organizationId, userId, principal.Id, isPrimary: true, assignedBy, timeProvider));
+        PractitionerLocationsOutbox.Enqueue(db, organizationId, userId);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Dos requests del mismo usuario a la vez: la PK (org, user, sede) deja ganar a uno.
+            db.ChangeTracker.Clear();
+            return false;
+        }
+
+        logger.LogInformation(
+            "Usuario {UserId} asignado a la sede principal de la org {OrgId}: no tenía ninguna.",
+            userId, organizationId);
+        return true;
     }
 }

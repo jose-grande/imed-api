@@ -43,7 +43,8 @@ public sealed record PdfIssuerInfo(
     string LegalName,
     string? TaxId,
     string? Address,
-    string? Phone);
+    string? Phone,
+    PdfLogo? Logo = null);
 
 public sealed record PdfBuyerInfo(string Name, string? TaxId);
 

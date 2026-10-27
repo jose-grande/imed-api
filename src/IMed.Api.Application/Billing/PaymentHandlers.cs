@@ -56,8 +56,26 @@ public sealed record ReceivePaymentResult(
 /// vez de generar un vuelto que la caja no puede dar.</para>
 /// </summary>
 public sealed class ReceivePaymentHandler(
-    ICashRepository cash, IInvoiceRepository invoices)
+    ICashRepository cash,
+    IInvoiceRepository invoices,
+    IFiscalRepository fiscal,
+    ILocationRepository locations,
+    ILegalEntityRepository legalEntities)
 {
+    /// <summary>
+    /// Razón social de una factura anterior a FAC-9, que no la guarda: la de la sede de su
+    /// documento fiscal.
+    /// </summary>
+    private async Task<Guid?> RazonDeLaFacturaAsync(Guid orgId, Invoice factura, CancellationToken ct)
+    {
+        var documento = await invoices.GetFiscalDocumentAsync(orgId, factura.Id, ct);
+        if (documento?.LegalEntityId is { } congelada)
+        {
+            return congelada;
+        }
+        return documento is null ? null : (await locations.GetAsync(orgId, documento.LocationId, ct))?.LegalEntityId;
+    }
+
     public async Task<ReceivePaymentResult> HandleAsync(
         ReceivePaymentCommand cmd, CancellationToken ct = default)
     {
@@ -101,6 +119,28 @@ public sealed class ReceivePaymentHandler(
         if (facturas.Count == 0)
         {
             return ReceivePaymentResult.Reject("sin_facturas", "No se indicó qué cobrar.");
+        }
+
+        // ── La caja cobra solo lo de su razón social (FAC-9, D5) ──
+        // El dinero entra al arqueo de esta caja y a los libros de su razón social. Cobrar acá
+        // una factura de otra persona jurídica dejaría a las dos descuadradas. Dentro de la misma
+        // razón social sí se cobra lo emitido en otra sucursal: es el mismo contribuyente.
+        var caja = await fiscal.GetCashPointAsync(cmd.OrganizationId, turno.CashPointId, ct);
+        var sedeCaja = caja is null ? null : await locations.GetAsync(cmd.OrganizationId, caja.LocationId, ct);
+        if (sedeCaja is not null)
+        {
+            foreach (var f in facturas)
+            {
+                var emisora = f.LegalEntityId ?? await RazonDeLaFacturaAsync(cmd.OrganizationId, f, ct);
+                if (emisora is { } razonFactura && razonFactura != sedeCaja.LegalEntityId)
+                {
+                    var nombre = (await legalEntities.GetAsync(cmd.OrganizationId, razonFactura, ct))?.LegalName
+                        ?? "otra razón social";
+                    return ReceivePaymentResult.Reject(
+                        "factura_de_otro_emisor",
+                        $"La factura es de {nombre}: se cobra en una caja de esa razón social.");
+                }
+            }
         }
 
         var porCobrar = facturas.Sum(f => f.Balance);

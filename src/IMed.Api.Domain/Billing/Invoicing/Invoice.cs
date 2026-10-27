@@ -16,6 +16,12 @@ public sealed class Invoice
     public Guid OrganizationId { get; private set; }
     public Guid AccountId { get; private set; }
     public Guid BillToPartyId { get; private set; }
+
+    /// <summary>Sede que emitió (FAC-9). Null mientras es borrador.</summary>
+    public Guid? LocationId { get; private set; }
+
+    /// <summary>Razón social que emitió (FAC-9). Decide qué caja puede cobrarla.</summary>
+    public Guid? LegalEntityId { get; private set; }
     public BillToKind BillToKind { get; private set; }
 
     public DateOnly IssueDate { get; private set; }
@@ -108,6 +114,13 @@ public sealed class Invoice
             2, MidpointRounding.AwayFromZero);
 
     /// <summary>Marca la factura como timbrada y la deja inmutable.</summary>
+    /// <summary>Fija quién emite: la sede y su razón social (FAC-9).</summary>
+    public void AssignIssuer(Guid locationId, Guid legalEntityId)
+    {
+        LocationId = locationId;
+        LegalEntityId = legalEntityId;
+    }
+
     public void MarkIssued(Guid fiscalDocumentId, TimeProvider? timeProvider = null)
     {
         if (Status != InvoiceStatus.Draft)

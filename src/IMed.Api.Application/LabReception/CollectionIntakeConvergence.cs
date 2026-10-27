@@ -1,6 +1,7 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Lab;
 using Microsoft.Extensions.Logging;
+using IMed.Api.Domain.Catalogs.Lab;
 
 namespace IMed.Api.Application.LabReception;
 
@@ -84,12 +85,10 @@ public sealed class CollectionIntakeConvergence(
         var testsByCode = (await catalog.SearchTestsAsync(orgId, null, null, activeOnly: false, CatalogLookupLimit, ct))
             .GroupBy(t => t.Code, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-        var fastingHours = container.Items
-            .Select(i => testsByCode.GetValueOrDefault(i.LabTestCode)?.FastingHours)
-            .Where(h => h is not null)
-            .Select(h => h!.Value)
-            .DefaultIfEmpty(0)
-            .Max();
+        var fasting = FastingWindow.Combine(container.Items
+            .Select(i => testsByCode.GetValueOrDefault(i.LabTestCode))
+            .Where(t => t is not null)
+            .Select(t => (t!.FastingHoursMin, t.FastingHoursMax)));
 
         // Practitioner del técnico que resolvió el QC → collector de la muestra y agente de la
         // cadena de custodia, igual que en el camino legacy. Sin esto la muestra queda sin firma
@@ -113,7 +112,7 @@ public sealed class CollectionIntakeConvergence(
                 AccessionNumber: container.AccessionNumber,
                 ReceivedTime: now.ToString("o"),
                 CollectedDateTime: container.CollectedAt?.ToString("o"),
-                FastingHours: fastingHours == 0 ? null : fastingHours,
+                FastingHours: fasting.MinHours,
                 Note: null,
                 AdditionalServiceRequestFhirIds: serviceRequestIds.Skip(1).ToList(),
                 CollectorPractitionerId: collectorRef,
@@ -132,7 +131,7 @@ public sealed class CollectionIntakeConvergence(
                 order.PatientFhirId,
                 OrderRouting.InHouse, // se tomó y procesó en la sede
                 LabRouting.ParsePriority(order.Priority),
-                fastingRequired: fastingHours > 0,
+                fastingRequired: fasting.Required,
                 timeProvider: timeProvider);
 
             intake.Classify(order.Requisition, container.SpecimenTypeCode, container.TubeTypeCode, timeProvider);
