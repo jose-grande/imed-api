@@ -1,3 +1,4 @@
+using IMed.Api.Infrastructure.Inventory;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Abstractions.Email;
 using IMed.Api.Application.Abstractions.Terminology;
@@ -81,6 +82,8 @@ public static class DependencyInjection
         services.AddTerminology();
         services.AddPdf();
         services.AddUseCases();
+        // Inventario y farmacia (Stream B): su registro vive en Inventory/InventoryModule.cs.
+        services.AddInventoryModule();
         services.AddNotifications();
         services.AddOutbox(configuration);
         services.AddSeeders();

@@ -194,6 +194,9 @@ app.MapLabWorklistEndpoints();
 app.MapLabResultsEndpoints();
 app.MapLabRulesEndpoints();
 app.MapLabDashboardEndpoints();
+// Inventario y farmacia (Stream B).
+app.MapInventoryEndpoints();
+app.MapPharmacyEndpoints();
 
 // El proxy va último: es un catch-all de /fhir/** y no debe sombrear ninguna ruta propia.
 app.MapFhirProxy();
