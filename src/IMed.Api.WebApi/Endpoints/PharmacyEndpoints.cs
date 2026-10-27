@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Billing;
 using IMed.Api.Application.Pharmacy;
 using IMed.Api.Domain.Authorization;
 using IMed.Api.WebApi.Http;
@@ -34,6 +35,8 @@ public static class PharmacyEndpoints
         g.MapPost("/sales/{id:guid}/invoice", InvoiceAsync).RequireAuthorization(vender);
         g.MapPost("/sales/{id:guid}/collect", CollectAsync).RequireAuthorization(vender);
         g.MapPost("/sales/{id:guid}/cancel", CancelAsync).RequireAuthorization(vender);
+        g.MapGet("/sales/{id:guid}/invoice/pdf", InvoicePdfAsync).RequireAuthorization(vender)
+            .WithSummary("PDF de la factura de una venta libre (ticket con format=thermal80), para el mostrador.");
         return app;
     }
 
@@ -109,6 +112,27 @@ public static class PharmacyEndpoints
         EndpointRun.Org(p, async org => EndpointRun.User(p) is not { } user
             ? EndpointRun.Forbidden("El cobro necesita saber quién lo recibe.")
             : await h.CollectAsync(org, user, id, body, ct) is { } r ? Results.Ok(r) : Results.NotFound());
+
+    /// <summary>
+    /// El mostrador imprime la factura de su venta sin necesitar el permiso de lectura de todo
+    /// facturación: solo la de una venta que existe en farmacia.
+    /// </summary>
+    private static Task<IResult> InvoicePdfAsync(
+        Guid id, string? format, bool? reprint, ClaimsPrincipal p, DispenseReader ventas, GetInvoicePdfHandler pdfs,
+        CancellationToken ct) =>
+        EndpointRun.Org(p, async org =>
+        {
+            var venta = await ventas.GetAsync(org, id, ct);
+            if (venta?.InvoiceId is not { } facturaId)
+            {
+                return Results.NotFound();
+            }
+            var plantilla = string.Equals(format, "thermal80", StringComparison.OrdinalIgnoreCase)
+                ? InvoicePrintFormat.Thermal80
+                : InvoicePrintFormat.Letter;
+            var pdf = await pdfs.HandleAsync(org, facturaId, plantilla, reprint ?? false, ct);
+            return pdf is null ? Results.NotFound() : Results.File(pdf.Bytes, "application/pdf", pdf.FileName);
+        });
 
     private static Task<IResult> CancelAsync(
         Guid id, ReasonRequest body, ClaimsPrincipal p, OverTheCounterSaleHandler h, CancellationToken ct) =>

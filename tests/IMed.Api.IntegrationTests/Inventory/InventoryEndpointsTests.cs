@@ -99,6 +99,12 @@ public sealed class InventoryEndpointsTests(ImedApiFixture fixture) : IAsyncLife
         var r = (await venta.Content.ReadFromJsonAsync<SaleResultDto>())!;
         r.Invoice!.GrandTotal.Should().Be(6m);
 
+        // El mostrador imprime su factura sin el permiso de lectura de todo facturación.
+        var pdf = await auxiliar.GetAsync($"/api/pharmacy/sales/{r.Sale.Id}/invoice/pdf?format=thermal80");
+        pdf.StatusCode.Should().Be(HttpStatusCode.OK);
+        pdf.Content.Headers.ContentType!.MediaType.Should().Be("application/pdf");
+        (await auxiliar.GetAsync($"/api/billing/invoices/{r.Invoice.Id}/pdf")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
         var bodeguero = Cliente(e, "warehouse_keeper");
         (await bodeguero.GetAsync("/api/pharmacy/queue")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await bodeguero.GetAsync($"/api/pharmacy/dispenses/{r.Sale.Id}")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
