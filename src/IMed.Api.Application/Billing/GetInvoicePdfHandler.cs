@@ -27,7 +27,8 @@ public sealed class GetInvoicePdfHandler(
     IInvoicePdfRenderer renderer,
     IOrganizationBrandingRepository branding,
     ILocationRepository locations,
-    ILegalEntityRepository legalEntities)
+    ILegalEntityRepository legalEntities,
+    ICreditNoteRepository creditNotes)
 {
     public async Task<GetInvoicePdfResult?> HandleAsync(
         Guid orgId,
@@ -36,8 +37,11 @@ public sealed class GetInvoicePdfHandler(
         bool isReprint = false,
         CancellationToken ct = default)
     {
+        // El id puede ser de una factura o de una nota de crédito (A9): las dos se imprimen igual,
+        // la nota con la referencia a la factura que modifica.
         var factura = await invoices.GetAsync(orgId, invoiceId, ct);
-        if (factura is null)
+        var nota = factura is null ? await creditNotes.GetAsync(orgId, invoiceId, ct) : null;
+        if (factura is null && nota is null)
         {
             return null;
         }
@@ -78,19 +82,28 @@ public sealed class GetInvoicePdfHandler(
                 documento.RangeSnapshot,
                 documento.LimitDateSnapshot,
                 documento.Status == FiscalDocumentStatus.Voided),
-            Lines: factura.Lines
-                .OrderBy(l => l.LineNumber)
-                .Select(l => new PdfInvoiceLine(
-                    l.LineNumber, l.DescriptionSnapshot, l.Quantity, l.UnitPrice,
-                    l.DiscountAmount, l.Total, MarcaTributaria(l.TaxTreatment, l.TaxRate)))
-                .ToList(),
+            Lines: factura is not null
+                ? factura.Lines
+                    .OrderBy(l => l.LineNumber)
+                    .Select(l => new PdfInvoiceLine(
+                        l.LineNumber, l.DescriptionSnapshot, l.Quantity, l.UnitPrice,
+                        l.DiscountAmount, l.Total, MarcaTributaria(l.TaxTreatment, l.TaxRate)))
+                    .ToList()
+                : nota!.Lines
+                    .OrderBy(l => l.LineNumber)
+                    .Select(l => new PdfInvoiceLine(
+                        l.LineNumber, l.DescriptionSnapshot, l.Quantity, l.UnitPrice,
+                        l.DiscountAmount, l.Total, MarcaTributaria(l.TaxTreatment, l.TaxRate)))
+                    .ToList(),
             Totals: new PdfInvoiceTotals(
                 documento.SubtotalExempt, documento.SubtotalExonerated,
                 documento.SubtotalTaxed15, documento.SubtotalTaxed18,
                 documento.DiscountTotal, documento.TaxTotal, documento.GrandTotal,
                 documento.AmountInWords),
             IsReprint: isReprint,
-            VoidReason: documento.VoidReason);
+            VoidReason: documento.VoidReason,
+            Reference: nota is null ? null
+                : $"Modifica la factura {(await invoices.GetFiscalDocumentAsync(orgId, nota.InvoiceId, ct))?.FullNumber ?? "—"} — {nota.Reason}");
 
         var bytes = renderer.Render(modelo, format);
         return new GetInvoicePdfResult(bytes, $"{documento.FullNumber}.pdf");

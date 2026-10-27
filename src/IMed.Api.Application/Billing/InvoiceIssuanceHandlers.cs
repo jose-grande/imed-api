@@ -17,7 +17,9 @@ public sealed record InvoiceLineDto(
     decimal DiscountAmount,
     decimal NetAmount,
     decimal TaxAmount,
-    decimal Total);
+    decimal Total,
+    /// <summary>Id de la línea: es lo que pide la nota de crédito por líneas (A9).</summary>
+    Guid? Id = null);
 
 public sealed record FiscalDocumentDto(
     Guid Id,
@@ -60,7 +62,9 @@ public sealed record InvoiceDto(
     FiscalDocumentDto? FiscalDocument,
     Guid? LocationId = null,
     Guid? LegalEntityId = null,
-    IReadOnlyList<PendingIssuerDto>? PendingOtherIssuers = null);
+    IReadOnlyList<PendingIssuerDto>? PendingOtherIssuers = null,
+    /// <summary>Suma de las notas de crédito emitidas contra la factura (A9).</summary>
+    decimal CreditedTotal = 0m);
 
 /// <summary>
 /// Cargos de la cuenta que quedaron sin facturar porque se prestaron en una sede de otra razón
@@ -474,10 +478,11 @@ public static class InvoiceMapper
             i.Lines.OrderBy(l => l.LineNumber).Select(l => new InvoiceLineDto(
                 l.LineNumber, l.ChargeId, l.DescriptionSnapshot, l.TaxCodeSnapshot,
                 l.TaxTreatment.ToString(), l.TaxRate, l.Quantity, l.UnitPrice,
-                l.DiscountAmount, l.NetAmount, l.TaxAmount, l.Total)).ToList(),
+                l.DiscountAmount, l.NetAmount, l.TaxAmount, l.Total, l.Id)).ToList(),
             d is null ? null : ToDto(d),
             i.LocationId ?? d?.LocationId,
-            i.LegalEntityId ?? d?.LegalEntityId);
+            i.LegalEntityId ?? d?.LegalEntityId,
+            CreditedTotal: i.CreditedTotal);
 
     public static FiscalDocumentDto ToDto(FiscalDocument d) =>
         new(d.Id, d.FullNumber, d.EstablishmentCode, d.EmissionPointCode, d.DocumentTypeCode,

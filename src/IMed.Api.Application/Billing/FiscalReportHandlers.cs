@@ -148,9 +148,12 @@ public sealed record TaxReportDto(
     decimal GrandTotal,
     Guid? LegalEntityId = null,
     string? LegalName = null,
-    string? TaxId = null);
+    string? TaxId = null,
+    /// <summary>Notas de crédito del período. Sus montos ya están restados de los totales (A9).</summary>
+    int CreditNoteCount = 0);
 
-public sealed class GetTaxReportHandler(IFiscalReportRepository repo, IClinicClock clock, LegalEntityScopeResolver scopes)
+public sealed class GetTaxReportHandler(
+    IFiscalReportRepository repo, IClinicClock clock, LegalEntityScopeResolver scopes, IFiscalRepository fiscal)
 {
     /// <param name="legalEntityId">Razón social que declara (FAC-9). Obligatoria si hay varias.</param>
     public async Task<TaxReportDto> HandleAsync(
@@ -166,20 +169,29 @@ public sealed class GetTaxReportHandler(IFiscalReportRepository repo, IClinicClo
             .ToList();
         var vigentes = docs.Where(d => d.Status != FiscalDocumentStatus.Voided).ToList();
 
+        // Cada tipo de documento declara su signo: la nota de crédito (−1) resta lo que revirtió.
+        // Sumarlas como si fueran facturas declararía de más exactamente lo que se devolvió.
+        var signos = (await fiscal.ListDocumentTypesAsync(orgId, ct))
+            .ToDictionary(t => t.Id, t => t.Sign == 0 ? (short)1 : t.Sign);
+        decimal Neto(Func<FiscalDocument, decimal> monto) =>
+            Round(vigentes.Sum(d => monto(d) * signos.GetValueOrDefault(d.DocumentTypeId, (short)1)));
+        var notas = vigentes.Count(d => signos.GetValueOrDefault(d.DocumentTypeId, (short)1) < 0);
+
         return new TaxReportDto(
             desde, hasta,
-            DocumentCount: vigentes.Count,
+            DocumentCount: vigentes.Count - notas,
             VoidedCount: docs.Count - vigentes.Count,
-            SubtotalExempt: Round(vigentes.Sum(d => d.SubtotalExempt)),
-            SubtotalExonerated: Round(vigentes.Sum(d => d.SubtotalExonerated)),
-            SubtotalTaxed15: Round(vigentes.Sum(d => d.SubtotalTaxed15)),
-            SubtotalTaxed18: Round(vigentes.Sum(d => d.SubtotalTaxed18)),
-            DiscountTotal: Round(vigentes.Sum(d => d.DiscountTotal)),
-            TaxTotal: Round(vigentes.Sum(d => d.TaxTotal)),
-            GrandTotal: Round(vigentes.Sum(d => d.GrandTotal)),
+            SubtotalExempt: Neto(d => d.SubtotalExempt),
+            SubtotalExonerated: Neto(d => d.SubtotalExonerated),
+            SubtotalTaxed15: Neto(d => d.SubtotalTaxed15),
+            SubtotalTaxed18: Neto(d => d.SubtotalTaxed18),
+            DiscountTotal: Neto(d => d.DiscountTotal),
+            TaxTotal: Neto(d => d.TaxTotal),
+            GrandTotal: Neto(d => d.GrandTotal),
             LegalEntityId: alcance.LegalEntity?.Id,
             LegalName: alcance.LegalEntity?.LegalName,
-            TaxId: alcance.LegalEntity?.TaxId);
+            TaxId: alcance.LegalEntity?.TaxId,
+            CreditNoteCount: notas);
     }
 
     private static decimal Round(decimal v) => Math.Round(v, 2, MidpointRounding.AwayFromZero);

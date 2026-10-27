@@ -41,6 +41,9 @@ public sealed class Invoice
     /// <summary>Null hasta timbrar. Una proforma no lo tiene nunca.</summary>
     public Guid? FiscalDocumentId { get; private set; }
 
+    /// <summary>Suma de las notas de crédito emitidas contra esta factura (A9).</summary>
+    public decimal CreditedTotal { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -146,7 +149,7 @@ public sealed class Invoice
         {
             throw new ArgumentOutOfRangeException(nameof(amount), "El cobro tiene que ser positivo.");
         }
-        if (Status is InvoiceStatus.Voided or InvoiceStatus.Draft)
+        if (Status is InvoiceStatus.Voided or InvoiceStatus.Draft or InvoiceStatus.Credited)
         {
             throw new InvalidOperationException(
                 $"Una factura en estado '{Status}' no recibe cobros.");
@@ -160,6 +163,41 @@ public sealed class Invoice
         Balance = Math.Round(Balance - amount, 2, MidpointRounding.AwayFromZero);
         Status = Balance == 0 ? InvoiceStatus.Paid : InvoiceStatus.PartiallyPaid;
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+    }
+
+    /// <summary>
+    /// Registra una nota de crédito por <paramref name="amount"/>. Baja primero lo que la factura
+    /// tenía pendiente; devuelve cuánto bajó. Lo que excede ya estaba cobrado y es devolución.
+    /// </summary>
+    public decimal ApplyCredit(decimal amount, TimeProvider? timeProvider = null)
+    {
+        if (amount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount), "El crédito tiene que ser positivo.");
+        }
+        if (Status is InvoiceStatus.Voided or InvoiceStatus.Draft or InvoiceStatus.Credited)
+        {
+            throw new InvalidOperationException($"Una factura en estado '{Status}' no admite nota de crédito.");
+        }
+        if (CreditedTotal + amount > GrandTotal)
+        {
+            throw new InvalidOperationException(
+                $"La nota de crédito supera lo que queda por acreditar ({GrandTotal - CreditedTotal:N2}).");
+        }
+
+        var aplicado = Math.Min(Balance, amount);
+        Balance = Math.Round(Balance - aplicado, 2, MidpointRounding.AwayFromZero);
+        CreditedTotal = Math.Round(CreditedTotal + amount, 2, MidpointRounding.AwayFromZero);
+        if (CreditedTotal >= GrandTotal)
+        {
+            Status = InvoiceStatus.Credited;
+        }
+        else if (Balance == 0)
+        {
+            Status = InvoiceStatus.Paid;
+        }
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
+        return aplicado;
     }
 
     public void Void(TimeProvider? timeProvider = null)

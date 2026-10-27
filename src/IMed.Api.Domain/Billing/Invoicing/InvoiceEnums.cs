@@ -22,6 +22,9 @@ public enum InvoiceStatus
 
     /// <summary>Anulada dentro de ventana. El correlativo queda consumido.</summary>
     Voided = 4,
+
+    /// <summary>Revertida por completo con notas de crédito (A9). No se cobra ni se anula.</summary>
+    Credited = 5,
 }
 
 public enum FiscalDocumentStatus

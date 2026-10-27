@@ -37,7 +37,12 @@ public sealed record InvoicePdfModel(
     /// Un duplicado que no se anuncia como tal es indistinguible del original.
     /// </summary>
     bool IsReprint = false,
-    string? VoidReason = null);
+    string? VoidReason = null,
+    /// <summary>
+    /// Documento que modifica (nota de crédito, A9): "Modifica la factura 001-002-01-00000007 —
+    /// motivo". El SAR exige que la nota identifique la factura que revierte.
+    /// </summary>
+    string? Reference = null);
 
 public sealed record PdfIssuerInfo(
     string LegalName,

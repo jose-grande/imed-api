@@ -96,6 +96,8 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<CashPoint> CashPoints => Set<CashPoint>();
     public DbSet<BillableItem> BillableItems => Set<BillableItem>();
     public DbSet<BillingSettings> BillingSettings => Set<BillingSettings>();
+    public DbSet<CreditNote> CreditNotes => Set<CreditNote>();
+    public DbSet<CreditNoteLine> CreditNoteLines => Set<CreditNoteLine>();
     public DbSet<PriceList> PriceLists => Set<PriceList>();
     public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
     public DbSet<BillingAccount> BillingAccounts => Set<BillingAccount>();
@@ -572,6 +574,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.TaxTotal).HasPrecision(19, 4).IsRequired();
             e.Property(x => x.GrandTotal).HasPrecision(19, 4).IsRequired();
             e.Property(x => x.Balance).HasPrecision(19, 4).IsRequired();
+            e.Property(x => x.CreditedTotal).HasPrecision(19, 4).IsRequired().HasDefaultValue(0m);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.FiscalDocumentId);
             e.Property(x => x.CreatedAt).IsRequired();
@@ -614,6 +617,36 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
                 .IsUnique()
                 .HasFilter("NOT voided")
                 .HasDatabaseName("ux_invoice_line_org_charge");
+        });
+
+        b.Entity<CreditNote>(e =>
+        {
+            e.ToTable("billing_credit_note");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            e.Property(x => x.Subtotal).HasPrecision(19, 4);
+            e.Property(x => x.DiscountTotal).HasPrecision(19, 4);
+            e.Property(x => x.TaxTotal).HasPrecision(19, 4);
+            e.Property(x => x.GrandTotal).HasPrecision(19, 4);
+            e.Property(x => x.AppliedToBalance).HasPrecision(19, 4);
+            e.Property(x => x.RefundDue).HasPrecision(19, 4);
+            e.HasMany(x => x.Lines).WithOne().HasForeignKey(l => l.CreditNoteId);
+            e.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasIndex(x => new { x.OrganizationId, x.InvoiceId }).HasDatabaseName("ix_credit_note_org_invoice");
+        });
+
+        b.Entity<CreditNoteLine>(e =>
+        {
+            e.ToTable("billing_credit_note_line");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.DescriptionSnapshot).HasMaxLength(300).IsRequired();
+            e.Property(x => x.TaxCodeSnapshot).HasMaxLength(20).IsRequired();
+            e.Property(x => x.TaxTreatment).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.TaxRate).HasPrecision(7, 4);
+            e.Property(x => x.Quantity).HasPrecision(19, 4);
+            e.Property(x => x.UnitPrice).HasPrecision(19, 4);
+            e.Property(x => x.DiscountAmount).HasPrecision(19, 4);
+            e.HasIndex(x => x.InvoiceLineId).HasDatabaseName("ix_credit_note_line_invoice_line");
         });
 
         b.Entity<FiscalDocument>(e =>

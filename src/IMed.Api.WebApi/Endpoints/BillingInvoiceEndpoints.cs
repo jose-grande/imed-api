@@ -43,7 +43,68 @@ public static class BillingInvoiceEndpoints
             .WithSummary("Anula una factura dentro de ventana. El correlativo queda consumido.")
             .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingSupervise));
 
+        group.MapPost("/{invoiceId:guid}/credit-notes", IssueCreditNoteAsync)
+            .WithName("IssueCreditNote")
+            .WithSummary("Emite una nota de crédito total (sin líneas) o por líneas y cantidades.")
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingSupervise));
+
+        group.MapGet("/{invoiceId:guid}/credit-notes", ListCreditNotesAsync)
+            .WithName("ListCreditNotes")
+            .WithSummary("Notas de crédito emitidas contra la factura.");
+
+        app.MapPost("/api/billing/credit-notes/{creditNoteId:guid}/refund", RefundCreditNoteAsync)
+            .WithTags("Billing · Facturas")
+            .WithName("RefundCreditNote")
+            .WithSummary("Paga la devolución de una nota de crédito desde el turno de caja abierto.")
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingCollect));
+
         return app;
+    }
+
+    private static async Task<IResult> IssueCreditNoteAsync(
+        Guid invoiceId, IssueCreditNoteRequest request, ClaimsPrincipal principal,
+        IssueCreditNoteHandler handler, CancellationToken ct)
+    {
+        if (OrgAndUser(principal) is not { } ids)
+        {
+            return Results.Forbid();
+        }
+        var (org, user) = ids;
+        var r = await handler.HandleAsync(new IssueCreditNoteCommand(
+            org, invoiceId, request.Reason ?? string.Empty, user,
+            request.Lines?.Select(l => new CreditNoteLineRequest(l.InvoiceLineId, l.Quantity)).ToList()), ct);
+        return r.Succeeded
+            ? Results.Ok(r.CreditNote)
+            : Results.Problem(
+                title: "No se pudo emitir la nota de crédito", detail: r.Rejected!.Message,
+                statusCode: r.Rejected.Code == "factura_inexistente" ? StatusCodes.Status404NotFound : StatusCodes.Status409Conflict,
+                extensions: new Dictionary<string, object?> { ["code"] = r.Rejected.Code });
+    }
+
+    private static async Task<IResult> ListCreditNotesAsync(
+        Guid invoiceId, ClaimsPrincipal principal, ListCreditNotesHandler handler, CancellationToken ct) =>
+        OrgAndUser(principal) is { } ids
+            ? Results.Ok(await handler.HandleAsync(ids.Org, invoiceId, ct))
+            : Results.Forbid();
+
+    private static async Task<IResult> RefundCreditNoteAsync(
+        Guid creditNoteId, ClaimsPrincipal principal, RefundCreditNoteHandler handler, CancellationToken ct)
+    {
+        if (OrgAndUser(principal) is not { } ids)
+        {
+            return Results.Forbid();
+        }
+        var (nota, error) = await handler.HandleAsync(ids.Org, creditNoteId, ids.User, ct);
+        return nota is not null
+            ? Results.Ok(nota)
+            : Results.Problem(title: "No se pudo registrar la devolución", detail: error, statusCode: StatusCodes.Status409Conflict);
+    }
+
+    private static (Guid Org, Guid User)? OrgAndUser(ClaimsPrincipal principal)
+    {
+        var sub = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub");
+        return Guid.TryParse(principal.FindFirstValue("organization_id"), out var org) && Guid.TryParse(sub, out var user)
+            ? (org, user) : null;
     }
 
     private static async Task<IResult> IssueAsync(
@@ -182,3 +243,7 @@ public sealed record IssueInvoiceRequest(
     string? BuyerName);
 
 public sealed record VoidInvoiceRequest(string Reason);
+
+public sealed record IssueCreditNoteRequest(string? Reason, IReadOnlyList<CreditNoteLineInput>? Lines);
+
+public sealed record CreditNoteLineInput(Guid InvoiceLineId, decimal Quantity);

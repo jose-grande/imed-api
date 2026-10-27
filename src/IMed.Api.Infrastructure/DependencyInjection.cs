@@ -549,6 +549,11 @@ public static class DependencyInjection
         // Corte fiscal y reportes (FAC-8).
         services.AddScoped<GetDailyCashCutHandler>();
         services.AddScoped<GetTaxReportHandler>();
+        // Nota de crédito (A9).
+        services.AddScoped<ICreditNoteRepository, CreditNoteRepository>();
+        services.AddScoped<IssueCreditNoteHandler>();
+        services.AddScoped<ListCreditNotesHandler>();
+        services.AddScoped<RefundCreditNoteHandler>();
         services.AddScoped<GetDocumentLedgerHandler>();
         services.AddScoped<GetExceptionReportHandler>();
         services.AddScoped<CheckInOrderHandler>();

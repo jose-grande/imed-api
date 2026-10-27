@@ -83,6 +83,10 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 
         section.AddParagraph(
             $"Emitida el {m.Fiscal.IssuedAt.ToLocalTime():dd/MM/yyyy HH:mm}").Style = "Subtle";
+        if (!string.IsNullOrWhiteSpace(m.Reference))
+        {
+            section.AddParagraph(m.Reference).Style = "Subtle";
+        }
 
         if (m.IsReprint)
         {
@@ -163,6 +167,10 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         Centered(section, m.Fiscal.DocumentTypeName.ToUpperInvariant(), bold: true);
         Centered(section, m.Fiscal.FullNumber, bold: true);
         Centered(section, m.Fiscal.IssuedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm", Hn), "Subtle");
+        if (!string.IsNullOrWhiteSpace(m.Reference))
+        {
+            Centered(section, m.Reference, "Subtle");
+        }
 
         if (m.IsReprint)
         {
