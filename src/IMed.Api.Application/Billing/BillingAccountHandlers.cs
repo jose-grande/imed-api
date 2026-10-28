@@ -14,7 +14,9 @@ public sealed record BillingAccountDto(
     string? EncounterFhirId,
     string Status,
     DateTimeOffset OpenedAt,
-    DateTimeOffset? ClosedAt);
+    DateTimeOffset? ClosedAt,
+    string Origin = "Manual",
+    string? OriginRef = null);
 
 /// <summary>
 /// El estado de cuenta (pantalla B6). Es la pantalla vertebral del módulo: cualquier otra que
@@ -57,7 +59,8 @@ public sealed class GetAccountStatementHandler(
 
     internal static BillingAccountDto ToDto(BillingAccount a, string? partyName) =>
         new(a.Id, a.Kind.ToString(), a.PartyId, partyName, a.PatientFhirId,
-            a.GuarantorPartyId, a.EncounterFhirId, a.Status.ToString(), a.OpenedAt, a.ClosedAt);
+            a.GuarantorPartyId, a.EncounterFhirId, a.Status.ToString(), a.OpenedAt, a.ClosedAt,
+            a.Origin.ToString(), a.OriginRef);
 }
 
 public sealed class SearchAccountsHandler(

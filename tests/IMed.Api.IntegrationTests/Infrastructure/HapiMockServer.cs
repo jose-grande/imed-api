@@ -833,6 +833,11 @@ public sealed partial class HapiMockServer : IDisposable
             .RespondWith(Response.Create().WithCallback(req =>
             {
                 var id = req.Path.Split('/').Last();
+                // Un paciente sembrado con SeedResource gana: hay pruebas que necesitan su nombre.
+                if (GetResource("Patient", id) is { } sembrado)
+                {
+                    return JsonMessage(HttpStatusCode.OK, sembrado);
+                }
                 return JsonMessage(HttpStatusCode.OK, new
                 {
                     resourceType = "Patient",

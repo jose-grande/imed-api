@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
@@ -274,6 +275,34 @@ public sealed class PricePendingAndAccountsTests(ImedApiFixture fixture) : IAsyn
 
         var invalido = () => resolver.GetOrOpenStandaloneAsync(e.OrgId, BillingAccountOrigin.Encounter, "enc-1", "pat-x", null);
         await invalido.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task CuentaSinNombre_tomaElDelExpediente_yCorrigeLaParteProvisional()
+    {
+        var e = await ArrangeAsync();
+        using var scope = fixture.Factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+        var resolver = sp.GetRequiredService<IEncounterAccountResolver>();
+        var db = sp.GetRequiredService<AppDbContext>();
+
+        // La recepción del laboratorio no sabe el nombre: se lee del Patient.
+        fixture.Hapi.SeedResource(new JsonObject
+        {
+            ["resourceType"] = "Patient",
+            ["id"] = "pat-nombre",
+            ["name"] = new JsonArray(new JsonObject { ["given"] = new JsonArray("Dolores"), ["family"] = "Reyes" }),
+        });
+        await resolver.GetOrOpenStandaloneAsync(e.OrgId, BillingAccountOrigin.LabOrder, "ORD-N1", "pat-nombre", null);
+        (await db.Parties.SingleAsync(p => p.OrganizationId == e.OrgId && p.PatientFhirId == "pat-nombre"))
+            .LegalName.Should().Contain("Dolores");
+
+        // Una parte que quedó como "Paciente" (HAPI no respondió con nombre) se corrige después.
+        await resolver.GetOrOpenStandaloneAsync(e.OrgId, BillingAccountOrigin.LabOrder, "ORD-N2", "pat-sin", null);
+        await resolver.GetOrOpenStandaloneAsync(e.OrgId, BillingAccountOrigin.LabOrder, "ORD-N3", "pat-sin", "Luis Mejía");
+        db.ChangeTracker.Clear();
+        (await db.Parties.SingleAsync(p => p.OrganizationId == e.OrgId && p.PatientFhirId == "pat-sin"))
+            .LegalName.Should().Be("Luis Mejía");
     }
 
     [Fact]

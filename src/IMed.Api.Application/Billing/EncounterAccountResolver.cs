@@ -1,6 +1,7 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Billing;
 using IMed.Api.Domain.Billing.Accounts;
+using Microsoft.Extensions.Logging;
 
 namespace IMed.Api.Application.Billing;
 
@@ -36,8 +37,13 @@ public interface IEncounterAccountResolver
 
 public sealed class EncounterAccountResolver(
     IBillingAccountRepository accounts,
-    IPartyRepository parties) : IEncounterAccountResolver
+    IPartyRepository parties,
+    IHapiFhirClient hapi,
+    ILogger<EncounterAccountResolver> logger) : IEncounterAccountResolver
 {
+    /// <summary>El nombre que recibe la parte cuando nadie supo decir el del paciente.</summary>
+    private const string NombreProvisional = "Paciente";
+
     public async Task<Guid?> GetOrOpenForEncounterAsync(
         Guid organizationId, string encounterFhirId, string patientFhirId, string? patientName,
         CancellationToken ct = default)
@@ -101,6 +107,11 @@ public sealed class EncounterAccountResolver(
     /// <summary>
     /// La parte del paciente, creándola si no existe: obligar a darla de alta aparte convierte
     /// "cobrar una consulta" en dos trámites, y el segundo se olvida.
+    ///
+    /// <para><b>El nombre sale del expediente si el llamador no lo trae.</b> La recepción del
+    /// laboratorio y la farmacia abren cuentas sin saber el nombre; una cuenta a nombre de
+    /// "Paciente" no la encuentra nadie en caja. Por lo mismo, una parte que ya quedó con el nombre
+    /// provisional se corrige la próxima vez que se le abre una cuenta.</para>
     /// </summary>
     private async Task<Guid> ParteDelPacienteAsync(
         Guid organizationId, string patientFhirId, string? patientName, CancellationToken ct)
@@ -108,12 +119,20 @@ public sealed class EncounterAccountResolver(
         var paciente = patientFhirId.Trim();
         if (await parties.FindByPatientAsync(organizationId, paciente, ct) is { } existente)
         {
+            if (existente.LegalName == NombreProvisional
+                && await NombreAsync(organizationId, paciente, patientName, ct) is { } corregido)
+            {
+                existente.UpdateDetails(
+                    corregido, existente.TaxId, existente.TaxIdKind, existente.TradeName,
+                    existente.Address, existente.Email, existente.Phone);
+                await parties.UpdateAsync(existente, ct);
+            }
             return existente.Id;
         }
 
         var nueva = Party.Create(
             organizationId, PartyKind.Patient,
-            legalName: string.IsNullOrWhiteSpace(patientName) ? "Paciente" : patientName.Trim(),
+            legalName: await NombreAsync(organizationId, paciente, patientName, ct) ?? NombreProvisional,
             patientFhirId: paciente);
         if (await parties.TryAddAsync(nueva, ct))
         {
@@ -121,6 +140,27 @@ public sealed class EncounterAccountResolver(
         }
         return (await parties.FindByPatientAsync(organizationId, paciente, ct))?.Id
             ?? throw new InvalidOperationException("No se pudo crear ni encontrar la parte del paciente.");
+    }
+
+    /// <summary>El nombre recibido o, si no vino, el del <c>Patient</c>. Null si no se pudo saber.</summary>
+    private async Task<string?> NombreAsync(
+        Guid organizationId, string patientFhirId, string? patientName, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(patientName))
+        {
+            return patientName.Trim();
+        }
+        try
+        {
+            var p = await hapi.GetPatientAsync(patientFhirId, $"org-{organizationId}", ct);
+            return string.IsNullOrWhiteSpace(p?.DisplayName) ? null : p.DisplayName.Trim();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Sin el nombre la cuenta se abre igual: cobrar no puede depender de que HAPI responda.
+            logger.LogWarning(ex, "No se pudo leer el nombre del paciente {Patient}.", patientFhirId);
+            return null;
+        }
     }
 
     private static void Requerido(string value, string name)
