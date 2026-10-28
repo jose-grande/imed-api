@@ -189,6 +189,7 @@ app.MapPrescriptionsEndpoints();
 app.MapLabOrdersEndpoints();
 app.MapLabCatalogEndpoints();
 app.MapLabReceptionEndpoints();
+app.MapLabCheckoutEndpoints();
 app.MapLabSpecimenEndpoints();
 app.MapLabWorklistEndpoints();
 app.MapLabResultsEndpoints();

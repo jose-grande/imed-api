@@ -528,6 +528,7 @@ public static class DependencyInjection
 
         // Factura y timbrado (FAC-5).
         services.AddScoped<IssueInvoiceHandler>();
+        services.AddScoped<LabOrderCheckoutHandler>();
         services.AddScoped<GetInvoiceHandler>();
         services.AddScoped<ListAccountInvoicesHandler>();
         services.AddScoped<VoidInvoiceHandler>();

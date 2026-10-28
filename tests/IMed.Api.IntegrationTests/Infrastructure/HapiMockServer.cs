@@ -1193,6 +1193,15 @@ public sealed partial class HapiMockServer : IDisposable
         result = d.ResultIds.Select(rid => new { reference = $"Observation/{rid}" }).ToArray()
     };
 
+    /// <summary>
+    /// HAPI no escribe campos vacíos: los omite. Serializar <c>"encounter": null</c> hacía fallar
+    /// al cliente con un caso que en producción no existe (una orden externa no tiene encuentro).
+    /// </summary>
+    private static readonly JsonSerializerOptions OmitirNulos = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
     private static ResponseMessage JsonMessage(HttpStatusCode status, object body)
     {
         return new ResponseMessage
@@ -1204,7 +1213,7 @@ public sealed partial class HapiMockServer : IDisposable
             },
             BodyData = new BodyData
             {
-                BodyAsString = JsonSerializer.Serialize(body),
+                BodyAsString = JsonSerializer.Serialize(body, OmitirNulos),
                 DetectedBodyType = BodyType.String
             }
         };
