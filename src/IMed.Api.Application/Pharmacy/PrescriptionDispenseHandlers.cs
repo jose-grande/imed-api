@@ -263,6 +263,12 @@ public sealed class DispensePrescriptionHandler(
         {
             if (llenado.TryGetValue(r.Id, out var f) && f.Completed)
             {
+                // Puede haberla completado este mismo despacho, reenviado, entre la primera
+                // lectura de la llave y esta: entonces es el reintento, no un segundo despacho.
+                if (await repo.FindDispenseByKeyAsync(organizationId, llave, ct) is { } ganador)
+                {
+                    return new DispenseResult(await reader.ToDtoAsync(ganador, ct), AlreadyProcessed: true);
+                }
                 throw new InvalidOperationException($"La receta de {r.Label} ya se despachó por completo.");
             }
         }
