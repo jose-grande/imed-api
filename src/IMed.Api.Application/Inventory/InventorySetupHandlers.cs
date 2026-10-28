@@ -226,3 +226,123 @@ public sealed class InventorySettingsHandlers(IInventoryRepository repo, IInvent
         return new InventorySettingsDto(s.AdjustmentApprovalThreshold, s.ExpiryAlertDays);
     }
 }
+
+public sealed record InventoryUnitInput(string Name, bool Active = true);
+
+/// <summary>
+/// La lista de unidades base de la organización.
+///
+/// <para><b>Se siembra a pedido</b>, como la bodega general: la primera vez que alguien la mira
+/// arranca con <see cref="InventoryUnit.Defaults"/>, y siempre incluye las unidades que ya usan los
+/// artículos creados cuando el campo era texto libre, para que ninguno quede fuera de la lista.</para>
+/// </summary>
+public sealed class InventoryUnitHandlers(IInventoryRepository repo, IInventoryUnitOfWork uow)
+{
+    public async Task<IReadOnlyList<InventoryUnitDto>> ListAsync(
+        Guid organizationId, bool activeOnly, CancellationToken ct = default)
+    {
+        await EnsureAsync(organizationId, ct);
+        return (await repo.ListUnitsAsync(organizationId, ct))
+            .Where(u => !activeOnly || u.Active)
+            .Select(ToDto)
+            .ToList();
+    }
+
+    public async Task<InventoryUnitDto> CreateAsync(Guid organizationId, InventoryUnitInput input, CancellationToken ct = default)
+    {
+        await EnsureAsync(organizationId, ct);
+        var unidad = InventoryUnit.Create(organizationId, input.Name);
+        if (!input.Active)
+        {
+            unidad.Update(unidad.Name, active: false);
+        }
+        if (!await repo.TryAddUnitAsync(unidad, ct))
+        {
+            throw new ArgumentException($"La unidad \"{unidad.Name}\" ya está en la lista.", nameof(input));
+        }
+        return ToDto(unidad);
+    }
+
+    /// <summary>
+    /// Renombra o activa/desactiva. Un renombre cambia la unidad de los artículos que la usan en la
+    /// misma transacción: es la misma unidad mal escrita, no otra.
+    /// </summary>
+    public async Task<InventoryUnitDto?> UpdateAsync(
+        Guid organizationId, Guid unitId, InventoryUnitInput input, CancellationToken ct = default)
+    {
+        var unidad = await repo.GetUnitAsync(organizationId, unitId, ct);
+        if (unidad is null)
+        {
+            return null;
+        }
+        var anterior = unidad.Name;
+        var nuevo = InventoryUnit.Normalize(input.Name);
+        if (nuevo != anterior && await repo.FindUnitByNameAsync(organizationId, nuevo, ct) is not null)
+        {
+            throw new ArgumentException(
+                $"La unidad \"{nuevo}\" ya está en la lista. Desactivá esta y usá aquella en los artículos.", nameof(input));
+        }
+
+        await uow.ExecuteAsync(async t =>
+        {
+            unidad.Update(nuevo, input.Active);
+            await uow.SaveChangesAsync(t);
+            if (nuevo != anterior)
+            {
+                await repo.RenameItemsBaseUnitAsync(organizationId, anterior, nuevo, t);
+            }
+            return true;
+        }, ct);
+        return ToDto(unidad);
+    }
+
+    /// <summary>
+    /// La unidad con la que se guarda un artículo: tiene que estar en la lista y activa. La que el
+    /// artículo ya tenía se acepta aunque se haya desactivado después, para que editar otro dato
+    /// no obligue a cambiarla.
+    /// </summary>
+    public async Task<string> ValidateForItemAsync(
+        Guid organizationId, string? baseUnit, string? current, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(baseUnit))
+        {
+            throw new ArgumentException(
+                "La unidad base es obligatoria: es la unidad en la que se cuenta todo (tableta, frasco, unidad).",
+                nameof(baseUnit));
+        }
+        var nombre = InventoryUnit.Normalize(baseUnit);
+        if (nombre == current)
+        {
+            return nombre;
+        }
+        await EnsureAsync(organizationId, ct);
+        var unidad = await repo.FindUnitByNameAsync(organizationId, nombre, ct)
+            ?? throw new ArgumentException(
+                $"La unidad \"{nombre}\" no está en la lista de unidades. Agregala en Inventario → Configuración.",
+                nameof(baseUnit));
+        if (!unidad.Active)
+        {
+            throw new ArgumentException($"La unidad \"{nombre}\" está desactivada.", nameof(baseUnit));
+        }
+        return nombre;
+    }
+
+    private async Task EnsureAsync(Guid organizationId, CancellationToken ct)
+    {
+        var existentes = (await repo.ListUnitsAsync(organizationId, ct)).Select(u => u.Name).ToHashSet();
+        var usadas = await repo.ListItemBaseUnitsAsync(organizationId, ct);
+        var semilla = existentes.Count == 0 ? InventoryUnit.Defaults : [];
+        foreach (var nombre in semilla.Concat(usadas).Distinct())
+        {
+            // Una unidad vieja que no cabe en la lista (más larga que el tope) se deja como está.
+            if (existentes.Contains(nombre) || nombre.Length is 0 or > InventoryUnit.NameMaxLength)
+            {
+                continue;
+            }
+            await repo.TryAddUnitAsync(InventoryUnit.Create(organizationId, nombre), ct);
+            existentes.Add(nombre);
+        }
+    }
+
+    public static InventoryUnitDto ToDto(InventoryUnit u) => new(u.Id, u.Name, u.Active);
+}

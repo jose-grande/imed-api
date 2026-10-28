@@ -13,6 +13,7 @@ public sealed partial class AppDbContext
     public DbSet<StockItem> StockItems => Set<StockItem>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<InventoryUnit> InventoryUnits => Set<InventoryUnit>();
     public DbSet<InventorySettings> InventorySettings => Set<InventorySettings>();
     public DbSet<StockLot> StockLots => Set<StockLot>();
     public DbSet<StockMovement> StockMovements => Set<StockMovement>();

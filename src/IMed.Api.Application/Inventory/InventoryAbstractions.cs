@@ -122,6 +122,19 @@ public interface IInventoryRepository
     Task AddSupplierAsync(Supplier supplier, CancellationToken ct = default);
     Task UpdateSupplierAsync(Supplier supplier, CancellationToken ct = default);
 
+    Task<IReadOnlyList<InventoryUnit>> ListUnitsAsync(Guid organizationId, CancellationToken ct = default);
+    Task<InventoryUnit?> GetUnitAsync(Guid organizationId, Guid unitId, CancellationToken ct = default);
+    Task<InventoryUnit?> FindUnitByNameAsync(Guid organizationId, string name, CancellationToken ct = default);
+
+    /// <summary>Agrega la unidad salvo que ya exista con ese nombre (índice único). Guarda.</summary>
+    Task<bool> TryAddUnitAsync(InventoryUnit unit, CancellationToken ct = default);
+
+    /// <summary>Unidades base distintas que ya usan los artículos, para que entren a la lista.</summary>
+    Task<IReadOnlyList<string>> ListItemBaseUnitsAsync(Guid organizationId, CancellationToken ct = default);
+
+    /// <summary>Renombra la unidad base en todos los artículos que la usan. Devuelve cuántos.</summary>
+    Task<int> RenameItemsBaseUnitAsync(Guid organizationId, string oldName, string newName, CancellationToken ct = default);
+
     // ── Lotes ──
     Task<StockLot?> GetLotAsync(Guid organizationId, Guid lotId, CancellationToken ct = default);
     Task<IReadOnlyList<StockLot>> GetLotsAsync(Guid organizationId, IReadOnlyCollection<Guid> ids, CancellationToken ct = default);

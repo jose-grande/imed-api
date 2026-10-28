@@ -46,6 +46,7 @@ public sealed class StockItemCommandHandler(
     IFiscalRepository fiscal,
     IBillableItemProvisioner provisioner,
     IBillingCatalogRepository catalog,
+    InventoryUnitHandlers units,
     ILogger<StockItemCommandHandler> logger)
 {
     public async Task<StockItemDto> CreateAsync(Guid organizationId, StockItemInput input, CancellationToken ct = default)
@@ -60,7 +61,8 @@ public sealed class StockItemCommandHandler(
             throw new ArgumentException($"Ya existe un artículo con el código {codigo}.", nameof(input));
         }
 
-        var item = StockItem.Create(organizationId, codigo, input.Name, tipo, input.BaseUnit, input.RequiresLot, input.Barcode);
+        var unidad = await units.ValidateForItemAsync(organizationId, input.BaseUnit, current: null, ct);
+        var item = StockItem.Create(organizationId, codigo, input.Name, tipo, unidad, input.RequiresLot, input.Barcode);
         await AplicarAsync(organizationId, item, input, esNuevo: true, ct);
         await repo.AddItemAsync(item, ct);
         await uow.SaveChangesAsync(ct);
@@ -77,7 +79,8 @@ public sealed class StockItemCommandHandler(
         {
             return null;
         }
-        item.Rename(input.Name, input.BaseUnit, input.Barcode, input.RequiresLot);
+        var unidad = await units.ValidateForItemAsync(organizationId, input.BaseUnit, item.BaseUnit, ct);
+        item.Rename(input.Name, unidad, input.Barcode, input.RequiresLot);
         await AplicarAsync(organizationId, item, input, esNuevo: false, ct);
         item.SetActive(input.Active);
         await repo.UpdateItemAsync(item, ct);

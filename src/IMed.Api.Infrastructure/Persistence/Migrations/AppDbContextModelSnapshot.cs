@@ -3535,6 +3535,44 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("inventory_settings", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Inventory.InventoryUnit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_unit_org_name");
+
+                    b.ToTable("stock_unit", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Inventory.StockAdjustment", b =>
                 {
                     b.Property<Guid>("Id")

@@ -55,6 +55,8 @@ public sealed record WarehouseDto(
 public sealed record SupplierDto(
     Guid Id, string Name, string? TaxId, string? ContactName, string? Phone, string? Email, bool Active);
 
+public sealed record InventoryUnitDto(Guid Id, string Name, bool Active);
+
 public sealed record InventorySettingsDto(decimal AdjustmentApprovalThreshold, int ExpiryAlertDays);
 
 /// <summary>Existencia de un lote en una bodega, valorizada al promedio de la bodega.</summary>

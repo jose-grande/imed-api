@@ -112,6 +112,23 @@ internal sealed class WarehouseConfiguration : IEntityTypeConfiguration<Warehous
     }
 }
 
+internal sealed class InventoryUnitConfiguration : IEntityTypeConfiguration<InventoryUnit>
+{
+    public void Configure(EntityTypeBuilder<InventoryUnit> e)
+    {
+        e.ToTable("stock_unit");
+        e.HasKey(x => x.Id);
+        e.Property(x => x.OrganizationId).IsRequired();
+        e.Property(x => x.Name).HasMaxLength(InventoryUnit.NameMaxLength).IsRequired();
+        e.Property(x => x.Active).IsRequired();
+        e.Property(x => x.CreatedAt).IsRequired();
+        e.Property(x => x.UpdatedAt).IsRequired();
+
+        // Una unidad por nombre: la lista inicial se siembra a pedido y dos pedidos a la vez no la duplican.
+        e.HasIndex(x => new { x.OrganizationId, x.Name }).IsUnique().HasDatabaseName("ux_stock_unit_org_name");
+    }
+}
+
 internal sealed class SupplierConfiguration : IEntityTypeConfiguration<Supplier>
 {
     public void Configure(EntityTypeBuilder<Supplier> e)

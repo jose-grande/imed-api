@@ -195,6 +195,41 @@ public sealed class InventoryRepository(AppDbContext db) : IInventoryRepository
 
     public Task UpdateSupplierAsync(Supplier supplier, CancellationToken ct = default) => Task.CompletedTask;
 
+    // ── Unidades ──
+
+    public async Task<IReadOnlyList<InventoryUnit>> ListUnitsAsync(Guid organizationId, CancellationToken ct = default) =>
+        await db.InventoryUnits.AsNoTracking().Where(u => u.OrganizationId == organizationId)
+            .OrderBy(u => u.Name).ToListAsync(ct);
+
+    public Task<InventoryUnit?> GetUnitAsync(Guid organizationId, Guid unitId, CancellationToken ct = default) =>
+        db.InventoryUnits.FirstOrDefaultAsync(u => u.OrganizationId == organizationId && u.Id == unitId, ct);
+
+    public Task<InventoryUnit?> FindUnitByNameAsync(Guid organizationId, string name, CancellationToken ct = default) =>
+        db.InventoryUnits.AsNoTracking().FirstOrDefaultAsync(u => u.OrganizationId == organizationId && u.Name == name, ct);
+
+    public async Task<bool> TryAddUnitAsync(InventoryUnit unit, CancellationToken ct = default)
+    {
+        db.InventoryUnits.Add(unit);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: UniqueViolation })
+        {
+            db.Entry(unit).State = EntityState.Detached;
+            return false;
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> ListItemBaseUnitsAsync(Guid organizationId, CancellationToken ct = default) =>
+        await db.StockItems.AsNoTracking().Where(i => i.OrganizationId == organizationId)
+            .Select(i => i.BaseUnit).Distinct().ToListAsync(ct);
+
+    public Task<int> RenameItemsBaseUnitAsync(Guid organizationId, string oldName, string newName, CancellationToken ct = default) =>
+        db.StockItems.Where(i => i.OrganizationId == organizationId && i.BaseUnit == oldName)
+            .ExecuteUpdateAsync(s => s.SetProperty(i => i.BaseUnit, newName), ct);
+
     // ── Lotes ──
 
     public Task<StockLot?> GetLotAsync(Guid organizationId, Guid lotId, CancellationToken ct = default) =>

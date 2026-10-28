@@ -39,6 +39,11 @@ public static class InventoryEndpoints
         g.MapPost("/warehouses", CreateWarehouseAsync).RequireAuthorization(administrar);
         g.MapPut("/warehouses/{id:guid}", UpdateWarehouseAsync).RequireAuthorization(administrar);
 
+        g.MapGet("/units", ListUnitsAsync).WithSummary("Lista de unidades base; la siembra la primera vez.");
+        g.MapPost("/units", CreateUnitAsync).RequireAuthorization(administrar);
+        g.MapPut("/units/{id:guid}", UpdateUnitAsync).RequireAuthorization(administrar)
+            .WithSummary("Renombra (y propaga a los artículos) o activa/desactiva una unidad.");
+
         g.MapGet("/suppliers", ListSuppliersAsync);
         g.MapPost("/suppliers", CreateSupplierAsync).RequireAuthorization(administrar);
         g.MapPut("/suppliers/{id:guid}", UpdateSupplierAsync).RequireAuthorization(administrar);
@@ -133,6 +138,22 @@ public static class InventoryEndpoints
 
     private static Task<IResult> UpdateWarehouseAsync(
         Guid id, WarehouseInput body, ClaimsPrincipal p, WarehouseHandlers h, CancellationToken ct) =>
+        EndpointRun.Org(p, async org => await h.UpdateAsync(org, id, body, ct) is { } dto ? Results.Ok(dto) : Results.NotFound());
+
+    private static Task<IResult> ListUnitsAsync(
+        bool? activeOnly, ClaimsPrincipal p, InventoryUnitHandlers h, CancellationToken ct) =>
+        EndpointRun.Org(p, async org => Results.Ok(await h.ListAsync(org, activeOnly ?? false, ct)));
+
+    private static Task<IResult> CreateUnitAsync(
+        InventoryUnitInput body, ClaimsPrincipal p, InventoryUnitHandlers h, CancellationToken ct) =>
+        EndpointRun.Org(p, async org =>
+        {
+            var dto = await h.CreateAsync(org, body, ct);
+            return Results.Created($"/api/inventory/units/{dto.Id}", dto);
+        });
+
+    private static Task<IResult> UpdateUnitAsync(
+        Guid id, InventoryUnitInput body, ClaimsPrincipal p, InventoryUnitHandlers h, CancellationToken ct) =>
         EndpointRun.Org(p, async org => await h.UpdateAsync(org, id, body, ct) is { } dto ? Results.Ok(dto) : Results.NotFound());
 
     private static Task<IResult> ListSuppliersAsync(

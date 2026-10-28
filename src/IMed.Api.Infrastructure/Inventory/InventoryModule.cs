@@ -29,6 +29,7 @@ public static class InventoryModule
         services.AddScoped<SearchStockItemsHandler>();
         services.AddScoped<WarehouseHandlers>();
         services.AddScoped<SupplierHandlers>();
+        services.AddScoped<InventoryUnitHandlers>();
         services.AddScoped<InventorySettingsHandlers>();
         services.AddScoped<GoodsReceiptHandlers>();
         services.AddScoped<StockMovementHandlers>();
