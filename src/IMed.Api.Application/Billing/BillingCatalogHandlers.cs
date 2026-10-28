@@ -18,7 +18,9 @@ public sealed record BillableItemDto(
     bool Active,
     bool PricePending = false,
     string? SpecialtyCode = null,
-    string? ConsultationType = null);
+    string? ConsultationType = null,
+    /// <summary>Artículo de inventario que lo originó (farmacia, insumos), si es uno.</summary>
+    Guid? StockItemId = null);
 
 /// <summary>Un cobrable con su precio ya resuelto y la razón. Es lo que consume la caja.</summary>
 public sealed record PricedItemDto(
@@ -36,7 +38,7 @@ public static class BillableItemMapper
     public static BillableItemDto ToDto(BillableItem i) =>
         new(i.Id, i.Code, i.Name, i.Kind.ToString(), i.Component.ToString(), i.TaxCodeId,
             i.DefaultPrice, i.PaymentTiming.ToString(), i.LabTestId, i.LabPanelId,
-            i.ServiceCode, i.Active, i.PricePending, i.SpecialtyCode, i.ConsultationType?.ToString());
+            i.ServiceCode, i.Active, i.PricePending, i.SpecialtyCode, i.ConsultationType?.ToString(), i.StockItemId);
 }
 
 public sealed class SearchBillableItemsHandler(IBillingCatalogRepository repo)
@@ -44,7 +46,9 @@ public sealed class SearchBillableItemsHandler(IBillingCatalogRepository repo)
     public async Task<IReadOnlyList<BillableItemDto>> HandleAsync(
         Guid orgId, string? term, bool activeOnly, int limit, CancellationToken ct = default)
     {
-        var rows = await repo.SearchItemsAsync(orgId, term, activeOnly, Math.Clamp(limit, 1, 200), ct);
+        // Hasta 1000: la pantalla del catálogo los trae todos para filtrar y contar por categoría
+        // sin ir al servidor en cada tecla. Un catálogo de laboratorio real pasa de 200.
+        var rows = await repo.SearchItemsAsync(orgId, term, activeOnly, Math.Clamp(limit, 1, 1000), ct);
         return rows.Select(BillableItemMapper.ToDto).ToList();
     }
 }
