@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Lab;
 
@@ -18,14 +19,22 @@ namespace IMed.Api.Application.LabReception;
 /// contenedores —incluidos los ya recibidos— para que se vea "1 de 3" y se note si falta uno.</para>
 /// </summary>
 public sealed class GetTechnicalReceptionHandler(
-    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops)
+    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops,
+    ResolveActiveLocationHandler activeLocation)
 {
     private static readonly ContainerStatus[] Candidate =
         [ContainerStatus.Collected, ContainerStatus.LabelGenerated, ContainerStatus.LabelPrinted];
 
-    public async Task<IReadOnlyList<TechnicalReceptionOrderDto>> HandleAsync(Guid orgId, CancellationToken ct = default)
+    /// <summary>
+    /// Worklist del bench de la sede activa (FAC-9): los tubos que se tomaron en esta sucursal.
+    /// El escaneo no se filtra: un tubo en la mano se resuelve venga de donde venga.
+    /// </summary>
+    public async Task<IReadOnlyList<TechnicalReceptionOrderDto>> HandleAsync(Guid orgId, Guid? userId, CancellationToken ct = default)
     {
-        var rows = await ops.ListSiblingContainersForTechnicalReceptionAsync(orgId, Candidate, ct);
+        var sede = await activeLocation.ResolveScopeAsync(orgId, userId, ct);
+        var rows = (await ops.ListSiblingContainersForTechnicalReceptionAsync(orgId, Candidate, ct))
+            .Where(r => sede.Includes(r.LocationId))
+            .ToList();
         if (rows.Count == 0)
         {
             return [];

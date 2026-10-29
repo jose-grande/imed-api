@@ -27,6 +27,7 @@ public sealed partial class HapiMockServer : IDisposable
     private readonly Dictionary<string, FakePractitionerRole> _rolesById = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakeServiceRequest> _serviceRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _encounterStates = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _encounterLocations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakeObservation> _observations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FakeDiagnosticReport> _diagnosticReports = new(StringComparer.Ordinal);
     private readonly List<CreatedProvenance> _provenances = new();
@@ -97,6 +98,7 @@ public sealed partial class HapiMockServer : IDisposable
         _rolesById.Clear();
         _serviceRequests.Clear();
         _encounterStates.Clear();
+        _encounterLocations.Clear();
         _observations.Clear();
         _diagnosticReports.Clear();
         _provenances.Clear();
@@ -615,6 +617,16 @@ public sealed partial class HapiMockServer : IDisposable
             .RespondWith(Response.Create().WithCallback(req =>
             {
                 var id = req.Path.Split('/').Last();
+                if (_encounterLocations.TryGetValue(id, out var locationRef))
+                {
+                    return JsonMessage(HttpStatusCode.OK, new
+                    {
+                        resourceType = "Encounter",
+                        id,
+                        status = _encounterStates.GetValueOrDefault(id, "in-progress"),
+                        location = new[] { new { location = new { reference = locationRef } } },
+                    });
+                }
                 if (_encounterStates.TryGetValue(id, out var status))
                 {
                     return JsonMessage(HttpStatusCode.OK, new { resourceType = "Encounter", id, status });
@@ -626,6 +638,10 @@ public sealed partial class HapiMockServer : IDisposable
     /// <summary>Declara el estado de un Encounter para las pruebas que dependen de él.</summary>
     public void RegisterEncounter(string encounterFhirId, string status) =>
         _encounterStates[encounterFhirId] = status;
+
+    /// <summary>Declara la sede (<c>Location/sede-…</c>) de un Encounter (FAC-9).</summary>
+    public void RegisterEncounterLocation(string encounterFhirId, string locationReference) =>
+        _encounterLocations[encounterFhirId] = locationReference;
 
     /// <summary>Extrae el coding de una orden repartido por sistema, como lo guarda HAPI.</summary>
     private static (string? Loinc, string? LocalCode, string? LocalSystem, string? CodeText) ParseLabCoding(

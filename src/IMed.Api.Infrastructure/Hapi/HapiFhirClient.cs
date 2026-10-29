@@ -2335,6 +2335,48 @@ public sealed class HapiFhirClient(
             : null;
     }
 
+    public async Task<string?> GetEncounterLocationAsync(
+        string encounterFhirId,
+        string partitionName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(encounterFhirId))
+        {
+            throw new ArgumentException("encounterFhirId es obligatorio.", nameof(encounterFhirId));
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Get, $"Encounter/{Uri.EscapeDataString(encounterFhirId)}?_elements=location");
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        resp.EnsureSuccessStatusCode();
+
+        var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        if (!doc.TryGetProperty("location", out var locations) || locations.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+        foreach (var entry in locations.EnumerateArray())
+        {
+            if (entry.TryGetProperty("location", out var loc)
+                && loc.TryGetProperty("reference", out var reference)
+                && reference.ValueKind == JsonValueKind.String)
+            {
+                return reference.GetString();
+            }
+        }
+        return null;
+    }
+
     private async Task<IReadOnlyList<LabOrderSnapshot>> SearchLabOrdersAsync(
         string url, string partitionName, CancellationToken cancellationToken)
     {

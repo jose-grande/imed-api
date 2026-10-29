@@ -282,18 +282,36 @@ public static class LabReceptionEndpoints
         {
             return Forbidden();
         }
-        return Results.Ok(await handler.HandleAsync(orgId.Value, ct));
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(orgId.Value, ParseSub(principal), ct));
+        }
+        catch (ArgumentException ex)
+        {
+            // La sede activa pedida no existe o no es del usuario.
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
+    /// <param name="allLocations">Las órdenes de todas las sedes, no solo las de consultas de la activa.</param>
     private static async Task<IResult> GetAwaitingAdmissionAsync(
-        ClaimsPrincipal principal, GetAwaitingAdmissionHandler handler, CancellationToken ct)
+        ClaimsPrincipal principal, GetAwaitingAdmissionHandler handler, CancellationToken ct,
+        bool allLocations = false)
     {
         var orgId = ParseOrganizationId(principal);
         if (orgId is null)
         {
             return Forbidden();
         }
-        return Results.Ok(await handler.HandleAsync(orgId.Value, ct));
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(orgId.Value, ParseSub(principal), allLocations, ct));
+        }
+        catch (ArgumentException ex)
+        {
+            // La sede activa pedida no existe o no es del usuario.
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     private static async Task<IResult> CreateExternalOrderMultiAsync(
@@ -310,7 +328,7 @@ public static class LabReceptionEndpoints
             var result = await handler.HandleAsync(new CreateExternalOrderMultiCommand(
                 orgId.Value, request.PatientFhirId, request.RequesterName, request.RequesterIdentifier,
                 request.RequesterInstitution, request.Priority, request.OccurrenceDateTime, request.ReasonText,
-                request.Note, request.Exams ?? []), ct);
+                request.Note, request.Exams ?? [], ParseSub(principal)), ct);
             return Results.Created($"/api/lab/reception/by-order/{result.Requisition}", result);
         }
         catch (ArgumentException ex)
@@ -339,7 +357,15 @@ public static class LabReceptionEndpoints
         {
             return Forbidden();
         }
-        return Results.Ok(await handler.HandleAsync(orgId.Value, ct));
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(orgId.Value, ParseSub(principal), ct));
+        }
+        catch (ArgumentException ex)
+        {
+            // La sede activa pedida no existe o no es del usuario.
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     private static async Task<IResult> GetTechnicalReceptionAsync(
@@ -350,7 +376,15 @@ public static class LabReceptionEndpoints
         {
             return Forbidden();
         }
-        return Results.Ok(await handler.HandleAsync(orgId.Value, ct));
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(orgId.Value, ParseSub(principal), ct));
+        }
+        catch (ArgumentException ex)
+        {
+            // La sede activa pedida no existe o no es del usuario.
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     private static async Task<IResult> ScanTechnicalReceptionAsync(

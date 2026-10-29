@@ -77,4 +77,26 @@ public sealed class ResolveActiveLocationHandler(
             ?? await provisioning.EnsureDefaultLocationAsync(organizationId, null, ct);
         return fallback.Id;
     }
+
+    /// <summary>
+    /// La sede activa como filtro de listas operativas: lo que una sucursal no debería ver mezclado
+    /// con lo de otra (worklists del laboratorio).
+    /// </summary>
+    public async Task<ActiveLocationScope> ResolveScopeAsync(
+        Guid organizationId, Guid? userId, CancellationToken ct = default)
+    {
+        var id = await HandleAsync(organizationId, userId, null, ct);
+        var sede = await locations.GetAsync(organizationId, id, ct);
+        return new ActiveLocationScope(id, sede?.IsDefault ?? false);
+    }
+}
+
+/// <summary>Sede activa, con lo necesario para decidir si un dato es de ella.</summary>
+public sealed record ActiveLocationScope(Guid LocationId, bool IsDefault)
+{
+    /// <summary>
+    /// Si un dato con esa sede es de la activa. Lo anterior al eje de sede no tiene ninguna: cuenta
+    /// como de la principal, que es donde <c>LocationBackfill</c> ancla los datos viejos.
+    /// </summary>
+    public bool Includes(Guid? locationId) => locationId is { } id ? id == LocationId : IsDefault;
 }

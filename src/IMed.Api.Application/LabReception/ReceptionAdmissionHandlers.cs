@@ -1,6 +1,7 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Lab;
+using IMed.Api.Domain.Locations;
 
 namespace IMed.Api.Application.LabReception;
 
@@ -10,19 +11,27 @@ namespace IMed.Api.Application.LabReception;
 /// Es el inverso de <see cref="GetPendingOrdersHandler"/> (que muestra las ya
 /// admitidas): acá el recepcionista ve lo que falta dar por admitido. Agrupa por
 /// requisición (número de orden) con nombre del paciente y disponibilidad por examen.
+///
+/// <para><b>Por sede (FAC-9).</b> La orden todavía no tiene sede —la toma al admitirse—, así que
+/// se reparte por la sede de la consulta que la pidió; la que no tiene consulta, o es anterior al
+/// eje, cuenta como de la principal. <c>allLocations</c> muestra las de todas: el paciente puede
+/// presentarse en el laboratorio de otra sucursal, y al admitirlo la orden pasa a esa.</para>
 /// </summary>
 public sealed class GetAwaitingAdmissionHandler(
     IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops,
-    IServiceGate gate)
+    IServiceGate gate, ResolveActiveLocationHandler activeLocation)
 {
-    public async Task<IReadOnlyList<AwaitingAdmissionOrder>> HandleAsync(Guid orgId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AwaitingAdmissionOrder>> HandleAsync(
+        Guid orgId, Guid? userId, bool allLocations = false, CancellationToken ct = default)
     {
         var partition = LabRouting.PartitionOf(orgId);
+        var sede = allLocations ? null : await activeLocation.ResolveScopeAsync(orgId, userId, ct);
         var orders = await hapi.SearchActiveLabOrdersAsync(partition, ct);
         var checkedIn = await ops.GetCheckedInRequisitionsAsync(orgId, ct);
 
         var groups = new Dictionary<string, AwaitingGroupBuilder>();
         var patientNames = new Dictionary<string, string?>();
+        var encounterSedes = new Dictionary<string, Guid?>();
 
         foreach (var o in orders)
         {
@@ -36,6 +45,21 @@ public sealed class GetAwaitingAdmissionHandler(
             if (intake is not null)
             {
                 continue;
+            }
+
+            if (sede is not null)
+            {
+                Guid? origen = null;
+                if (o.EncounterFhirId is { } enc && !encounterSedes.TryGetValue(enc, out origen))
+                {
+                    origen = OrganizationLocation.FromFhirReference(
+                        await hapi.GetEncounterLocationAsync(enc, partition, ct));
+                    encounterSedes[enc] = origen;
+                }
+                if (!sede.Includes(origen))
+                {
+                    continue;
+                }
             }
 
             var key = o.Requisition ?? $"__sr__:{o.Id}";
@@ -131,7 +155,9 @@ public sealed class CreateExternalOrderMultiHandler(
         // clínica. Con UTC, una admisión de la tarde salía con la fecha de mañana y el contador
         // arrancado de nuevo.
         var day = clock.Today();
-        var locationId = await activeLocation.HandleAsync(cmd.OrganizationId, null, null, ct);
+        // Con el usuario: la sede pedida en el request se verifica contra sus asignaciones, y sin
+        // pedido vale su principal, no la de la organización.
+        var locationId = await activeLocation.HandleAsync(cmd.OrganizationId, cmd.UserId, null, ct);
         var seq = await ops.NextOrderSeqAsync(cmd.OrganizationId, locationId, day, ct);
         var requisition = $"ORD-{day:yyyyMMdd}-{seq:D4}";
 
@@ -207,6 +233,7 @@ public sealed record ExternalOrderExam(string? LoincCode, string? LocalCode, str
 public sealed record CreateExternalOrderMultiCommand(
     Guid OrganizationId, string PatientFhirId, string RequesterName, string? RequesterIdentifier,
     string? RequesterInstitution, string? Priority, string? OccurrenceDateTime, string? ReasonText, string? Note,
-    IReadOnlyList<ExternalOrderExam> Exams);
+    IReadOnlyList<ExternalOrderExam> Exams,
+    Guid? UserId = null);
 
 public sealed record CreatedExternalOrderMulti(string Requisition, IReadOnlyList<string> ServiceRequestIds);

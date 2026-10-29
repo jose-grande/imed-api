@@ -78,6 +78,18 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
         return rows.ToHashSet(StringComparer.Ordinal);
     }
 
+    public async Task<IReadOnlyDictionary<string, Guid?>> GetCheckInLocationsAsync(
+        Guid organizationId, CancellationToken cancellationToken = default)
+    {
+        var rows = await db.LabOrderCheckIns.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId)
+            .Select(x => new { x.Requisition, x.LocationId })
+            .ToListAsync(cancellationToken);
+        return rows
+            .GroupBy(x => x.Requisition, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().LocationId, StringComparer.Ordinal);
+    }
+
     public async Task<int> NextOrderSeqAsync(
         Guid organizationId, Guid locationId, DateOnly day, CancellationToken cancellationToken = default)
     {
@@ -168,7 +180,7 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
             join p in db.CollectionPlans.AsNoTracking() on c.CollectionPlanId equals p.Id
             where p.OrganizationId == organizationId && statuses.Contains(c.Status)
             orderby c.CollectedAt
-            select new { c.Id, p.Requisition, p.PatientFhirId })
+            select new { c.Id, p.Requisition, p.PatientFhirId, p.LocationId })
             .ToListAsync(cancellationToken);
 
         if (flat.Count == 0)
@@ -186,7 +198,7 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
 
         return flat
             .Where(f => byId.ContainsKey(f.Id))
-            .Select(f => new TechnicalReceptionRow(byId[f.Id], f.Requisition, f.PatientFhirId))
+            .Select(f => new TechnicalReceptionRow(byId[f.Id], f.Requisition, f.PatientFhirId, f.LocationId))
             .ToList();
     }
 
@@ -217,7 +229,7 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
             .ToListAsync(cancellationToken);
 
         return plans
-            .SelectMany(p => p.Containers.Select(c => new TechnicalReceptionRow(c, p.Requisition, p.PatientFhirId)))
+            .SelectMany(p => p.Containers.Select(c => new TechnicalReceptionRow(c, p.Requisition, p.PatientFhirId, p.LocationId)))
             .ToList();
     }
 
@@ -233,7 +245,7 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
             join p in db.CollectionPlans.AsNoTracking() on c.CollectionPlanId equals p.Id
             where p.OrganizationId == organizationId
                && (c.Barcode == trimmed || c.AccessionNumber == trimmed)
-            select new { c.Id, p.Requisition, p.PatientFhirId })
+            select new { c.Id, p.Requisition, p.PatientFhirId, p.LocationId })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (flat is null)
@@ -245,7 +257,7 @@ public sealed class LabOperationsRepository(AppDbContext db) : ILabOperationsRep
             .Include(c => c.Items)
             .FirstOrDefaultAsync(c => c.Id == flat.Id, cancellationToken);
 
-        return container is null ? null : new TechnicalReceptionRow(container, flat.Requisition, flat.PatientFhirId);
+        return container is null ? null : new TechnicalReceptionRow(container, flat.Requisition, flat.PatientFhirId, flat.LocationId);
     }
 
     public async Task<IReadOnlySet<Guid>> ListContainersWithEventAsync(

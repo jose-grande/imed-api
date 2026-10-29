@@ -77,6 +77,23 @@ public sealed class OrganizationLocation
     /// </summary>
     public static string FhirIdFor(Guid locationId) => $"sede-{locationId:N}";
 
+    /// <summary>
+    /// Sede de una referencia FHIR (<c>Location/sede-…</c> o el id pelado). Null si la referencia
+    /// no es de una sede: un <c>Location</c> que no salió de <see cref="FhirIdFor"/>.
+    /// </summary>
+    public static Guid? FromFhirReference(string? reference)
+    {
+        if (string.IsNullOrWhiteSpace(reference))
+        {
+            return null;
+        }
+        var id = reference.StartsWith("Location/", StringComparison.Ordinal) ? reference["Location/".Length..] : reference;
+        return id.StartsWith("sede-", StringComparison.Ordinal)
+            && Guid.TryParseExact(id["sede-".Length..], "N", out var locationId)
+            ? locationId
+            : null;
+    }
+
     public static OrganizationLocation Create(
         Guid organizationId,
         string code,

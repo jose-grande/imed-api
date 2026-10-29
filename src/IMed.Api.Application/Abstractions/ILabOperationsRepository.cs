@@ -59,6 +59,12 @@ public interface ILabOperationsRepository
     /// <summary>Conjunto de requisitions ingresadas (en cola) de la organización.</summary>
     Task<IReadOnlySet<string>> GetCheckedInRequisitionsAsync(Guid organizationId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Requisitions ingresadas con la sede donde se ingresaron (null: ingreso anterior al eje de
+    /// sede). Es lo que reparte las colas del laboratorio entre sucursales (FAC-9).
+    /// </summary>
+    Task<IReadOnlyDictionary<string, Guid?>> GetCheckInLocationsAsync(Guid organizationId, CancellationToken cancellationToken = default);
+
     // --- R6-F2: plan de colección ---
 
     /// <summary>Plan de colección de una requisición (con contenedores + items). Null si no se calculó.</summary>
@@ -107,4 +113,6 @@ public interface ILabOperationsRepository
 }
 
 /// <summary>Un contenedor con los datos de su plan (requisición + paciente) para la recepción técnica.</summary>
-public sealed record TechnicalReceptionRow(CollectionPlanContainer Container, string Requisition, string PatientFhirId);
+/// <param name="LocationId">Sede del plan de toma; null si es anterior al eje de sede.</param>
+public sealed record TechnicalReceptionRow(
+    CollectionPlanContainer Container, string Requisition, string PatientFhirId, Guid? LocationId = null);

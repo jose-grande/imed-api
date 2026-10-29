@@ -1,4 +1,5 @@
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Catalogs.Lab;
 
 namespace IMed.Api.Application.LabReception;
@@ -39,20 +40,26 @@ public sealed class GetSpecimenLabelHandler(IHapiFhirClient hapi)
 /// Cola de órdenes pendientes (R1-F5, LIS-RD-10): órdenes de laboratorio activas
 /// de la organización que aún no fueron recibidas (sin `order_intake`). Reemplaza
 /// el tecleo manual del ID de orden en recepción.
+///
+/// <para>Solo las ingresadas en la sede activa (FAC-9): cada sucursal trabaja su propia cola.</para>
 /// </summary>
-public sealed class GetPendingOrdersHandler(IHapiFhirClient hapi, ILabOperationsRepository ops)
+public sealed class GetPendingOrdersHandler(
+    IHapiFhirClient hapi, ILabOperationsRepository ops, ResolveActiveLocationHandler activeLocation)
 {
-    public async Task<IReadOnlyList<PendingOrder>> HandleAsync(Guid orgId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<PendingOrder>> HandleAsync(Guid orgId, Guid? userId, CancellationToken ct = default)
     {
         var partition = LabRouting.PartitionOf(orgId);
+        var sede = await activeLocation.ResolveScopeAsync(orgId, userId, ct);
         var orders = await hapi.SearchActiveLabOrdersAsync(partition, ct);
         // F2: la cola muestra solo órdenes ingresadas (el paciente solicitó hacérselas en la clínica).
-        var checkedIn = await ops.GetCheckedInRequisitionsAsync(orgId, ct);
+        var checkedIn = await ops.GetCheckInLocationsAsync(orgId, ct);
 
         var pending = new List<PendingOrder>();
         foreach (var o in orders)
         {
-            if (o.Requisition is null || !checkedIn.Contains(o.Requisition))
+            if (o.Requisition is null
+                || !checkedIn.TryGetValue(o.Requisition, out var ingresoEn)
+                || !sede.Includes(ingresoEn))
             {
                 continue;
             }
@@ -72,23 +79,28 @@ public sealed class GetPendingOrdersHandler(IHapiFhirClient hapi, ILabOperations
 /// <summary>
 /// Cola de toma de muestra on-site (R1-F7, LIS-RD-24): órdenes activas sin recibir
 /// cuyo tipo de muestra se **toma en el laboratorio** (sangre, hisopado, OGTT).
-/// Distinta de la recepción de muestras que el paciente trae.
+/// Distinta de la recepción de muestras que el paciente trae. Solo las ingresadas en la sede
+/// activa (FAC-9): el paciente está en la sala de espera de esa sucursal.
 /// </summary>
 public sealed class GetCollectionQueueHandler(
-    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops)
+    IHapiFhirClient hapi, ILabCatalogRepository catalog, ILabOperationsRepository ops,
+    ResolveActiveLocationHandler activeLocation)
 {
-    public async Task<IReadOnlyList<CollectionQueueItem>> HandleAsync(Guid orgId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<CollectionQueueItem>> HandleAsync(Guid orgId, Guid? userId, CancellationToken ct = default)
     {
         var partition = LabRouting.PartitionOf(orgId);
+        var sede = await activeLocation.ResolveScopeAsync(orgId, userId, ct);
         var orders = await hapi.SearchActiveLabOrdersAsync(partition, ct);
         var specimenTypes = (await catalog.ListSpecimenTypesAsync(orgId, ct)).ToDictionary(s => s.Id);
         // F2: solo órdenes ingresadas.
-        var checkedIn = await ops.GetCheckedInRequisitionsAsync(orgId, ct);
+        var checkedIn = await ops.GetCheckInLocationsAsync(orgId, ct);
 
         var items = new List<CollectionQueueItem>();
         foreach (var o in orders)
         {
-            if (o.Requisition is null || !checkedIn.Contains(o.Requisition))
+            if (o.Requisition is null
+                || !checkedIn.TryGetValue(o.Requisition, out var ingresoEn)
+                || !sede.Includes(ingresoEn))
             {
                 continue;
             }

@@ -276,6 +276,15 @@ public interface IHapiFhirClient
         string partitionName,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Referencia de la sede de un <c>Encounter</c> (<c>Location/sede-…</c>), o null si no existe o
+    /// no tiene sede (anterior a FAC-9). Reparte las órdenes "por admitir" entre sucursales.
+    /// </summary>
+    Task<string?> GetEncounterLocationAsync(
+        string encounterFhirId,
+        string partitionName,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<LabOrderSnapshot>> SearchActiveLabOrdersAsync(
         string partitionName,
         CancellationToken cancellationToken = default);
