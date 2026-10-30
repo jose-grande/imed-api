@@ -1,5 +1,6 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.LabRules;
+using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Domain.Lab;
 
 namespace IMed.Api.Application.LabResults;
@@ -87,9 +88,9 @@ public sealed class EnterResultsHandler(
             string? appliesToSex = null;
             int? appliesAgeMin = null, appliesAgeMax = null;
 
-            if (line.ValueNumeric is { } value && !string.IsNullOrWhiteSpace(line.Loinc))
+            if (line.ValueNumeric is { } value)
             {
-                var test = await catalog.GetTestByLoincAsync(cmd.OrganizationId, line.Loinc, ct);
+                var test = await ResolveTestAsync(cmd.OrganizationId, line, ct);
                 if (test is not null)
                 {
                     var ranges = await catalog.ListRangesByTestAsync(cmd.OrganizationId, test.Id, ct);
@@ -210,6 +211,25 @@ public sealed class EnterResultsHandler(
 
         return new EnterResultsResult(
             reportId, inHouse ? "InHouse" : "External", reportStatus, hasCritical, requiresReview, observations);
+    }
+
+    /// <summary>
+    /// La prueba del catálogo de esta línea: por id si la hoja lo mandó (verificando que sea de la
+    /// organización), si no por LOINC.
+    /// </summary>
+    private async Task<LabTestDefinition?> ResolveTestAsync(Guid orgId, ResultLine line, CancellationToken ct)
+    {
+        if (line.LabTestId is { } id)
+        {
+            var porId = await catalog.GetTestByIdAsync(id, ct);
+            if (porId is not null && porId.OrganizationId == orgId)
+            {
+                return porId;
+            }
+        }
+        return string.IsNullOrWhiteSpace(line.Loinc)
+            ? null
+            : await catalog.GetTestByLoincAsync(orgId, line.Loinc, ct);
     }
 }
 

@@ -4,15 +4,34 @@ namespace IMed.Api.Application.LabCatalog;
 
 // ------------------------------- Pruebas -------------------------------
 
-public sealed record SearchLabTestsQuery(Guid? OrganizationId, string? Term, string? Department, bool ActiveOnly, int Limit);
+/// <param name="OrderableOnly">
+/// Solo las que el laboratorio hace: activas y ofertadas. Es lo que se puede cargar en una orden
+/// externa en recepción; lo que no se hace en el laboratorio se refiere afuera y no se carga.
+/// </param>
+public sealed record SearchLabTestsQuery(
+    Guid? OrganizationId, string? Term, string? Department, bool ActiveOnly, int Limit, bool OrderableOnly = false);
 
 public sealed class SearchLabTestsHandler(ILabCatalogRepository repo)
 {
     public async Task<IReadOnlyList<LabTestDto>> HandleAsync(SearchLabTestsQuery query, CancellationToken cancellationToken = default)
     {
         var limit = Math.Clamp(query.Limit, 1, 200);
-        var rows = await repo.SearchTestsAsync(query.OrganizationId, query.Term, query.Department, query.ActiveOnly, limit, cancellationToken);
-        return rows.Select(LabTestDto.FromDomain).ToList();
+        if (!query.OrderableOnly || query.OrganizationId is not { } orgId)
+        {
+            var rows = await repo.SearchTestsAsync(query.OrganizationId, query.Term, query.Department, query.ActiveOnly, limit, cancellationToken);
+            return rows.Select(LabTestDto.FromDomain).ToList();
+        }
+
+        // Se filtra después de buscar, así que se pide de más para no quedarse corto cuando hay
+        // pruebas no ofertadas entre las primeras.
+        var noOfertadas = await repo.ListNotOfferedTestIdsAsync(orgId, cancellationToken);
+        var candidatas = await repo.SearchTestsAsync(
+            orgId, query.Term, query.Department, activeOnly: true, Math.Min(limit + noOfertadas.Count, 1000), cancellationToken);
+        return candidatas
+            .Where(t => !noOfertadas.Contains(t.Id))
+            .Take(limit)
+            .Select(LabTestDto.FromDomain)
+            .ToList();
     }
 }
 

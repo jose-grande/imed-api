@@ -81,6 +81,8 @@ public interface ILabCatalogRepository
 
     // ---- Ofertas por sede ----
     Task<LabTestOffering?> GetOfferingAsync(Guid organizationId, Guid testId, CancellationToken cancellationToken = default);
+    /// <summary>Pruebas que la organización marcó como no ofertadas (se refieren a un laboratorio externo).</summary>
+    Task<IReadOnlySet<Guid>> ListNotOfferedTestIdsAsync(Guid organizationId, CancellationToken cancellationToken = default);
     Task UpsertOfferingAsync(LabTestOffering offering, CancellationToken cancellationToken = default);
 
     // ---- Fórmulas calculadas / TAT (read-only en LIS-1) ----

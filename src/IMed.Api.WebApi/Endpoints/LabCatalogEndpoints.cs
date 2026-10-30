@@ -73,11 +73,11 @@ public static class LabCatalogEndpoints
     private static async Task<IResult> SearchTestsAsync(
         ClaimsPrincipal principal, SearchLabTestsHandler handler,
         [FromQuery] string? q, [FromQuery] string? department, [FromQuery] bool? activeOnly, [FromQuery] int? limit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, [FromQuery] bool? orderable = null)
     {
         var orgId = ParseOrganizationId(principal);
         var result = await handler.HandleAsync(
-            new SearchLabTestsQuery(orgId, q, department, activeOnly ?? true, limit ?? 50), cancellationToken);
+            new SearchLabTestsQuery(orgId, q, department, activeOnly ?? true, limit ?? 50, orderable ?? false), cancellationToken);
         return Results.Ok(result);
     }
 

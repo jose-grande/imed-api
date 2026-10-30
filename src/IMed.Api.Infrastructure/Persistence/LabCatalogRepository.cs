@@ -40,6 +40,7 @@ public sealed class LabCatalogRepository(AppDbContext db, TimeProvider timeProvi
             var codePrefix = $"{t}%";
             q = q.Where(x =>
                 EF.Functions.ILike(x.Code, codePrefix) ||
+                x.LoincCode == t ||
                 EF.Functions.ILike(EF.Functions.Unaccent(x.Name), EF.Functions.Unaccent(like)));
         }
 
@@ -342,6 +343,14 @@ public sealed class LabCatalogRepository(AppDbContext db, TimeProvider timeProvi
         Guid organizationId, Guid testId, CancellationToken cancellationToken = default) =>
         db.LabTestOfferings.FirstOrDefaultAsync(
             x => x.OrganizationId == organizationId && x.LabTestId == testId, cancellationToken);
+
+    public async Task<IReadOnlySet<Guid>> ListNotOfferedTestIdsAsync(
+        Guid organizationId, CancellationToken cancellationToken = default) =>
+        (await db.LabTestOfferings.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && !x.Offered)
+            .Select(x => x.LabTestId)
+            .ToListAsync(cancellationToken))
+        .ToHashSet();
 
     public async Task UpsertOfferingAsync(LabTestOffering offering, CancellationToken cancellationToken = default)
     {

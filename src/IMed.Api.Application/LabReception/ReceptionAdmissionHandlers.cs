@@ -126,7 +126,7 @@ public sealed class GetAwaitingAdmissionHandler(
 /// split in-house/send-out del flujo de check-in.
 /// </summary>
 public sealed class CreateExternalOrderMultiHandler(
-    IHapiFhirClient hapi, ILabOperationsRepository ops,
+    IHapiFhirClient hapi, ILabOperationsRepository ops, ILabCatalogRepository catalog,
     ResolveActiveLocationHandler activeLocation, IClinicClock clock)
 {
     public async Task<CreatedExternalOrderMulti> HandleAsync(CreateExternalOrderMultiCommand cmd, CancellationToken ct = default)
@@ -143,6 +143,9 @@ public sealed class CreateExternalOrderMultiHandler(
         {
             throw new ArgumentException("Agregá al menos un examen o panel.", nameof(cmd));
         }
+
+        // Antes de crear nada en HAPI: una orden a medio crear deja exámenes sueltos.
+        await ValidateAgainstCatalogAsync(cmd.OrganizationId, cmd.Exams, ct);
 
         var partition = LabRouting.PartitionOf(cmd.OrganizationId);
 
@@ -188,6 +191,72 @@ public sealed class CreateExternalOrderMultiHandler(
         return new CreatedExternalOrderMulti(requisition, ids);
     }
 
+    /// <summary>
+    /// En recepción solo se cargan pruebas y paneles parametrizados que el laboratorio hace; lo
+    /// demás se refiere afuera y no entra al sistema. (La orden del médico no tiene esta
+    /// restricción: puede pedir cualquier prueba.)
+    ///
+    /// <para>Además de que exista, se verifica que el código que va a quedar en la orden lleve a
+    /// <b>esa</b> prueba o panel: recepción, toma, etiquetas y resultados la encuentran por ese
+    /// código (<see cref="LabRouting.ExpandOrderAsync"/>), y de ahí sacan tipo de muestra, tubo,
+    /// ayuno y rangos. Si dos pruebas comparten LOINC, o una prueba comparte código con un panel,
+    /// la orden terminaría resolviendo a otra, con la parametrización de otra.</para>
+    /// </summary>
+    private async Task ValidateAgainstCatalogAsync(
+        Guid orgId, IReadOnlyList<ExternalOrderExam> exams, CancellationToken ct)
+    {
+        var noOfertadas = await catalog.ListNotOfferedTestIdsAsync(orgId, ct);
+        foreach (var exam in exams)
+        {
+            var nombre = exam.CodeDisplay ?? exam.CodeText;
+            // El mismo código con que la leen las demás estaciones (LabOrderSnapshot.CatalogCode).
+            var code = !string.IsNullOrWhiteSpace(exam.LoincCode) ? exam.LoincCode.Trim() : exam.LocalCode?.Trim();
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                throw new ArgumentException(
+                    $"«{nombre}» no está en el catálogo del laboratorio. Solo se cargan pruebas y paneles parametrizados; lo demás se refiere afuera.");
+            }
+
+            var esPanel = string.Equals(exam.LocalSystem, LabOrderCodeSystems.Panel, StringComparison.Ordinal);
+            var panel = await catalog.GetPanelByCodeOrLoincAsync(orgId, code, ct);
+            if (panel is not null)
+            {
+                if (!esPanel)
+                {
+                    throw new ArgumentException(
+                        $"El código {code} de «{nombre}» es también el de un panel del catálogo. Corregí el código de la prueba o del panel en el catálogo.");
+                }
+                var pruebas = await LabRouting.ExpandOrderAsync(catalog, orgId, code, ct);
+                if (!pruebas.Any(p => p.Routing == OrderRouting.InHouse))
+                {
+                    throw new ArgumentException(
+                        $"Ninguna prueba del panel «{panel.Name}» se hace en el laboratorio: hay que referirlo afuera.");
+                }
+                continue;
+            }
+            if (esPanel)
+            {
+                throw new ArgumentException($"El panel «{nombre}» no está activo en el catálogo del laboratorio.");
+            }
+
+            var test = await catalog.GetTestByCodeOrLoincAsync(orgId, code, ct);
+            if (test is null || !test.Active)
+            {
+                throw new ArgumentException(
+                    $"«{nombre}» no está en el catálogo del laboratorio. Solo se cargan pruebas y paneles parametrizados; lo demás se refiere afuera.");
+            }
+            if (!string.IsNullOrWhiteSpace(exam.LocalCode) && !string.Equals(test.Code, exam.LocalCode.Trim(), StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    $"El LOINC {code} lo tienen varias pruebas del catálogo ({test.Code} y {exam.LocalCode.Trim()}). Dejalo en una sola para que la orden tome los rangos y la muestra correctos.");
+            }
+            if (noOfertadas.Contains(test.Id))
+            {
+                throw new ArgumentException($"«{test.Name}» no se hace en el laboratorio: hay que referirla afuera.");
+            }
+        }
+    }
+
     /// <summary>La institución externa (trazabilidad) se anota en la nota de la orden (MVP Fase 1).</summary>
     private static string? ComposeNote(string? institution, string? note)
     {
@@ -228,6 +297,17 @@ public sealed record AwaitingAdmissionOrder(
     IReadOnlyList<AwaitingAdmissionExam> Exams);
 
 /// <summary>Un examen/panel a crear en una orden externa (dual coding opcional).</summary>
+/// <summary>
+/// Sistemas de los códigos propios de la clínica en una orden. Van junto al LOINC (dual coding):
+/// el LOINC es el significado compartido con el mundo; el código local es la prueba o el panel
+/// exactos del catálogo, y es el único que tienen las pruebas sin LOINC.
+/// </summary>
+public static class LabOrderCodeSystems
+{
+    public const string Panel = "http://imed.local/panel";
+    public const string Test = "http://imed.local/lab-test";
+}
+
 public sealed record ExternalOrderExam(string? LoincCode, string? LocalCode, string? LocalSystem, string CodeText, string? CodeDisplay);
 
 public sealed record CreateExternalOrderMultiCommand(
