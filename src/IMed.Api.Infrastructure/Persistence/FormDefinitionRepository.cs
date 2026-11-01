@@ -110,6 +110,31 @@ public sealed class FormDefinitionRepository(AppDbContext dbContext) : IFormDefi
                 cancellationToken);
     }
 
+    public async Task<FormDefinition?> ResolveLatestByCodeAsync(
+        Guid organizationId,
+        string code,
+        CancellationToken cancellationToken = default)
+    {
+        var ofOrganization = await dbContext.FormDefinitions.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.Code == code && x.Status == FormStatus.Published)
+            .ToListAsync(cancellationToken);
+        var latest = Latest(ofOrganization);
+        if (latest is not null)
+        {
+            return latest;
+        }
+
+        var global = await dbContext.FormDefinitions.AsNoTracking()
+            .Where(x => x.OrganizationId == null && x.Code == code && x.Status == FormStatus.Published)
+            .ToListAsync(cancellationToken);
+        return Latest(global);
+    }
+
+    /// <summary>La versión se compara como número ("1.10.0" > "1.9.0"); una versión no numérica cuenta como 0.0.</summary>
+    private static FormDefinition? Latest(List<FormDefinition> forms) =>
+        forms.OrderByDescending(x => Version.TryParse(x.Version, out var parsed) ? parsed : new Version(0, 0))
+            .FirstOrDefault();
+
     public Task<bool> ExistsAsync(string code, string version, Guid? organizationId, CancellationToken cancellationToken = default)
         => dbContext.FormDefinitions
             .AsNoTracking()

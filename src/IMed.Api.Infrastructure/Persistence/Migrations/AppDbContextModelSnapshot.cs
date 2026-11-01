@@ -422,6 +422,140 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.ToTable("diagram_definitions", (string)null);
                 });
 
+            modelBuilder.Entity("IMed.Api.Domain.Forms.FormCatalog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FormCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("form_code");
+
+                    b.Property<string>("ResourceTypes")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("resource_types");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FormCode", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("ux_form_catalogs_code_version");
+
+                    b.ToTable("form_catalogs", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Forms.FormCatalogField", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Binding")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("binding");
+
+                    b.Property<Guid>("CatalogId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("catalog_id");
+
+                    b.Property<bool>("Core")
+                        .HasColumnType("boolean")
+                        .HasColumnName("core");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Custom")
+                        .HasColumnType("boolean")
+                        .HasColumnName("custom");
+
+                    b.Property<string>("Defaults")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("defaults");
+
+                    b.Property<string>("Editable")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("editable");
+
+                    b.Property<bool>("Email")
+                        .HasColumnType("boolean")
+                        .HasColumnName("email");
+
+                    b.Property<string>("FieldKey")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("field_key");
+
+                    b.Property<string>("ListSource")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("list_source");
+
+                    b.Property<string>("Messages")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("messages");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Widget")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("widget");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CatalogId", "FieldKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_form_catalog_fields_catalog_key");
+
+                    b.ToTable("form_catalog_fields", (string)null);
+                });
+
             modelBuilder.Entity("IMed.Api.Domain.Forms.FormDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -836,6 +970,15 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_user_tier_assignments_org");
 
                     b.ToTable("user_tier_assignments", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Forms.FormCatalogField", b =>
+                {
+                    b.HasOne("IMed.Api.Domain.Forms.FormCatalog", null)
+                        .WithMany()
+                        .HasForeignKey("CatalogId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

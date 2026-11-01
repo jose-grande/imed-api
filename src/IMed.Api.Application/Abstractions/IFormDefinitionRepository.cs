@@ -39,6 +39,15 @@ public interface IFormDefinitionRepository
         string version,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Resuelve la versión publicada más reciente (por versión semántica) de un formulario por
+    /// <paramref name="code"/>. Orden: org-específica → preset global. Devuelve null si ninguna está publicada.
+    /// </summary>
+    Task<FormDefinition?> ResolveLatestByCodeAsync(
+        Guid organizationId,
+        string code,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Confirma si existe (code, version, organizationId). Para evitar duplicados al crear.</summary>
     Task<bool> ExistsAsync(string code, string version, Guid? organizationId, CancellationToken cancellationToken = default);
 

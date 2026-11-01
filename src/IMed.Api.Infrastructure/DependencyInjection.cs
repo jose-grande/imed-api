@@ -6,6 +6,7 @@ using IMed.Api.Application.Catalogs;
 using IMed.Api.Application.Diagnoses;
 using IMed.Api.Application.Diagrams;
 using IMed.Api.Application.Forms;
+using IMed.Api.Application.Forms.Studio;
 using IMed.Api.Application.Identifiers;
 using IMed.Api.Application.Invitations;
 using IMed.Api.Application.JoinRequests;
@@ -21,6 +22,7 @@ using IMed.Api.Application.Prescriptions;
 using IMed.Api.Application.Profile;
 using IMed.Api.Application.Team;
 using IMed.Api.Infrastructure.Email;
+using IMed.Api.Infrastructure.Forms.Studio;
 using IMed.Api.Infrastructure.Hapi;
 using IMed.Api.Infrastructure.Identifiers;
 using IMed.Api.Infrastructure.Keycloak;
@@ -53,6 +55,7 @@ public static class DependencyInjection
         services.AddEmail(configuration);
         services.AddInvitations(configuration);
         services.AddIdentifiers(configuration);
+        services.AddFormStudio(configuration);
         services.AddTerminology();
         services.AddPdf();
         services.AddUseCases();
@@ -60,6 +63,15 @@ public static class DependencyInjection
         services.AddOutbox(configuration);
         services.AddSeeders();
 
+        return services;
+    }
+
+    private static IServiceCollection AddFormStudio(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddSingleton<IFieldCatalogProvider, DbFieldCatalogProvider>();
+        services.AddSingleton(configuration.GetSection(FormStudioOptions.SectionName).Get<FormStudioOptions>()
+            ?? new FormStudioOptions());
+        services.AddScoped<StudioFormProcessor>();
         return services;
     }
 
@@ -271,6 +283,7 @@ public static class DependencyInjection
         services.AddScoped<ListFormsHandler>();
         services.AddScoped<GetFormBySpecialtyHandler>();
         services.AddScoped<GetFormByCodeHandler>();
+        services.AddScoped<ResolveFormByCodeHandler>();
         services.AddScoped<CreateFormHandler>();
         services.AddScoped<UpdateFormHandler>();
         services.AddScoped<PublishFormHandler>();

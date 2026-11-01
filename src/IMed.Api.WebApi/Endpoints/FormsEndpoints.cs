@@ -28,6 +28,10 @@ public static class FormsEndpoints
             .WithName("GetFormBySpecialty")
             .WithSummary("Resuelve la mejor FormDefinition publicada para una especialidad.");
 
+        group.MapGet("/resolve/{code}", ResolveAsync)
+            .WithName("ResolveFormByCode")
+            .WithSummary("Resuelve la versión publicada más reciente de un formulario por code: org → preset global.");
+
         group.MapGet("/by-code/{code}", GetByCodeAsync)
             .WithName("GetFormByCode")
             .WithSummary("Resuelve una FormDefinition exacta por code+version (incluye retired). Usada por el detail page del encuentro.");
@@ -96,6 +100,24 @@ public static class FormsEndpoints
                 statusCode: StatusCodes.Status403Forbidden);
         }
         var result = await handler.HandleAsync(new GetFormBySpecialtyQuery(orgId.Value, code), cancellationToken);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }
+
+    private static async Task<IResult> ResolveAsync(
+        string code,
+        ClaimsPrincipal principal,
+        ResolveFormByCodeHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Results.Problem(
+                title: "Sin organización",
+                detail: "El JWT no trae organization_id.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+        var result = await handler.HandleAsync(new ResolveFormByCodeQuery(orgId.Value, code), cancellationToken);
         return result is null ? Results.NotFound() : Results.Ok(result);
     }
 
@@ -188,6 +210,10 @@ public static class FormsEndpoints
             return Results.Ok(result);
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
         catch (InvalidOperationException ex)
         {
             return Results.Problem(title: "Estado inválido", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
@@ -211,6 +237,10 @@ public static class FormsEndpoints
             return Results.Ok(result);
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
         catch (InvalidOperationException ex)
         {
             return Results.Problem(title: "Estado inválido", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);

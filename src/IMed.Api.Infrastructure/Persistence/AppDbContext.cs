@@ -21,6 +21,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
     public DbSet<AppAuditLogEntry> AppAuditLog => Set<AppAuditLogEntry>();
     public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
+    public DbSet<FormCatalog> FormCatalogs => Set<FormCatalog>();
+    public DbSet<FormCatalogField> FormCatalogFields => Set<FormCatalogField>();
     public DbSet<DiagramDefinition> DiagramDefinitions => Set<DiagramDefinition>();
     public DbSet<Icd11Code> Icd11Catalog => Set<Icd11Code>();
     public DbSet<LoincCode> LoincCatalog => Set<LoincCode>();
@@ -40,6 +42,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         ConfigureOutboxEvent(modelBuilder);
         ConfigureAppAuditLog(modelBuilder);
         ConfigureFormDefinition(modelBuilder);
+        ConfigureFormCatalog(modelBuilder);
         ConfigureDiagramDefinition(modelBuilder);
         ConfigureIcd11Code(modelBuilder);
         ConfigureLoincCode(modelBuilder);
@@ -169,6 +172,56 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => new { x.OrganizationId, x.Code, x.Version })
                 .IsUnique()
                 .HasDatabaseName("ux_form_definitions_org_code_version");
+        });
+    }
+
+    private static void ConfigureFormCatalog(ModelBuilder b)
+    {
+        b.Entity<FormCatalog>(e =>
+        {
+            e.ToTable("form_catalogs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FormCode).HasMaxLength(60).IsRequired();
+            e.Property(x => x.Version).HasMaxLength(20).IsRequired();
+            e.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            e.Property(x => x.ResourceTypes).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // Un catálogo por (tipo de formulario, versión); los scripts de db/forms hacen upsert sobre esta clave.
+            e.HasIndex(x => new { x.FormCode, x.Version })
+                .IsUnique()
+                .HasDatabaseName("ux_form_catalogs_code_version");
+        });
+
+        b.Entity<FormCatalogField>(e =>
+        {
+            e.ToTable("form_catalog_fields");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CatalogId).IsRequired();
+            e.Property(x => x.FieldKey).HasMaxLength(60).IsRequired();
+            e.Property(x => x.SortOrder).IsRequired();
+            e.Property(x => x.Widget).HasMaxLength(20).IsRequired();
+            e.Property(x => x.Core).IsRequired();
+            e.Property(x => x.Custom).IsRequired();
+            e.Property(x => x.Email).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.Editable).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.Defaults).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.Messages).HasColumnType("jsonb");
+            e.Property(x => x.ListSource).HasColumnType("jsonb");
+            e.Property(x => x.Binding).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            // Los campos se borran con su catálogo.
+            e.HasOne<FormCatalog>().WithMany().HasForeignKey(x => x.CatalogId).OnDelete(DeleteBehavior.Cascade);
+
+            // Un campo por clave dentro de cada catálogo; los scripts hacen upsert sobre esta clave.
+            e.HasIndex(x => new { x.CatalogId, x.FieldKey })
+                .IsUnique()
+                .HasDatabaseName("ux_form_catalog_fields_catalog_key");
         });
     }
 

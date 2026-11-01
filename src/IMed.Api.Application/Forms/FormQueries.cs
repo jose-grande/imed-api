@@ -45,3 +45,14 @@ public sealed class GetFormByCodeHandler(IFormDefinitionRepository repo)
         return form is null ? null : FormDefinitionDto.FromDomain(form);
     }
 }
+
+public sealed record ResolveFormByCodeQuery(Guid OrganizationId, string Code);
+
+public sealed class ResolveFormByCodeHandler(IFormDefinitionRepository repo)
+{
+    public async Task<FormDefinitionDto?> HandleAsync(ResolveFormByCodeQuery query, CancellationToken cancellationToken = default)
+    {
+        var form = await repo.ResolveLatestByCodeAsync(query.OrganizationId, query.Code, cancellationToken);
+        return form is null ? null : FormDefinitionDto.FromDomain(form);
+    }
+}
