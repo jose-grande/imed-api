@@ -20,6 +20,8 @@ public enum LabDepartment
     Molecular = 4,
     Urinalysis = 5,
     Other = 6,
+    /// <summary>Examen de heces (coproparasitológico). Observación de staging: faltaba el área.</summary>
+    Parasitology = 7,
 }
 
 /// <summary>Sexo al que aplica un rango de referencia.</summary>

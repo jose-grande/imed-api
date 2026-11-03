@@ -278,12 +278,11 @@ public sealed class LabResultsTests(ImedApiFixture fixture) : IAsyncLifetime
     }
 
     /// <summary>
-    /// El informe imprimible: lo que se lleva el paciente. Se verifica que salga un PDF real y
-    /// que el nombre del archivo distinga preliminar de liberado — un preliminar archivado como
-    /// definitivo es el error que este documento tiene que hacer imposible.
+    /// El informe imprimible: lo que se lleva el paciente. Solo imprime lo validado (decisión del
+    /// cliente): antes de liberar no hay informe (409 con motivo), después sale un PDF real.
     /// </summary>
     [Fact]
-    public async Task ReportPdf_marcaPreliminarAntesDeLiberar_yDefinitivoDespues()
+    public async Task ReportPdf_sinValidar409_yValidadoSaleElPdf()
     {
         var client = await AuthedClient();
         var srId = await ReceiveGlucoseAsync(client, "pat-pdf");
@@ -291,21 +290,18 @@ public sealed class LabResultsTests(ImedApiFixture fixture) : IAsyncLifetime
             .Content.ReadFromJsonAsync<EnterResultsResult>();
         var reportId = entered!.DiagnosticReportId;
 
-        var preliminary = await client.GetAsync($"/api/lab/results/{reportId}/pdf");
-        preliminary.StatusCode.Should().Be(HttpStatusCode.OK);
-        preliminary.Content.Headers.ContentType!.MediaType.Should().Be("application/pdf");
-        var preliminaryBytes = await preliminary.Content.ReadAsByteArrayAsync();
-        preliminaryBytes.Should().NotBeEmpty();
-        System.Text.Encoding.ASCII.GetString(preliminaryBytes, 0, 5).Should().Be("%PDF-");
-        preliminary.Content.Headers.ContentDisposition!.FileNameStar!.Should().Contain("PRELIMINAR");
+        var sinValidar = await client.GetAsync($"/api/lab/results/{reportId}/pdf");
+        sinValidar.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await sinValidar.Content.ReadAsStringAsync()).Should().Contain("no tiene resultados validados");
 
         (await client.PostAsJsonAsync($"/api/lab/results/{reportId}/release", new { comment = (string?)null }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
 
         var final = await client.GetAsync($"/api/lab/results/{reportId}/pdf");
         final.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await final.Content.ReadAsByteArrayAsync()).Should().NotBeEmpty();
-        final.Content.Headers.ContentDisposition!.FileNameStar!.Should().NotContain("PRELIMINAR");
+        final.Content.Headers.ContentType!.MediaType.Should().Be("application/pdf");
+        var bytes = await final.Content.ReadAsByteArrayAsync();
+        System.Text.Encoding.ASCII.GetString(bytes, 0, 5).Should().Be("%PDF-");
     }
 
     /// <summary>Un informe inexistente no puede devolver un PDF vacío disfrazado de éxito.</summary>
@@ -353,7 +349,9 @@ public sealed class LabResultsTests(ImedApiFixture fixture) : IAsyncLifetime
 
         await client.PostAsJsonAsync("/api/lab/results", ResultsBody(srId, 85m));
 
-        var after = await (await client.GetAsync("/api/lab/worklist?status=Received"))
+        // 85 lo autovalida el motor: la orden queda cerrada (ya no "Recibida"), así que se busca
+        // en toda la worklist.
+        var after = await (await client.GetAsync("/api/lab/worklist"))
             .Content.ReadFromJsonAsync<WorklistItem[]>();
         after!.Single(x => x.ServiceRequestId == srId).HasResults.Should().BeTrue();
     }

@@ -76,6 +76,7 @@ public sealed class CollectionIntakeBackfill(
 
             await BackfillExamDescriptionsAsync(scope, db, cancellationToken);
             await BackfillReportAnchorsAsync(scope, db, cancellationToken);
+            await BackfillAutoValidatedAsync(scope, db, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -198,6 +199,61 @@ public sealed class CollectionIntakeBackfill(
             await db.SaveChangesAsync(cancellationToken);
             logger.LogInformation("Backfill de informes: {Count} orden(es) ancladas.", anchored);
         }
+    }
+
+    /// <summary>
+    /// Órdenes autovalidadas por el motor de reglas antes de que eso cerrara la orden: el informe
+    /// está <c>final</c> pero la orden seguía "Recibida", y en Resultados aparecía como pendiente
+    /// de validar. Se cierran con la fecha de emisión del informe como fecha de validación.
+    /// Idempotente: solo mira órdenes recibidas con informe.
+    /// </summary>
+    private async Task BackfillAutoValidatedAsync(
+        AsyncServiceScope scope, AppDbContext db, CancellationToken cancellationToken)
+    {
+        var open = await db.OrderIntakes
+            .Where(x => x.Status == OrderIntakeStatus.Received && x.ReportFhirId != null)
+            .ToListAsync(cancellationToken);
+        if (open.Count == 0)
+        {
+            return;
+        }
+
+        var hapi = scope.ServiceProvider.GetRequiredService<IHapiFhirClient>();
+        var closed = 0;
+        foreach (var intake in open)
+        {
+            try
+            {
+                var report = await hapi.GetDiagnosticReportAsync(
+                    intake.ReportFhirId!, $"org-{intake.OrganizationId}", cancellationToken);
+                if (report is null || !string.Equals(report.Status, "final", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var at = DateTimeOffset.TryParse(report.Issued, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var issued) ? new FixedTime(issued) : null;
+                intake.MarkCompleted(at);
+                intake.MarkValidated(practitionerFhirId: null, at);
+                closed++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "No se pudo revisar el informe {ReportId} de la orden {IntakeId}.",
+                    intake.ReportFhirId, intake.Id);
+            }
+        }
+
+        if (closed > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("Backfill de autovalidados: {Count} orden(es) cerradas.", closed);
+        }
+    }
+
+    /// <summary>Reloj fijo: registra la validación con la fecha real del informe, no la del arranque.</summary>
+    private sealed class FixedTime(DateTimeOffset instant) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => instant.ToUniversalTime();
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

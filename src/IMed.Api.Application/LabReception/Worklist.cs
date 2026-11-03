@@ -27,9 +27,42 @@ public sealed record WorklistItem(
     /// ofrecer "Ingresar resultados" sobre algo ya resultado, que es lo que llevaba a
     /// redigitar y duplicar el informe.
     /// </summary>
-    bool HasResults = false);
+    bool HasResults = false,
+    /// <summary>Etapa del trabajo del laboratorio (<see cref="WorklistStages"/>).</summary>
+    string Stage = WorklistStages.Other,
+    /// <summary>Número de orden (requisición), para buscar por él.</summary>
+    string? Requisition = null);
 
-public sealed record WorklistQuery(Guid OrganizationId, string? Status);
+/// <param name="Stage">
+/// Filtro por etapa del trabajo (<see cref="WorklistStages"/>); tiene prioridad sobre
+/// <paramref name="Status"/>, que se conserva por compatibilidad.
+/// </param>
+public sealed record WorklistQuery(Guid OrganizationId, string? Status, string? Stage = null);
+
+/// <summary>
+/// Etapas de la worklist como las piensa el laboratorio. Observación de staging: el filtro
+/// "Pendientes" era el estado interno de la recepción ("muestra todavía no recibida"), así que un
+/// paciente con resultados esperando revisión nunca aparecía ahí.
+/// </summary>
+public static class WorklistStages
+{
+    /// <summary>Muestra recibida, sin resultados cargados.</summary>
+    public const string PendingResults = "PendingResults";
+    /// <summary>Resultados cargados que nadie liberó todavía ("pendiente de revisar").</summary>
+    public const string PendingValidation = "PendingValidation";
+    /// <summary>Liberados, por una persona o autovalidados por el motor de reglas.</summary>
+    public const string Validated = "Validated";
+    /// <summary>Por recibir, bloqueadas, rechazadas o referidas.</summary>
+    public const string Other = "Other";
+
+    public static string Of(OrderIntake intake) => intake.Status switch
+    {
+        OrderIntakeStatus.Completed => Validated,
+        OrderIntakeStatus.Received when !string.IsNullOrWhiteSpace(intake.ReportFhirId) => PendingValidation,
+        OrderIntakeStatus.Received => PendingResults,
+        _ => Other,
+    };
+}
 
 /// <summary>
 /// Worklist server-side (L3-D9): intakes in-house por estado/prioridad con TAT
@@ -42,8 +75,12 @@ public sealed class GetWorklistHandler(
 {
     public async Task<IReadOnlyList<WorklistItem>> HandleAsync(WorklistQuery query, CancellationToken ct = default)
     {
-        OrderIntakeStatus? status = Enum.TryParse<OrderIntakeStatus>(query.Status, ignoreCase: true, out var s) ? s : null;
-        var rows = await ops.ListInHouseIntakesAsync(query.OrganizationId, status, ct);
+        var byStage = !string.IsNullOrWhiteSpace(query.Stage);
+        OrderIntakeStatus? status = !byStage && Enum.TryParse<OrderIntakeStatus>(query.Status, ignoreCase: true, out var s)
+            ? s : null;
+        var rows = (await ops.ListInHouseIntakesAsync(query.OrganizationId, status, ct))
+            .Where(x => !byStage || string.Equals(WorklistStages.Of(x), query.Stage, StringComparison.OrdinalIgnoreCase))
+            .ToList();
         var now = timeProvider.GetUtcNow();
 
         // Nombres en lote (un lookup por paciente, no por fila): la worklist repite pacientes
@@ -87,7 +124,9 @@ public sealed class GetWorklistHandler(
                 PatientName: names.GetValueOrDefault(x.PatientFhirId),
                 ExamText: x.ExamText,
                 ExamLoincCode: x.ExamLoincCode,
-                HasResults: !string.IsNullOrWhiteSpace(x.ReportFhirId));
+                HasResults: !string.IsNullOrWhiteSpace(x.ReportFhirId),
+                Stage: WorklistStages.Of(x),
+                Requisition: x.Requisition);
         }).ToList();
     }
 

@@ -38,8 +38,12 @@ public sealed class TeamEndpointsTests(ImedApiFixture fixture) : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    /// <summary>
+    /// Observación de staging: el fundador (sin perfil clínico) no aparecía en Equipo porque la
+    /// lista salía de los Practitioner. Ahora sale de la membresía.
+    /// </summary>
     [Fact]
-    public async Task GET_api_team_org_sin_miembros_devuelve_array_vacio()
+    public async Task GET_api_team_tras_bootstrap_lista_al_fundador_sin_perfil_clinico()
     {
         // Bootstrap una org sin agregar PractitionerRoles después.
         var founderId = Guid.NewGuid();
@@ -64,7 +68,10 @@ public sealed class TeamEndpointsTests(ImedApiFixture fixture) : IAsyncLifetime
         var teamResp = await client.GetAsync("/api/team");
         teamResp.StatusCode.Should().Be(HttpStatusCode.OK);
         var team = await teamResp.Content.ReadFromJsonAsync<TeamMember[]>();
-        team.Should().NotBeNull().And.BeEmpty();
+        var fundador = team.Should().ContainSingle().Subject;
+        fundador.KeycloakUserId.Should().Be(founderId);
+        fundador.PractitionerFhirId.Should().BeNull("el administrador no tiene rol clínico");
+        fundador.IsActive.Should().BeTrue();
     }
 
     [Fact]
@@ -136,6 +143,8 @@ public sealed class TeamEndpointsTests(ImedApiFixture fixture) : IAsyncLifetime
                 organizationId: orgId,
                 practitionerFhirId: "prac-bob",
                 practitionerRoleFhirId: "role-bob"));
+            db.OrganizationMembers.Add(IMed.Api.Domain.Organizations.OrganizationMember.Join(aliceUserId, orgId, null, null));
+            db.OrganizationMembers.Add(IMed.Api.Domain.Organizations.OrganizationMember.Join(bobUserId, orgId, null, null));
             await db.SaveChangesAsync();
         }
 
@@ -148,7 +157,7 @@ public sealed class TeamEndpointsTests(ImedApiFixture fixture) : IAsyncLifetime
         teamResp.StatusCode.Should().Be(HttpStatusCode.OK);
         var team = await teamResp.Content.ReadFromJsonAsync<TeamMember[]>();
         team.Should().NotBeNull();
-        team!.Should().HaveCount(2);
+        team!.Should().HaveCount(3, "el fundador + Alice + Bob");
 
         var alice = team.SingleOrDefault(m => m.KeycloakUserId == aliceUserId);
         alice.Should().NotBeNull();

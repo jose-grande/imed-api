@@ -66,11 +66,16 @@ public sealed record CashResult(CashSessionDto? Session, string? Code, string? M
 /// abre el del entrante sobre la misma caja. Obligar a cerrar la caja física en cada cambio de
 /// guardia haría que el entrante arranque contando lo que el saliente ya contó.</para>
 /// </summary>
-public sealed class OpenCashSessionHandler(ICashRepository cash, IFiscalRepository fiscal)
+public sealed class OpenCashSessionHandler(
+    ICashRepository cash, IFiscalRepository fiscal, ILocationRepository locations, ILocationProvisioning provisioning)
 {
+    /// <param name="anyLocation">
+    /// Quien administra la facturación puede abrir turno en cualquier caja; los demás, solo en las
+    /// de sus sedes.
+    /// </param>
     public async Task<CashResult> HandleAsync(
         Guid orgId, Guid cashPointId, Guid cashierUserId, decimal openingAmount,
-        CancellationToken ct = default)
+        bool anyLocation = false, CancellationToken ct = default)
     {
         var caja = await fiscal.GetCashPointAsync(orgId, cashPointId, ct);
         if (caja is null)
@@ -80,6 +85,18 @@ public sealed class OpenCashSessionHandler(ICashRepository cash, IFiscalReposito
         if (!caja.Active)
         {
             return CashResult.Reject("caja_cerrada", $"La caja '{caja.Name}' está cerrada.");
+        }
+
+        if (!anyLocation)
+        {
+            var sedes = await ListCashPointsHandler.AssignedLocationsAsync(locations, provisioning, orgId, cashierUserId, ct);
+            if (!sedes.Contains(caja.LocationId))
+            {
+                var sede = await locations.GetAsync(orgId, caja.LocationId, ct);
+                return CashResult.Reject(
+                    "caja_de_otra_sede",
+                    $"La caja '{caja.Name}' es de la sede {sede?.Name ?? "de otra sucursal"}, que no tenés asignada.");
+            }
         }
 
         // Dos turnos simultáneos sobre la misma gaveta hacen que el arqueo de cada uno reclame el

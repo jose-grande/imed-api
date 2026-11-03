@@ -7,19 +7,19 @@ using MigraDocCore.Rendering;
 namespace IMed.Api.Infrastructure.Pdf;
 
 /// <summary>
-/// Renderer del informe de resultados. Mismo lenguaje visual que los renderers de orden y
-/// receta, con tres diferencias que vienen del oficio y no del gusto:
+/// Renderer del informe de resultados de una orden. Mismo lenguaje visual que los renderers de
+/// orden y receta, con las reglas que vienen del oficio y del cliente:
 ///
 /// <list type="number">
-///   <item><b>Lo anormal se marca sin depender del color.</b> Estos informes se imprimen en
-///   blanco y negro y se fotocopian: un valor alto señalado solo con rojo desaparece. Va en
-///   negrita, con un asterisco y con la palabra escrita.</item>
+///   <item><b>Área → panel → subárea.</b> Lo que no tiene resultados no llega al modelo, así que
+///   no hay títulos vacíos.</item>
+///   <item><b>Fuera de rango: solo * o **.</b> En el mismo color y peso que el resto de la línea,
+///   sin columna de "Alto"/"Crítico alto": el paciente lee este papel (observación del cliente).
+///   Los asteriscos además sobreviven a la fotocopia en blanco y negro.</item>
 ///   <item><b>El panel es un encabezado, no una fila.</b> La observación "grouper" de FHIR no
-///   tiene valor propio; imprimirla como una determinación más dejaba una línea vacía en el
-///   papel.</item>
-///   <item><b>Un informe no liberado grita que es preliminar.</b> Es el documento que sale de la
-///   institución: uno preliminar sin marcar puede archivarse en una historia clínica como si
-///   fuera definitivo.</item>
+///   tiene valor propio.</item>
+///   <item><b>Solo lo validado.</b> Si quedan pruebas sin validar, se avisa: el documento no se
+///   puede tomar por completo.</item>
 /// </list>
 /// </summary>
 public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
@@ -27,7 +27,6 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
     private static readonly Color Ink = new(30, 30, 30);
     private static readonly Color Muted = new(110, 110, 110);
     private static readonly Color Rule = new(210, 210, 210);
-    private static readonly Color Alert = new(180, 30, 30);
     private static readonly Color HeaderBg = new(243, 244, 246);
 
     public LabReportPdfRenderer()
@@ -71,13 +70,9 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
 
         RenderPageFooter(section, model);
         RenderHeader(section, model);
-        if (!model.IsFinal)
-        {
-            RenderPreliminaryBanner(section);
-        }
         RenderPatientBlock(section, model);
         RenderResults(section, model);
-        RenderConclusion(section, model);
+        RenderPending(section, model);
         RenderSignature(section, model);
 
         return doc;
@@ -117,6 +112,24 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
         group.Font.Bold = true;
         group.ParagraphFormat.SpaceBefore = Unit.FromPoint(8);
         group.ParagraphFormat.SpaceAfter = Unit.FromPoint(2);
+        group.ParagraphFormat.KeepWithNext = true;
+
+        var area = doc.Styles.AddStyle("AreaTitle", "Normal");
+        area.Font.Size = 11;
+        area.Font.Bold = true;
+        area.ParagraphFormat.SpaceBefore = Unit.FromPoint(12);
+        area.ParagraphFormat.SpaceAfter = Unit.FromPoint(4);
+        area.ParagraphFormat.Shading.Color = HeaderBg;
+        area.ParagraphFormat.Alignment = ParagraphAlignment.Center;
+        area.ParagraphFormat.KeepWithNext = true;
+
+        var subsection = doc.Styles.AddStyle("SubsectionTitle", "Normal");
+        subsection.Font.Size = 9.5;
+        subsection.Font.Bold = true;
+        subsection.Font.Underline = Underline.Single;
+        subsection.ParagraphFormat.SpaceBefore = Unit.FromPoint(6);
+        subsection.ParagraphFormat.SpaceAfter = Unit.FromPoint(2);
+        subsection.ParagraphFormat.KeepWithNext = true;
 
         var footer = doc.Styles["Footer"]!;
         footer.Font.Size = 8;
@@ -161,48 +174,15 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
 
         var right = row.Cells[column + 1];
         right.Format.Alignment = ParagraphAlignment.Right;
-        if (!string.IsNullOrWhiteSpace(model.OrderNumber))
-        {
-            AddStyled(right, $"Orden {model.OrderNumber}", "Normal");
-        }
-        if (!string.IsNullOrWhiteSpace(model.AccessionNumber))
-        {
-            AddStyled(right, $"Accession {model.AccessionNumber}", "Subtle");
-        }
         if (!string.IsNullOrWhiteSpace(model.Requisition))
         {
-            AddStyled(right, $"Requisición {model.Requisition}", "Subtle");
+            AddStyled(right, $"Orden {model.Requisition}", "Normal");
         }
 
         var rule = section.AddParagraph();
         rule.Format.SpaceBefore = Unit.FromPoint(6);
         rule.Format.Borders.Bottom.Width = 0.75;
         rule.Format.Borders.Bottom.Color = Rule;
-    }
-
-    /// <summary>
-    /// Aviso para el informe no liberado. Deliberadamente grande y con borde: la alternativa
-    /// realista es que alguien archive un preliminar creyendo que es definitivo.
-    /// </summary>
-    private static void RenderPreliminaryBanner(Section section)
-    {
-        var table = section.AddTable();
-        table.Borders.Width = 1.0;
-        table.Borders.Color = Alert;
-        table.AddColumn(Unit.FromCentimeter(17.4));
-        var cell = table.AddRow().Cells[0];
-        cell.Format.Alignment = ParagraphAlignment.Center;
-        cell.Format.SpaceBefore = Unit.FromPoint(4);
-        cell.Format.SpaceAfter = Unit.FromPoint(4);
-
-        var p = cell.AddParagraph("RESULTADO PRELIMINAR — NO VALIDADO");
-        p.Format.Font.Bold = true;
-        p.Format.Font.Size = 11;
-        p.Format.Font.Color = Alert;
-
-        var q = cell.AddParagraph("Pendiente de validación profesional. No usar para decisiones clínicas.");
-        q.Format.Font.Size = 8.5;
-        q.Format.Font.Color = Alert;
     }
 
     private static void RenderPatientBlock(Section section, LabReportPdfModel model)
@@ -245,7 +225,6 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
         }
         // Las tres fechas cuentan la trazabilidad del estudio y son lo primero que pregunta
         // un médico cuando un valor no le cierra.
-        AddDate(right, "Toma", model.CollectedAt);
         AddDate(right, "Recepción", model.ReceivedAt);
         AddDate(right, "Liberación", model.ReleasedAt);
         if (!string.IsNullOrWhiteSpace(model.ExternalLabName))
@@ -256,126 +235,130 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
 
     private static void RenderResults(Section section, LabReportPdfModel model)
     {
-        AddStyled(section, "RESULTADOS", "SectionTitle");
-
-        if (model.Groups.Count == 0)
+        foreach (var area in model.Areas)
         {
-            AddStyled(section, "El informe no tiene determinaciones cargadas.", "Subtle");
-            return;
-        }
+            AddStyled(section, area.Title.ToUpper(CultureInfo.CurrentCulture), "AreaTitle");
 
-        foreach (var group in model.Groups)
-        {
-            // Un panel encabeza su bloque; las pruebas sueltas no necesitan encabezado propio.
-            if (group.Lines.Count > 1 || model.Groups.Count > 1)
+            foreach (var block in area.Blocks)
             {
-                var title = section.AddParagraph(group.Title);
-                title.Style = "GroupTitle";
-                if (!string.IsNullOrWhiteSpace(group.LoincCode))
+                if (!string.IsNullOrWhiteSpace(block.Title))
                 {
-                    var code = section.AddParagraph(group.LoincCode!);
-                    code.Style = "Subtle";
-                    code.Format.SpaceAfter = Unit.FromPoint(3);
+                    AddStyled(section, block.Title!.ToUpper(CultureInfo.CurrentCulture), "GroupTitle");
+                    if (!string.IsNullOrWhiteSpace(block.ValidatedBy))
+                    {
+                        var by = AddStyled(section, $"Resultados validados por: {block.ValidatedBy}", "Subtle");
+                        by.Format.KeepWithNext = true;
+                    }
+                }
+
+                foreach (var sub in block.Subsections)
+                {
+                    if (!string.IsNullOrWhiteSpace(sub.Title))
+                    {
+                        AddStyled(section, sub.Title!, "SubsectionTitle");
+                    }
+                    RenderLines(section, sub.Lines);
+                }
+
+                if (!string.IsNullOrWhiteSpace(block.Conclusion))
+                {
+                    var c = section.AddParagraph();
+                    c.Format.SpaceBefore = Unit.FromPoint(4);
+                    c.AddFormattedText("Comentario: ", TextFormat.Bold);
+                    c.AddText(block.Conclusion!);
                 }
             }
-
-            RenderGroupTable(section, group);
         }
 
+        // Neutra a propósito: dice qué significan los asteriscos sin calificar el valor.
         var legend = section.AddParagraph(
-            "* Valor fuera del rango de referencia.   ** Valor crítico.   (C) Resultado corregido.");
+            "* / ** Valor fuera del intervalo de referencia.   (C) Resultado corregido.");
         legend.Style = "Subtle";
-        legend.Format.SpaceBefore = Unit.FromPoint(6);
+        legend.Format.SpaceBefore = Unit.FromPoint(8);
     }
 
-    private static void RenderGroupTable(Section section, PdfReportGroup group)
+    private static void RenderLines(Section section, IReadOnlyList<PdfReportLine> lines)
     {
         var table = section.AddTable();
         table.Borders.Width = 0;
         table.Rows.LeftIndent = 0;
-        table.AddColumn(Unit.FromCentimeter(6.6));   // Determinación
-        table.AddColumn(Unit.FromCentimeter(3.2));   // Resultado
-        table.AddColumn(Unit.FromCentimeter(2.2));   // Unidad
-        table.AddColumn(Unit.FromCentimeter(3.4));   // Referencia
-        table.AddColumn(Unit.FromCentimeter(2.0));   // Marca
+        table.AddColumn(Unit.FromCentimeter(7.4));   // Descripción
+        table.AddColumn(Unit.FromCentimeter(3.8));   // Resultado
+        table.AddColumn(Unit.FromCentimeter(2.6));   // Unidad
+        table.AddColumn(Unit.FromCentimeter(3.6));   // Referencia
 
         var head = table.AddRow();
-        head.Shading.Color = HeaderBg;
+        head.HeadingFormat = true;
         head.Format.Font.Bold = true;
-        head.Format.Font.Size = 8.5;
-        head.TopPadding = Unit.FromPoint(3);
-        head.BottomPadding = Unit.FromPoint(3);
-        head.Cells[0].AddParagraph("Determinación");
+        head.Format.Font.Size = 8;
+        head.Format.Font.Color = Muted;
+        head.Cells[0].AddParagraph("Descripción");
         head.Cells[1].AddParagraph("Resultado");
         head.Cells[2].AddParagraph("Unidad");
         head.Cells[3].AddParagraph("Referencia");
-        head.Cells[4].AddParagraph("");
 
-        foreach (var line in group.Lines)
+        foreach (var line in lines)
         {
             var row = table.AddRow();
-            row.TopPadding = Unit.FromPoint(2.5);
-            row.BottomPadding = Unit.FromPoint(2.5);
+            row.TopPadding = Unit.FromPoint(1.5);
+            row.BottomPadding = Unit.FromPoint(1.5);
             row.Borders.Bottom.Width = 0.5;
             row.Borders.Bottom.Color = Rule;
 
             var nameCell = row.Cells[0].AddParagraph(line.Name);
             if (line.IsCorrected)
             {
-                nameCell.AddFormattedText("  (C)", TextFormat.NotBold).Font.Color = Muted;
-            }
-            if (!string.IsNullOrWhiteSpace(line.LoincCode))
-            {
-                var code = row.Cells[0].AddParagraph(line.LoincCode!);
-                code.Style = "Subtle";
+                nameCell.AddText("  (C)");
             }
 
-            // El valor anormal se distingue por peso y símbolo, no por color: estos informes se
-            // fotocopian en blanco y negro.
-            var value = row.Cells[1].AddParagraph(line.Value + (line.IsCritical ? " **" : line.IsAbnormal ? " *" : ""));
-            value.Format.Font.Bold = line.IsAbnormal || line.IsCritical;
-            if (line.IsCritical)
-            {
-                value.Format.Font.Color = Alert;
-            }
-
+            // Mismo color y peso que el resto de la línea: la marca es solo el asterisco.
+            row.Cells[1].AddParagraph(string.IsNullOrEmpty(line.Mark) ? line.Value : $"{line.Value} {line.Mark}");
             row.Cells[2].AddParagraph(line.Unit ?? "");
-            row.Cells[3].AddParagraph(line.ReferenceRange ?? "—");
-
-            if (!string.IsNullOrWhiteSpace(line.FlagLabel))
-            {
-                var flag = row.Cells[4].AddParagraph(line.FlagLabel!);
-                flag.Format.Font.Size = 8.5;
-                flag.Format.Font.Bold = line.IsCritical;
-                flag.Format.Font.Color = line.IsCritical ? Alert : Ink;
-            }
+            row.Cells[3].AddParagraph(line.ReferenceRange ?? "");
         }
     }
 
-    private static void RenderConclusion(Section section, LabReportPdfModel model)
+    /// <summary>Aviso de estudios de la orden aún sin validar: no se imprimen, pero se dice.</summary>
+    private static void RenderPending(Section section, LabReportPdfModel model)
     {
-        if (string.IsNullOrWhiteSpace(model.Conclusion))
+        if (model.PendingCount <= 0)
         {
             return;
         }
-        AddStyled(section, "OBSERVACIONES", "SectionTitle");
-        section.AddParagraph(model.Conclusion!);
+        var p = section.AddParagraph(model.PendingCount == 1
+            ? "Hay 1 estudio de esta orden pendiente de validación. Se entregará cuando esté listo."
+            : $"Hay {model.PendingCount} estudios de esta orden pendientes de validación. Se entregarán cuando estén listos.");
+        p.Format.SpaceBefore = Unit.FromPoint(8);
+        p.Format.Font.Bold = true;
+        p.Format.Borders.Width = 0.75;
+        p.Format.Borders.Color = Rule;
+        p.Format.Borders.Distance = Unit.FromPoint(4);
     }
 
     private static void RenderSignature(Section section, LabReportPdfModel model)
     {
-        var block = section.AddParagraph();
-        block.Format.SpaceBefore = Unit.FromCentimeter(1.4);
+        var validators = model.Validators ?? [];
+        if (validators.Count == 0)
+        {
+            // Liberado sin profesional resuelto: se dice, en vez de dejar un espacio en blanco
+            // que parezca una firma faltante.
+            var p = section.AddParagraph("Resultados liberados en el sistema. Profesional validador no registrado.");
+            p.Style = "Subtle";
+            p.Format.Alignment = ParagraphAlignment.Center;
+            p.Format.SpaceBefore = Unit.FromCentimeter(1.0);
+            return;
+        }
 
-        if (model.ValidatedBy is { } v)
+        foreach (var v in validators)
         {
             var line = section.AddParagraph();
             line.Format.Alignment = ParagraphAlignment.Center;
             line.Format.Borders.Top.Width = 0.75;
             line.Format.Borders.Top.Color = Rule;
-            line.Format.SpaceBefore = Unit.FromCentimeter(1.0);
+            line.Format.SpaceBefore = Unit.FromCentimeter(1.6);
             line.Format.LeftIndent = Unit.FromCentimeter(5.0);
             line.Format.RightIndent = Unit.FromCentimeter(5.0);
+            line.Format.KeepWithNext = true;
             line.AddFormattedText(FormatPractitioner(v), TextFormat.Bold);
 
             if (!string.IsNullOrWhiteSpace(v.LicenseNumber))
@@ -383,18 +366,11 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
                 var lic = section.AddParagraph($"Colegiación {v.LicenseNumber}");
                 lic.Style = "Subtle";
                 lic.Format.Alignment = ParagraphAlignment.Center;
+                lic.Format.KeepWithNext = true;
             }
-            var role = section.AddParagraph("Validó y liberó el informe");
+            var role = section.AddParagraph("Validó y liberó resultados");
             role.Style = "Subtle";
             role.Format.Alignment = ParagraphAlignment.Center;
-        }
-        else if (model.IsFinal)
-        {
-            // Liberado sin profesional resuelto: se dice, en vez de dejar un espacio en blanco
-            // que parezca una firma faltante.
-            var p = section.AddParagraph("Informe liberado en el sistema. Profesional validador no registrado.");
-            p.Style = "Subtle";
-            p.Format.Alignment = ParagraphAlignment.Center;
         }
     }
 

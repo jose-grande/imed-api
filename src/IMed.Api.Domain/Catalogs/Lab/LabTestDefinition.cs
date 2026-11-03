@@ -29,7 +29,7 @@ public sealed class LabTestDefinition
 
     public LabTestDatatype Datatype { get; private set; } = LabTestDatatype.Numeric;
 
-    /// <summary>Unidad UCUM. Ej: "mg/dL". Opcional (no aplica a coded/text/boolean).</summary>
+    /// <summary>Código UCUM de <see cref="LabUnits"/> (ej. <c>m[IU]/L</c>); se muestra su etiqueta. Opcional (no aplica a coded/text/boolean).</summary>
     public string? Unit { get; private set; }
 
     public LabDepartment Department { get; private set; } = LabDepartment.Other;
@@ -92,6 +92,9 @@ public sealed class LabTestDefinition
     /// <summary>Permite deprecar sin borrar para preservar referencias históricas.</summary>
     public bool Active { get; private set; } = true;
 
+    /// <summary>Código de <see cref="LabSubsections"/> para el informe; null = directo bajo el área.</summary>
+    public string? Subsection { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -139,7 +142,7 @@ public sealed class LabTestDefinition
             LoincCode = string.IsNullOrWhiteSpace(loincCode) ? null : loincCode.Trim(),
             Name = name.Trim(),
             Datatype = datatype,
-            Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim(),
+            Unit = LabUnits.Require(unit, nameof(unit)),
             Department = department,
             FastingHoursMin = fastingHoursMin,
             FastingHoursMax = fastingHoursMax,
@@ -177,15 +180,33 @@ public sealed class LabTestDefinition
                 nameof(fastingHoursMax));
         }
 
+        // Antes de tocar nada: una unidad fuera de la lista (también la de un dato viejo que no se
+        // migró) obliga a elegir una válida para poder guardar la prueba.
+        var unitCode = LabUnits.Require(unit, nameof(unit));
         Name = name.Trim();
         Datatype = datatype;
         LoincCode = string.IsNullOrWhiteSpace(loincCode) ? null : loincCode.Trim();
-        Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim();
+        Unit = unitCode;
         Department = department;
+        // La subárea pertenece a un área: si la prueba cambió de área, la anterior deja de valer.
+        if (LabSubsections.Find(department, Subsection) is null)
+        {
+            Subsection = null;
+        }
         FastingHoursMin = fastingHoursMin;
         FastingHoursMax = fastingHoursMax;
         CollectionType = string.IsNullOrWhiteSpace(collectionType) ? null : collectionType.Trim();
         PatientInstruction = string.IsNullOrWhiteSpace(patientInstruction) ? null : patientInstruction.Trim();
+        Touch(timeProvider);
+    }
+
+    /// <summary>
+    /// Subárea del informe dentro del área de la prueba (Serie roja, Examen físico…). Código de
+    /// <see cref="LabSubsections"/>; null = la prueba va directo bajo el área.
+    /// </summary>
+    public void SetSubsection(string? code, TimeProvider? timeProvider = null)
+    {
+        Subsection = LabSubsections.Require(Department, code, nameof(code));
         Touch(timeProvider);
     }
 

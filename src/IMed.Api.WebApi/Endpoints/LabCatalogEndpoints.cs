@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using IMed.Api.Domain.Authorization;
+using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.WebApi.Http;
 using IMed.Api.Application.LabCatalog;
 using Microsoft.AspNetCore.Mvc;
@@ -53,7 +54,21 @@ public static class LabCatalogEndpoints
 
         // -------- Tipos de muestra / tubos (LIS-RD-26/16) --------
         group.MapGet("/specimen-types", ListSpecimenTypesAsync).WithName("ListSpecimenTypes");
+        // Tipos de recolección: lista fija (LabCollectionMethods). Se sirve para que el formulario
+        // no repita la lista y no pueda desalinearse de lo que el servidor acepta.
+        group.MapGet("/collection-methods", () => Results.Ok(LabCollectionMethods.All)).WithName("ListCollectionMethods");
         group.MapGet("/tube-types", ListTubeTypesAsync).WithName("ListTubeTypes");
+        // Unidades admitidas: lista fija (LabUnits), código UCUM + etiqueta. Mismo motivo que la
+        // anterior: el selector del formulario no puede ofrecer algo que el servidor rechace.
+        group.MapGet("/units", () => Results.Ok(LabUnits.All)).WithName("ListLabUnits");
+        // Áreas y subáreas del informe: lista fija (LabSubsections), en el orden en que se imprimen.
+        group.MapGet("/report-areas", () => Results.Ok(LabSubsections.AreaOrder.Select(d => new
+        {
+            Department = d.ToString(),
+            Label = LabSubsections.AreaLabel(d),
+            Subsections = LabSubsections.All.Where(s => s.Department == d)
+                .Select(s => new { s.Code, s.Label }).ToList(),
+        }))).WithName("ListLabReportAreas");
 
         // -------- Motivos de rechazo de muestra (R6-F1a) --------
         group.MapGet("/rejection-reasons", ListRejectionReasonsAsync).WithName("ListSpecimenRejectionReasons");
@@ -97,7 +112,8 @@ public static class LabCatalogEndpoints
                 request.Unit, request.Department, request.FastingHoursMin, request.FastingHoursMax,
                 request.CollectionType, request.PatientInstruction,
                 request.SpecimenTypeId, request.TubeTypeId, request.CollectionMode,
-                request.MinVolumeMl, request.PreferredVolumeMl, request.AnalyzerMinVolumeMl, request.StabilityMinutes),
+                request.MinVolumeMl, request.PreferredVolumeMl, request.AnalyzerMinVolumeMl, request.StabilityMinutes,
+                request.Subsection),
                 cancellationToken);
             return Results.Created($"/api/lab-catalog/tests/{result.Id}", result);
         }
@@ -114,7 +130,8 @@ public static class LabCatalogEndpoints
                 id, request.Name, request.Datatype, request.LoincCode, request.Unit, request.Department,
                 request.FastingHoursMin, request.FastingHoursMax, request.CollectionType, request.PatientInstruction,
                 request.SpecimenTypeId, request.TubeTypeId, request.CollectionMode,
-                request.MinVolumeMl, request.PreferredVolumeMl, request.AnalyzerMinVolumeMl, request.StabilityMinutes),
+                request.MinVolumeMl, request.PreferredVolumeMl, request.AnalyzerMinVolumeMl, request.StabilityMinutes,
+                request.Subsection),
                 cancellationToken);
             return Results.Ok(result);
         }
@@ -379,13 +396,15 @@ public sealed record CreateLabTestRequest(
     string Code, string Name, string Datatype, string? LoincCode, string? Unit,
     string Department, int? FastingHoursMin, int? FastingHoursMax, string? CollectionType, string? PatientInstruction,
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
-    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
+    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes,
+    string? Subsection = null);
 
 public sealed record UpdateLabTestRequest(
     string Name, string Datatype, string? LoincCode, string? Unit,
     string Department, int? FastingHoursMin, int? FastingHoursMax, string? CollectionType, string? PatientInstruction,
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
-    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
+    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes,
+    string? Subsection = null);
 
 public sealed record SetActiveRequest(bool Active);
 

@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Organizations;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Subscriptions;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,7 @@ public sealed class BootstrapOrganizationHandler(
     IBootstrapOrganizationPersistence persistence,
     ILabCatalogProvisioning labCatalogProvisioning,
     ILocationProvisioning locationProvisioning,
+    IOrganizationMemberRepository members,
     ILogger<BootstrapOrganizationHandler> logger,
     TimeProvider timeProvider)
 {
@@ -122,6 +124,21 @@ public sealed class BootstrapOrganizationHandler(
             logger.LogError(ex,
                 "Aprovisionamiento de la sede principal falló para org {OrgId}; " +
                 "el backfill de arranque la recuperará.", organizationId);
+        }
+
+        // 4.7 El fundador es el primer miembro. El registro de sesión lo haría igual en su
+        //     próximo ingreso; acá queda desde el principio, sin esperar a que vuelva a entrar.
+        try
+        {
+            await members.AddAsync(OrganizationMember.Join(
+                command.KeycloakUserId, organizationId, displayName: null, email: null, timeProvider),
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "No se registró al fundador como miembro de {OrgId}; se registra en su próximo ingreso.",
+                organizationId);
         }
 
         // 5. Hot-path: sincronizar Keycloak. Si falla, el OutboxProcessor lo

@@ -248,7 +248,7 @@ public sealed class BillingHardeningTests(ImedApiFixture fixture) : IAsyncLifeti
         (await sp.GetRequiredService<ListFiscalAuthorizationsHandler>()
             .HandleAsync(otra)).Should().BeEmpty("autorizaciones");
         (await sp.GetRequiredService<ListCashPointsHandler>()
-            .HandleAsync(otra)).Should().BeEmpty("cajas");
+            .HandleAsync(otra, null, allLocations: true)).Should().BeEmpty("cajas");
         (await sp.GetRequiredService<SearchAccountsHandler>()
             .HandleAsync(otra, null, null, 50)).Should().BeEmpty("cuentas");
     }

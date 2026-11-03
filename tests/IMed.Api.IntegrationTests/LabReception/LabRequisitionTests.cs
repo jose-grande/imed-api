@@ -42,7 +42,7 @@ public sealed class LabRequisitionTests(ImedApiFixture fixture) : IAsyncLifetime
         // sin LOINC —los paneles de la clínica no tienen uno—. Antes esta prueba sembraba `CMP`
         // bajo el sistema LOINC, que es una forma que ninguna orden real tiene, y por eso no vio
         // que la recepción buscaba el catálogo por el campo equivocado.
-        // Sus pruebas son de química → "sangre".
+        // Sus pruebas son de química → "suero".
         var srId = fixture.Hapi.SeedServiceRequest(
             "pat-req-1", loinc: null, "Perfil metabolico completo", encounter: enc, requisition: enc,
             localCode: "CMP", localSystem: "http://imed.local/panel");
@@ -56,7 +56,8 @@ public sealed class LabRequisitionTests(ImedApiFixture fixture) : IAsyncLifetime
             .Content.ReadFromJsonAsync<RequisitionView>();
         view.Should().NotBeNull();
         view!.Groups.Should().NotBeEmpty("la orden-panel debe expandirse a un grupo de tipo de muestra");
-        var blood = view.Groups.Should().ContainSingle(g => g.SpecimenTypeCode == "BLOOD").Subject;
+        // La química se analiza en suero (tubo con gel): un solo grupo para todo el panel.
+        var blood = view.Groups.Should().ContainSingle(g => g.SpecimenTypeCode == "SERUM").Subject;
         blood.Orders.Should().Contain(o => o.ServiceRequestId == srId);
 
         // Recibir: una muestra para el grupo (N:M) → accession + Received.

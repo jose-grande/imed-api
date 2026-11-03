@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using IMed.Api.Domain.Catalogs.Lab;
 using WireMock;
 using WireMock.RequestBuilders;
 using WireMock.ResponseBuilders;
@@ -705,10 +706,14 @@ public sealed partial class HapiMockServer : IDisposable
             {
                 string? encParam = req.Query != null && req.Query.TryGetValue("encounter", out var ev) ? ev.FirstOrDefault() : null;
                 string? statusParam = req.Query != null && req.Query.TryGetValue("status", out var sv) ? sv.FirstOrDefault() : null;
+                string? reqParam = req.Query != null && req.Query.TryGetValue("requisition", out var rv) ? rv.FirstOrDefault() : null;
                 var encId = encParam?.Replace("Encounter/", string.Empty, StringComparison.Ordinal);
+                // `requisition` admite token `system|value`; se compara por el valor.
+                var reqValue = reqParam?.Split('|').Last();
 
                 var matches = _serviceRequests.Values.Where(sr =>
                     (encId is null || sr.Encounter == encId)
+                    && (reqValue is null || sr.Requisition == reqValue)
                     && (statusParam is null || statusParam.Split(',').Contains(sr.Status))).ToList();
 
                 var entries = matches.Select(sr => new
@@ -870,6 +875,10 @@ public sealed partial class HapiMockServer : IDisposable
             .Given(Request.Create().WithPath("/fhir/Observation").UsingPost())
             .RespondWith(Response.Create().WithCallback(req =>
             {
+                if (UcumRejection(req.Body) is { } rejected)
+                {
+                    return rejected;
+                }
                 var id = $"obs-{Guid.NewGuid():N}";
                 _observations[id] = ParseObservation(id, req.Body);
                 return JsonMessage(HttpStatusCode.Created, new { resourceType = "Observation", id, meta = new { versionId = "1" } });
@@ -901,6 +910,10 @@ public sealed partial class HapiMockServer : IDisposable
                 if (!_observations.ContainsKey(id))
                 {
                     return JsonMessage(HttpStatusCode.NotFound, new { error = "not found" });
+                }
+                if (UcumRejection(req.Body) is { } rejected)
+                {
+                    return rejected;
                 }
                 _observations[id] = ParseObservation(id, req.Body);
                 return JsonMessage(HttpStatusCode.OK, new { resourceType = "Observation", id, meta = new { versionId = "2" } });
@@ -1071,7 +1084,7 @@ public sealed partial class HapiMockServer : IDisposable
         }
 
         double? valueNum = null;
-        string? unit = null, valueStr = null;
+        string? unit = null, unitCode = null, valueStr = null;
         if (root.TryGetProperty("valueQuantity", out var vq))
         {
             if (vq.TryGetProperty("value", out var v) && v.TryGetDouble(out var dv))
@@ -1081,6 +1094,10 @@ public sealed partial class HapiMockServer : IDisposable
             if (vq.TryGetProperty("unit", out var u))
             {
                 unit = u.GetString();
+            }
+            if (vq.TryGetProperty("code", out var uc))
+            {
+                unitCode = uc.GetString();
             }
         }
         else if (root.TryGetProperty("valueString", out var vs))
@@ -1115,8 +1132,55 @@ public sealed partial class HapiMockServer : IDisposable
 
         var basedOn = ParseFirstReference(root, "basedOn", "ServiceRequest/");
         return new FakeObservation(
-            id, patient, loinc, codeText, valueNum, unit, valueStr, flag, low, high, status, effective, basedOn);
+            id, patient, loinc, codeText, valueNum, unit, valueStr, flag, low, high, status, effective, basedOn, unitCode);
     }
+
+    /// <summary>
+    /// Como HAPI con la validación de peticiones activa: un <c>Quantity</c> con sistema UCUM y un
+    /// código que no existe se rechaza con 422. El mock acepta los códigos de
+    /// <see cref="LabUnits"/> (todos verificados contra el UCUM de HAPI) y nada más, así que una
+    /// unidad que se cuele sin pasar por la lista hace fallar la prueba en vez de staging.
+    /// </summary>
+    private static ResponseMessage? UcumRejection(string? body)
+    {
+        var root = JsonDocument.Parse(body ?? "{}").RootElement;
+        var quantities = new List<JsonElement>();
+        if (root.TryGetProperty("valueQuantity", out var vq))
+        {
+            quantities.Add(vq);
+        }
+        if (root.TryGetProperty("referenceRange", out var rr) && rr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var range in rr.EnumerateArray())
+            {
+                foreach (var bound in new[] { "low", "high" })
+                {
+                    if (range.TryGetProperty(bound, out var q))
+                    {
+                        quantities.Add(q);
+                    }
+                }
+            }
+        }
+        foreach (var q in quantities)
+        {
+            if (q.TryGetProperty("system", out var sys) && sys.GetString() == "http://unitsofmeasure.org"
+                && q.TryGetProperty("code", out var c) && LabUnits.Find(c.GetString()) is null)
+            {
+                return JsonMessage(HttpStatusCode.UnprocessableEntity, new
+                {
+                    resourceType = "OperationOutcome",
+                    issue = new[] { new { severity = "error", code = "processing",
+                        diagnostics = $"Error processing unit '{c.GetString()}' (for 'http://unitsofmeasure.org#{c.GetString()}')" } },
+                });
+            }
+        }
+        return null;
+    }
+
+    /// <summary>La unidad visible y el código UCUM con que se guardó una Observation.</summary>
+    public (string? Unit, string? Code) ObservationUnit(string id) =>
+        _observations.TryGetValue(id, out var o) ? (o.Unit, o.UnitCode) : (null, null);
 
     /// <summary>Primera referencia de un array FHIR (<c>basedOn</c>, <c>partOf</c>, …).</summary>
     private static string? ParseFirstReference(JsonElement root, string property, string prefix)
@@ -1175,7 +1239,7 @@ public sealed partial class HapiMockServer : IDisposable
             coding = o.Loinc is null ? null : new[] { new { system = "http://loinc.org", code = o.Loinc, display = o.CodeText } },
             text = o.CodeText
         },
-        valueQuantity = o.ValueNumeric is null ? null : new { value = o.ValueNumeric, unit = o.Unit },
+        valueQuantity = o.ValueNumeric is null ? null : new { value = o.ValueNumeric, unit = o.Unit, code = o.UnitCode },
         valueString = o.ValueString,
         interpretation = o.Flag is null ? null : new[]
         {
@@ -1267,7 +1331,8 @@ public sealed partial class HapiMockServer : IDisposable
         /// devolvía siempre null y cualquier lógica que dependa del vínculo resultado↔orden
         /// quedaba sin poder probarse — la corrección lo necesita para cerrar la devolución.
         /// </summary>
-        string? ServiceRequestFhirId = null);
+        string? ServiceRequestFhirId = null,
+        string? UnitCode = null);
 
     private sealed record FakeDiagnosticReport(
         string Id, string PatientFhirId, string? Loinc, string? CodeText, string Status, string? Conclusion,

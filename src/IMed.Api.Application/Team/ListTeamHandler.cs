@@ -1,6 +1,7 @@
 using IMed.Api.Domain.Authorization;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Profile;
+using IMed.Api.Domain.Organizations;
 using IMed.Api.Domain.Practitioners;
 using Microsoft.Extensions.Logging;
 
@@ -9,22 +10,21 @@ namespace IMed.Api.Application.Team;
 public sealed record ListTeamQuery(Guid OrganizationId);
 
 /// <summary>
-/// Lista los miembros del equipo de la organización del JWT.
+/// Lista los miembros de la organización del JWT.
 ///
-/// <para>Pipeline:</para>
-/// <list type="number">
-///   <item>Lookup <c>OrganizationProfile</c> en BD para obtener <c>FhirId</c> + <c>PartitionName</c>.</item>
-///   <item>HAPI: search <c>PractitionerRole?organization=Organization/{fhirId}&amp;active=true</c>.</item>
-///   <item>Para cada PractitionerRole en paralelo: HAPI <c>GET Practitioner/{id}</c> + KC <c>GET user/{id}</c> (a través de <c>user_practitioner_assignments</c>) + KC <c>GET role-mappings</c>.</item>
-///   <item>Merge → <c>TeamMember[]</c>.</item>
-/// </list>
+/// <para><b>Fuente:</b> <see cref="OrganizationMember"/>, que se registra al iniciar sesión.
+/// Antes la lista salía de los PractitionerRole de HAPI, así que quien no tenía Practitioner
+/// —administración, caja, recepción, cuentas creadas desde la consola de Keycloak— no aparecía
+/// ni se le podían asignar sedes (observación de staging).</para>
 ///
-/// <para><b>Notas operativas.</b> Lookups N+1: para piloto con orgs &lt;30 members
-/// es aceptable. Si crece, optimizar con HAPI <c>_include=PractitionerRole:practitioner</c>
-/// (un solo Bundle) + batch lookup en BD del repo. Documentado como follow-up.</para>
+/// <para>Encima de la membresía se agregan, cuando existen: el perfil clínico (Practitioner y su
+/// especialidad, solo roles clínicos y de laboratorio), los roles de Keycloak y las sedes. Esas
+/// fuentes son degradables: si HAPI o Keycloak fallan, el miembro aparece igual, con menos
+/// datos.</para>
 /// </summary>
 public sealed class ListTeamHandler(
     IOrganizationProfileRepository orgRepo,
+    IOrganizationMemberRepository memberRepo,
     IUserPractitionerAssignmentRepository assignmentRepo,
     IHapiFhirClient hapi,
     IKeycloakAdminClient keycloak,
@@ -41,30 +41,18 @@ public sealed class ListTeamHandler(
         if (org is null)
         {
             logger.LogWarning("ListTeam: organization {OrgId} no existe", query.OrganizationId);
-            return Array.Empty<TeamMember>();
+            return [];
         }
 
-        var partitionName = $"org-{query.OrganizationId}";
-        var roles = await hapi.SearchPractitionerRolesByOrganizationAsync(org.FhirId, partitionName, cancellationToken);
-        if (roles.Count == 0)
+        // Todas las lecturas de BD antes del tramo paralelo: el DbContext no es thread-safe.
+        var members = await memberRepo.ListByOrganizationAsync(query.OrganizationId, cancellationToken);
+        if (members.Count == 0)
         {
-            return Array.Empty<TeamMember>();
+            return [];
         }
+        var assignments = (await assignmentRepo.ListByOrganizationAsync(query.OrganizationId, cancellationToken))
+            .ToDictionary(a => a.KeycloakUserId);
 
-        // Precargamos TODOS los assignments de la org en una sola query y los
-        // pasamos al builder paralelo como dict in-memory. Esto cumple dos cosas:
-        // (1) evita N+1 reads, (2) saca al DbContext del path concurrente —
-        // EF Core DbContext no es thread-safe y compartirlo en Task.WhenAll
-        // generaba "A second operation was started on this context instance"
-        // dependiendo del timing, dejando miembros invisibles intermitentemente.
-        var assignments = await assignmentRepo.ListByOrganizationAsync(query.OrganizationId, cancellationToken);
-        var assignmentsByPractitionerId = assignments.ToDictionary(
-            a => a.PractitionerFhirId,
-            a => a,
-            StringComparer.Ordinal);
-
-        // Sedes de toda la organización en dos lecturas, antes del tramo paralelo: mismo motivo
-        // que los assignments, el DbContext no se comparte entre tareas.
         var sedes = (await locations.ListAsync(query.OrganizationId, activeOnly: true, cancellationToken))
             .ToDictionary(l => l.Id);
         var sedesPorUsuario = (await locations.ListOrganizationAssignmentsAsync(query.OrganizationId, cancellationToken))
@@ -79,58 +67,84 @@ public sealed class ListTeamHandler(
                         a.LocationId, sedes[a.LocationId].Code, sedes[a.LocationId].Name, a.IsPrimary))
                     .ToList());
 
-        var tasks = roles.Select(role => BuildTeamMemberAsync(
-            role, assignmentsByPractitionerId, partitionName, cancellationToken));
-        var results = await Task.WhenAll(tasks);
-        return results
-            .Where(m => m is not null)
-            .Select(m => m! with { Locations = sedesPorUsuario.GetValueOrDefault(m!.KeycloakUserId) ?? [] })
+        // Especialidad de los que tienen perfil clínico: una búsqueda para toda la organización.
+        var partitionName = $"org-{query.OrganizationId}";
+        var rolesByPractitioner = await SafeSearchRolesAsync(org.FhirId, partitionName, cancellationToken);
+
+        var tasks = members.Select(m => BuildAsync(
+            m,
+            assignments.GetValueOrDefault(m.KeycloakUserId),
+            rolesByPractitioner,
+            sedesPorUsuario.GetValueOrDefault(m.KeycloakUserId) ?? [],
+            partitionName,
+            cancellationToken));
+        var team = await Task.WhenAll(tasks);
+
+        return team
+            .OrderByDescending(t => t.IsActive)
+            .ThenBy(t => t.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
     }
 
-    private async Task<TeamMember?> BuildTeamMemberAsync(
-        PractitionerRoleListItem role,
-        Dictionary<string, UserPractitionerAssignment> assignmentsByPractitionerId,
+    private async Task<TeamMember> BuildAsync(
+        OrganizationMember member,
+        UserPractitionerAssignment? assignment,
+        IReadOnlyDictionary<string, PractitionerRoleListItem> rolesByPractitioner,
+        IReadOnlyList<TeamMemberLocation> locations,
         string partitionName,
         CancellationToken cancellationToken)
     {
-        // El assignment es la fuente de verdad del vínculo Practitioner↔KC user.
-        // Sin él el row es ruido — lo skipeamos. Cualquier otra fuente (HAPI
-        // Practitioner, KC role-mappings) es degradable: un blip transitorio
-        // no debe sacar al miembro de la lista.
-        if (!assignmentsByPractitionerId.TryGetValue(role.PractitionerFhirId, out var assignment))
-        {
-            logger.LogWarning(
-                "ListTeam: PractitionerRole {RoleId} apunta a Practitioner {PracId} sin UserPractitionerAssignment local; skip",
-                role.Id, role.PractitionerFhirId);
-            return null;
-        }
-
-        // Lookups secundarios en paralelo: HAPI Practitioner + KC realm roles.
-        // Ambos son best-effort y no tocan el DbContext.
-        var practitionerTask = SafeGetPractitionerAsync(role.PractitionerFhirId, partitionName, cancellationToken);
-        var rolesTask = SafeGetUserRealmRolesAsync(assignment.KeycloakUserId, cancellationToken);
+        var practitionerTask = assignment is null
+            ? Task.FromResult<PractitionerSnapshot?>(null)
+            : SafeGetPractitionerAsync(assignment.PractitionerFhirId, partitionName, cancellationToken);
+        var rolesTask = SafeGetUserRealmRolesAsync(member.KeycloakUserId, cancellationToken);
         await Task.WhenAll(practitionerTask, rolesTask);
 
         var practitioner = practitionerTask.Result;
         var realmRoles = rolesTask.Result;
+        var practitionerRole = assignment is null
+            ? null
+            : rolesByPractitioner.GetValueOrDefault(assignment.PractitionerFhirId);
 
+        // Sin roles legibles (Keycloak caído) no se inventa uno: se muestra el más bajo.
         var primaryRole = RolePriority.FirstOrDefault(r => realmRoles.Contains(r, StringComparer.Ordinal))
-            ?? "practitioner";
+            ?? "auxiliar";
 
         return new TeamMember
         {
-            KeycloakUserId = assignment.KeycloakUserId,
-            Email = practitioner?.Email ?? string.Empty,
-            DisplayName = BuildDisplayName(practitioner),
+            KeycloakUserId = member.KeycloakUserId,
+            Email = member.Email ?? practitioner?.Email ?? string.Empty,
+            DisplayName = member.DisplayName
+                ?? BuildDisplayName(practitioner)
+                ?? member.Email
+                ?? "(sin nombre)",
             Role = primaryRole,
-            PractitionerFhirId = role.PractitionerFhirId,
-            PractitionerRoleFhirId = role.Id,
-            SpecialtyCode = role.SpecialtyCode,
-            SpecialtyDisplay = role.SpecialtyDisplay,
-            IsActive = role.Active,
+            PractitionerFhirId = assignment?.PractitionerFhirId,
+            PractitionerRoleFhirId = assignment?.PractitionerRoleFhirId,
+            SpecialtyCode = practitionerRole?.SpecialtyCode,
+            SpecialtyDisplay = practitionerRole?.SpecialtyDisplay,
+            IsActive = member.IsActive,
+            LastSeenAt = member.LastSeenAt,
+            Locations = locations,
             Functions = FunctionalRoles.All.Where(f => realmRoles.Contains(f, StringComparer.Ordinal)).ToList(),
         };
+    }
+
+    private async Task<IReadOnlyDictionary<string, PractitionerRoleListItem>> SafeSearchRolesAsync(
+        string organizationFhirId, string partitionName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var roles = await hapi.SearchPractitionerRolesByOrganizationAsync(organizationFhirId, partitionName, cancellationToken);
+            return roles
+                .GroupBy(r => r.PractitionerFhirId, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "ListTeam: HAPI PractitionerRole search falló; equipo sin especialidades");
+            return new Dictionary<string, PractitionerRoleListItem>(StringComparer.Ordinal);
+        }
     }
 
     private async Task<PractitionerSnapshot?> SafeGetPractitionerAsync(
@@ -158,18 +172,16 @@ public sealed class ListTeamHandler(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex,
-                "ListTeam: KC GetUserRealmRoles {UserId} falló; role default 'practitioner'",
-                keycloakUserId);
-            return Array.Empty<string>();
+            logger.LogWarning(ex, "ListTeam: KC GetUserRealmRoles {UserId} falló", keycloakUserId);
+            return [];
         }
     }
 
-    private static string BuildDisplayName(PractitionerSnapshot? practitioner)
+    private static string? BuildDisplayName(PractitionerSnapshot? practitioner)
     {
         if (practitioner is null)
         {
-            return "(sin nombre)";
+            return null;
         }
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(practitioner.Prefix))
@@ -181,6 +193,6 @@ public sealed class ListTeamHandler(
         {
             parts.Add(practitioner.Family);
         }
-        return parts.Count > 0 ? string.Join(" ", parts) : "(sin nombre)";
+        return parts.Count > 0 ? string.Join(" ", parts) : null;
     }
 }

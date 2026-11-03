@@ -13,58 +13,66 @@ public interface ILabReportPdfRenderer
     byte[] Render(LabReportPdfModel model);
 }
 
-/// <summary>Modelo de presentación del informe de resultados.</summary>
+/// <summary>
+/// Modelo de presentación del informe de resultados <b>de una orden</b>: todos sus paneles y
+/// pruebas individuales en un solo documento, organizados por área y subárea.
+/// </summary>
 public sealed record LabReportPdfModel(
     PdfOrgInfo Organization,
     PdfPatientInfo Patient,
-    /// <summary>Agrupaciones del informe: un panel con sus analitos, o pruebas sueltas.</summary>
-    IReadOnlyList<PdfReportGroup> Groups,
     /// <summary>
-    /// <c>true</c> solo si el informe está liberado. Cuando es <c>false</c> el documento sale con
-    /// un aviso imposible de ignorar: un preliminar impreso sin marcar puede terminar en una
-    /// historia clínica como si fuera definitivo.
+    /// Áreas con resultados validados, en el orden del informe. Un área, bloque o subárea sin
+    /// resultados no llega acá: el informe no imprime títulos vacíos.
     /// </summary>
-    bool IsFinal,
+    IReadOnlyList<PdfReportArea> Areas,
+    /// <summary>
+    /// Paneles o pruebas de la orden todavía sin validar. No se imprimen; el informe solo avisa
+    /// que hay pendientes, para que nadie lo tome por completo.
+    /// </summary>
+    int PendingCount = 0,
     string? Requisition = null,
-    string? AccessionNumber = null,
-    string? OrderNumber = null,
-    DateTimeOffset? CollectedAt = null,
     DateTimeOffset? ReceivedAt = null,
     DateTimeOffset? ReleasedAt = null,
     DateTimeOffset PrintedAt = default,
     /// <summary>Médico que solicitó el estudio.</summary>
     PdfPractitionerInfo? RequestedBy = null,
-    /// <summary>Profesional que validó y liberó. Es la firma del informe.</summary>
-    PdfPractitionerInfo? ValidatedBy = null,
-    string? Conclusion = null,
-    /// <summary>Laboratorio externo, cuando el estudio se derivó.</summary>
+    /// <summary>Profesionales que validaron lo impreso (sin repetir). Son las firmas del informe.</summary>
+    IReadOnlyList<PdfPractitionerInfo>? Validators = null,
+    /// <summary>Laboratorio externo, cuando algún estudio se derivó.</summary>
     string? ExternalLabName = null);
 
+/// <summary>Un área del laboratorio en el informe (Hematología, Uroanálisis…).</summary>
+public sealed record PdfReportArea(string Title, IReadOnlyList<PdfReportBlock> Blocks);
+
 /// <summary>
-/// Un bloque del informe. Para un panel, <see cref="Title"/> es el nombre del panel y los
-/// analitos van adentro: el "grouper" de FHIR no tiene valor propio, así que imprimirlo como
-/// una fila más dejaba una línea vacía en el papel.
+/// Un panel (con <see cref="Title"/> = nombre del panel) o las pruebas individuales del área
+/// (<see cref="Title"/> null). El "grouper" de FHIR no tiene valor propio: es el título del bloque,
+/// no una fila.
 /// </summary>
-public sealed record PdfReportGroup(
-    string Title,
-    string? LoincCode,
-    IReadOnlyList<PdfReportLine> Lines);
+public sealed record PdfReportBlock(
+    string? Title,
+    /// <summary>Quién validó el panel ("Resultados validados por"). Null en pruebas individuales.</summary>
+    string? ValidatedBy,
+    IReadOnlyList<PdfReportSubsection> Subsections,
+    /// <summary>Comentario del validador al liberar.</summary>
+    string? Conclusion = null);
+
+/// <summary>Subárea del bloque (Serie roja, Examen físico…). <see cref="Title"/> null = sin subárea.</summary>
+public sealed record PdfReportSubsection(string? Title, IReadOnlyList<PdfReportLine> Lines);
 
 /// <summary>Una determinación impresa.</summary>
 public sealed record PdfReportLine(
     string Name,
-    string? LoincCode,
     /// <summary>Valor ya formateado (numérico o textual).</summary>
     string Value,
     string? Unit,
     /// <summary>Rango de referencia legible, ej. "70 – 100".</summary>
     string? ReferenceRange,
-    /// <summary>Código de flag (H/L/HH/LL/A/N). Null si no aplica.</summary>
-    string? FlagCode,
-    /// <summary>Etiqueta legible del flag, ej. "Alto".</summary>
-    string? FlagLabel,
-    /// <summary>El valor está fuera de rango: se marca en negrita y con símbolo, no solo con color.</summary>
-    bool IsAbnormal,
-    bool IsCritical,
+    /// <summary>
+    /// "*" fuera de rango, "**" valor crítico, "" normal. Es la <b>única</b> señal: sin color, sin
+    /// negrita y sin palabras como "Crítico alto", por la sensibilidad del paciente que lee el
+    /// informe (observación del cliente).
+    /// </summary>
+    string Mark,
     /// <summary>El resultado fue rectificado después de emitirse (<c>corrected</c> en FHIR).</summary>
     bool IsCorrected);

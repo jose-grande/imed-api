@@ -19,11 +19,16 @@ public sealed record TeamMember
     public required string DisplayName { get; init; }
     /// <summary>"org_admin" | "practitioner" | "auxiliar". Si el user tiene varios, se prioriza org_admin > practitioner > auxiliar.</summary>
     public required string Role { get; init; }
-    public required string PractitionerFhirId { get; init; }
-    public required string PractitionerRoleFhirId { get; init; }
+    /// <summary>Perfil clínico (Practitioner). Null en quien no tiene rol clínico ni de laboratorio.</summary>
+    public string? PractitionerFhirId { get; init; }
+    public string? PractitionerRoleFhirId { get; init; }
     public string? SpecialtyCode { get; init; }
     public string? SpecialtyDisplay { get; init; }
+    /// <summary>False si un administrador lo dio de baja.</summary>
     public bool IsActive { get; init; }
+
+    /// <summary>Último inicio de sesión. Null en miembros migrados que todavía no entraron.</summary>
+    public DateTimeOffset? LastSeenAt { get; init; }
 
     /// <summary>Sedes donde trabaja, la principal primero (FAC-9). Nunca vacía para un miembro activo.</summary>
     public IReadOnlyList<TeamMemberLocation> Locations { get; init; } = [];

@@ -641,6 +641,7 @@ public sealed record UpsertObservationRequest(
     string? LoincCode,
     string CodeText,
     decimal? ValueNumeric,
+    /// <summary>Código UCUM de LabUnits; el cliente FHIR pone la etiqueta como texto visible.</summary>
     string? ValueUnit,
     string? ValueString,
     string? InterpretationCode,
@@ -691,7 +692,9 @@ public sealed record ObservationSnapshot(
     // orden, su muestra y quien lo ejecutó.
     string? ServiceRequestFhirId = null,
     string? SpecimenFhirId = null,
-    string? PerformerReference = null);
+    string? PerformerReference = null,
+    // `ValueUnit` es el texto visible (Quantity.unit); este, el código UCUM (Quantity.code).
+    string? ValueUnitCode = null);
 
 /// <summary>Datos para crear un <c>DiagnosticReport</c> FHIR R5 (informe, LIS-4).</summary>
 public sealed record UpsertDiagnosticReportRequest(

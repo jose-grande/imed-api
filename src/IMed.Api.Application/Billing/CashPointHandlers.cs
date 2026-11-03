@@ -39,12 +39,40 @@ public static class CashPointMapper
                 .ToList());
 }
 
-public sealed class ListCashPointsHandler(IFiscalRepository repo)
+/// <summary>
+/// Cajas visibles para el usuario. Quien administra la facturación (<c>billing.supervise</c>) ve
+/// todas; los demás, solo las de las sedes que tienen asignadas: una caja de otra sucursal no es
+/// asunto suyo, y abrir turno en ella dejaba cobrar a nombre de otra razón social.
+/// </summary>
+public sealed class ListCashPointsHandler(
+    IFiscalRepository repo, ILocationRepository locations, ILocationProvisioning provisioning)
 {
-    public async Task<IReadOnlyList<CashPointDto>> HandleAsync(Guid orgId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<CashPointDto>> HandleAsync(
+        Guid orgId, Guid? userId, bool allLocations, CancellationToken ct = default)
     {
         var todas = await repo.ListCashPointsAsync(orgId, ct);
-        return todas.Select(c => CashPointMapper.ToDto(c, todas)).ToList();
+        IEnumerable<CashPoint> visibles = todas;
+        if (!allLocations)
+        {
+            var sedes = userId is { } usuario
+                ? await AssignedLocationsAsync(locations, provisioning, orgId, usuario, ct)
+                : new HashSet<Guid>();
+            visibles = todas.Where(c => sedes.Contains(c.LocationId));
+        }
+        // Con quién comparte punto de emisión se calcula sobre todas: es un dato fiscal de la caja.
+        return visibles.Select(c => CashPointMapper.ToDto(c, todas)).ToList();
+    }
+
+    /// <summary>Sedes asignadas al usuario. Todo usuario tiene al menos una (FAC-9).</summary>
+    internal static async Task<IReadOnlySet<Guid>> AssignedLocationsAsync(
+        ILocationRepository locations, ILocationProvisioning provisioning, Guid orgId, Guid userId, CancellationToken ct)
+    {
+        var asignadas = await locations.ListForUserAsync(orgId, userId, ct);
+        if (asignadas.Count == 0 && await provisioning.EnsureUserAssignedAsync(orgId, userId, null, ct))
+        {
+            asignadas = await locations.ListForUserAsync(orgId, userId, ct);
+        }
+        return asignadas.Select(a => a.Location.Id).ToHashSet();
     }
 }
 

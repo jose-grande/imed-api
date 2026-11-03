@@ -26,6 +26,18 @@ public sealed class EnterResultsHandler(
         {
             throw new ArgumentException("Se requiere al menos una línea de resultado.", nameof(cmd));
         }
+        // Las unidades, antes de escribir nada en HAPI: si una línea de un panel fallara a mitad
+        // de camino, las Observations anteriores quedarían sueltas y el reintento las duplicaría.
+        foreach (var line in cmd.Results)
+        {
+            if (line.ValueNumeric is not null && !LabUnits.IsAllowed(line.Unit))
+            {
+                throw new ArgumentException(
+                    $"La unidad '{line.Unit}' de «{line.CodeText}» no está en la lista de unidades admitidas. "
+                    + "Corregila en el catálogo de pruebas y volvé a abrir la orden.",
+                    nameof(cmd));
+            }
+        }
         var partition = $"org-{cmd.OrganizationId}";
 
         var order = await hapi.GetLabOrderAsync(cmd.ServiceRequestId, partition, ct)
@@ -136,7 +148,7 @@ public sealed class EnterResultsHandler(
                 LoincCode: line.Loinc,
                 CodeText: line.CodeText,
                 ValueNumeric: line.ValueNumeric,
-                ValueUnit: line.Unit,
+                ValueUnit: line.ValueNumeric is null ? null : LabUnits.Find(line.Unit)?.Code,
                 ValueString: line.ValueString,
                 InterpretationCode: flagCode,
                 ReferenceLow: low,
@@ -203,6 +215,14 @@ public sealed class EnterResultsHandler(
         // Ancla de idempotencia: a partir de acá la orden ya tiene informe y un segundo
         // guardado se rechaza arriba.
         intake.AttachReport(reportId, timeProvider);
+        // Autovalidado por el motor de reglas = validado: la orden se cierra igual que cuando la
+        // libera una persona. Antes quedaba "Recibida" para siempre y se mezclaba en Resultados
+        // con lo que de verdad falta revisar (observación de staging).
+        if (reportStatus == "final")
+        {
+            intake.MarkCompleted(timeProvider);
+            intake.MarkValidated(practitionerFhirId: null, timeProvider);
+        }
         await ops.UpdateIntakeAsync(intake, ct);
 
         await ops.AddSpecimenEventAsync(

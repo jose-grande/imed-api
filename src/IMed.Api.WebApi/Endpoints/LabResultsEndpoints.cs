@@ -70,7 +70,7 @@ public static class LabResultsEndpoints
         app.MapGet("/api/lab/results/{reportId}/pdf", ReportPdfAsync)
             .WithTags("LabResults")
             .WithName("GetLabReportPdf")
-            .WithSummary("Informe de resultados imprimible. Un informe no liberado sale marcado como preliminar.")
+            .WithSummary("Informe de resultados de la orden a la que pertenece el informe: solo lo validado, por área y subárea. 409 si no hay nada validado.")
             .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabRead));
 
         app.MapGet("/api/lab/results/validation-rejection-reasons", RejectionReasonsAsync)
@@ -164,10 +164,18 @@ public static class LabResultsEndpoints
         {
             return Results.Problem(title: "Sin organización", statusCode: StatusCodes.Status403Forbidden);
         }
-        var result = await handler.HandleAsync(new GetLabReportPdfQuery(orgId.Value, reportId), ct);
-        return result is null
-            ? Results.NotFound()
-            : Results.File(result.Bytes, "application/pdf", fileDownloadName: result.FileName);
+        try
+        {
+            var result = await handler.HandleAsync(new GetLabReportPdfQuery(orgId.Value, reportId), ct);
+            return result is null
+                ? Results.NotFound()
+                : Results.File(result.Bytes, "application/pdf", fileDownloadName: result.FileName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Nada validado en la orden: el informe solo imprime lo liberado.
+            return Results.Problem(title: "Sin resultados validados", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
     }
 
     private static async Task<IResult> RejectionReasonsAsync(
@@ -236,6 +244,7 @@ public static class LabResultsEndpoints
                 request.ValueNumeric, request.ValueString, request.Unit, request.Reason), ct);
             return result is null ? Results.NotFound() : Results.Ok(result);
         }
+        catch (HttpRequestException ex) { return FhirRejected(ex, "corregir"); }
         catch (InvalidOperationException ex)
         {
             return Results.Problem(title: "Conflicto", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
@@ -245,6 +254,19 @@ public static class LabResultsEndpoints
             return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
+
+    /// <summary>
+    /// El servidor clínico (HAPI) rechazó o no respondió. Antes llegaba al portal como un 500 sin
+    /// detalle; ahora el técnico ve qué pasó y el motivo exacto queda en el registro de la API.
+    /// </summary>
+    private static IResult FhirRejected(HttpRequestException ex, string accion) =>
+        Results.Problem(
+            title: "El expediente clínico rechazó el resultado",
+            detail: ex.StatusCode is { } code && (int)code is >= 400 and < 500
+                ? $"No se pudo {accion} el resultado: el expediente clínico rechazó los datos (código {(int)code}). "
+                  + "Revisá la unidad y el valor de la prueba en el catálogo; el detalle quedó en el registro del servidor."
+                : $"No se pudo {accion} el resultado: el expediente clínico no respondió. Intentá de nuevo en unos minutos.",
+            statusCode: StatusCodes.Status502BadGateway);
 
     private static Guid? ParseOrg(ClaimsPrincipal principal) =>
         Guid.TryParse(principal.FindFirstValue("organization_id"), out var id) ? id : null;
@@ -267,6 +289,7 @@ public static class LabResultsEndpoints
             return Results.Ok(result);
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
+        catch (HttpRequestException ex) { return FhirRejected(ex, "guardar"); }
         catch (InvalidOperationException ex)
         {
             return Results.Problem(title: "Conflicto", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);

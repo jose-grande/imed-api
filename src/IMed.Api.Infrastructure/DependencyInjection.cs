@@ -271,6 +271,7 @@ public static class DependencyInjection
         services.AddScoped<IAllergyCatalogRepository, AllergyCatalogRepository>();
         services.AddScoped<IMedicationCatalogRepository, MedicationCatalogRepository>();
         services.AddScoped<IUserPractitionerAssignmentRepository, UserPractitionerAssignmentRepository>();
+        services.AddScoped<IOrganizationMemberRepository, OrganizationMemberRepository>();
         services.AddScoped<IUpsertPractitionerProfilePersistence, UpsertPractitionerProfilePersistence>();
         services.AddScoped<IInvitationsRepository, InvitationsRepository>();
         services.AddScoped<IInvitationsPersistence, InvitationsPersistence>();
@@ -392,6 +393,8 @@ public static class DependencyInjection
 
         // Team (Épica F2 + F5)
         services.AddScoped<ListTeamHandler>();
+        services.AddScoped<StartSessionHandler>();
+        services.AddScoped<SetMemberActiveHandler>();
         services.AddScoped<ChangeMemberRoleHandler>();
         services.AddScoped<SetMemberFunctionsHandler>();
 

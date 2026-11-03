@@ -79,7 +79,7 @@ public sealed class ReferenceRange
             High = high,
             CriticalLow = criticalLow,
             CriticalHigh = criticalHigh,
-            Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim(),
+            Unit = LabUnits.Require(unit, nameof(unit)),
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -98,6 +98,7 @@ public sealed class ReferenceRange
         string? unit,
         TimeProvider? timeProvider = null)
     {
+        var unitCode = LabUnits.Require(unit, nameof(unit));
         Sex = sex;
         AgeMinYears = ageMinYears;
         AgeMaxYears = ageMaxYears;
@@ -107,7 +108,7 @@ public sealed class ReferenceRange
         High = high;
         CriticalLow = criticalLow;
         CriticalHigh = criticalHigh;
-        Unit = string.IsNullOrWhiteSpace(unit) ? null : unit.Trim();
+        Unit = unitCode;
         UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 }

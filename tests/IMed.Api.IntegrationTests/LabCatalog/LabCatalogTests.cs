@@ -76,7 +76,7 @@ public sealed class LabCatalogTests(ImedApiFixture fixture) : IAsyncLifetime
             unit = "mg/dL",
             department = "Chemistry",
             fastingHours = (int?)null,
-            collectionType = "blood",
+            collectionType = "Venopunción",
             patientInstruction = (string?)null,
         };
         var create = await client.PostAsJsonAsync("/api/lab-catalog/tests", body);

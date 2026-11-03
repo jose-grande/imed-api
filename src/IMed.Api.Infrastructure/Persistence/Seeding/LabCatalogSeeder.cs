@@ -25,52 +25,64 @@ public sealed class LabCatalogSeeder(
     private static readonly (string Code, string Name, LabTestDatatype Type, string? Loinc, string? Unit, LabDepartment Dept, int? FastMin, int? FastMax, string? Collection)[] Tests =
     [
         // Hematología (CBC)
-        ("WBC", "Leucocitos (WBC)", LabTestDatatype.Numeric, "6690-2", "10^3/uL", LabDepartment.Hematology, null, null, "blood"),
-        ("RBC", "Eritrocitos (RBC)", LabTestDatatype.Numeric, "789-8", "10^6/uL", LabDepartment.Hematology, null, null, "blood"),
-        ("HGB", "Hemoglobina", LabTestDatatype.Numeric, "718-7", "g/dL", LabDepartment.Hematology, null, null, "blood"),
-        ("HCT", "Hematocrito", LabTestDatatype.Numeric, "4544-3", "%", LabDepartment.Hematology, null, null, "blood"),
-        ("MCV", "Volumen corpuscular medio (VCM)", LabTestDatatype.Numeric, "787-2", "fL", LabDepartment.Hematology, null, null, "blood"),
-        ("MCH", "Hemoglobina corpuscular media (HCM)", LabTestDatatype.Numeric, "785-6", "pg", LabDepartment.Hematology, null, null, "blood"),
-        ("MCHC", "Concentración HCM (CHCM)", LabTestDatatype.Numeric, "786-4", "g/dL", LabDepartment.Hematology, null, null, "blood"),
-        ("PLT", "Plaquetas", LabTestDatatype.Numeric, "777-3", "10^3/uL", LabDepartment.Hematology, null, null, "blood"),
-        ("NEU", "Neutrófilos %", LabTestDatatype.Numeric, "770-8", "%", LabDepartment.Hematology, null, null, "blood"),
-        ("LYM", "Linfocitos %", LabTestDatatype.Numeric, "736-9", "%", LabDepartment.Hematology, null, null, "blood"),
+        ("WBC", "Leucocitos (WBC)", LabTestDatatype.Numeric, "6690-2", "10*3/uL", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("RBC", "Eritrocitos (RBC)", LabTestDatatype.Numeric, "789-8", "10*6/uL", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("HGB", "Hemoglobina", LabTestDatatype.Numeric, "718-7", "g/dL", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("HCT", "Hematocrito", LabTestDatatype.Numeric, "4544-3", "%", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("MCV", "Volumen corpuscular medio (VCM)", LabTestDatatype.Numeric, "787-2", "fL", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("MCH", "Hemoglobina corpuscular media (HCM)", LabTestDatatype.Numeric, "785-6", "pg", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("MCHC", "Concentración HCM (CHCM)", LabTestDatatype.Numeric, "786-4", "g/dL", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("PLT", "Plaquetas", LabTestDatatype.Numeric, "777-3", "10*3/uL", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("NEU", "Neutrófilos %", LabTestDatatype.Numeric, "770-8", "%", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
+        ("LYM", "Linfocitos %", LabTestDatatype.Numeric, "736-9", "%", LabDepartment.Hematology, null, null, LabCollectionMethods.Venipuncture),
 
         // Química clínica
-        ("GLU", "Glucosa", LabTestDatatype.Numeric, "2345-7", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
-        ("GLU_FAST", "Glucosa en ayunas", LabTestDatatype.Numeric, "1558-6", "mg/dL", LabDepartment.Chemistry, 8, null, "blood"),
-        ("BUN", "Nitrógeno ureico (BUN)", LabTestDatatype.Numeric, "3094-0", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
-        ("CREAT", "Creatinina", LabTestDatatype.Numeric, "2160-0", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
-        ("NA", "Sodio", LabTestDatatype.Numeric, "2951-2", "mmol/L", LabDepartment.Chemistry, null, null, "blood"),
-        ("K", "Potasio", LabTestDatatype.Numeric, "2823-3", "mmol/L", LabDepartment.Chemistry, null, null, "blood"),
-        ("CL", "Cloro", LabTestDatatype.Numeric, "2075-0", "mmol/L", LabDepartment.Chemistry, null, null, "blood"),
-        ("CO2", "Bicarbonato (CO2)", LabTestDatatype.Numeric, "1963-8", "mmol/L", LabDepartment.Chemistry, null, null, "blood"),
-        ("CA", "Calcio", LabTestDatatype.Numeric, "17861-6", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
-        ("ALB", "Albúmina", LabTestDatatype.Numeric, "1751-7", "g/dL", LabDepartment.Chemistry, null, null, "blood"),
-        ("TP", "Proteína total", LabTestDatatype.Numeric, "2885-2", "g/dL", LabDepartment.Chemistry, null, null, "blood"),
-        ("ALT", "Alanina aminotransferasa (ALT)", LabTestDatatype.Numeric, "1742-6", "U/L", LabDepartment.Chemistry, null, null, "blood"),
-        ("AST", "Aspartato aminotransferasa (AST)", LabTestDatatype.Numeric, "1920-8", "U/L", LabDepartment.Chemistry, null, null, "blood"),
-        ("TBIL", "Bilirrubina total", LabTestDatatype.Numeric, "1975-2", "mg/dL", LabDepartment.Chemistry, null, null, "blood"),
-        ("ALP", "Fosfatasa alcalina", LabTestDatatype.Numeric, "6768-6", "U/L", LabDepartment.Chemistry, null, null, "blood"),
+        ("GLU", "Glucosa", LabTestDatatype.Numeric, "2345-7", "mg/dL", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("GLU_FAST", "Glucosa en ayunas", LabTestDatatype.Numeric, "1558-6", "mg/dL", LabDepartment.Chemistry, 8, null, LabCollectionMethods.Venipuncture),
+        ("BUN", "Nitrógeno ureico (BUN)", LabTestDatatype.Numeric, "3094-0", "mg/dL", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("CREAT", "Creatinina", LabTestDatatype.Numeric, "2160-0", "mg/dL", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("NA", "Sodio", LabTestDatatype.Numeric, "2951-2", "mmol/L", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("K", "Potasio", LabTestDatatype.Numeric, "2823-3", "mmol/L", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("CL", "Cloro", LabTestDatatype.Numeric, "2075-0", "mmol/L", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("CO2", "Bicarbonato (CO2)", LabTestDatatype.Numeric, "1963-8", "mmol/L", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("CA", "Calcio", LabTestDatatype.Numeric, "17861-6", "mg/dL", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("ALB", "Albúmina", LabTestDatatype.Numeric, "1751-7", "g/dL", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("TP", "Proteína total", LabTestDatatype.Numeric, "2885-2", "g/dL", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("ALT", "Alanina aminotransferasa (ALT)", LabTestDatatype.Numeric, "1742-6", "U/L", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("AST", "Aspartato aminotransferasa (AST)", LabTestDatatype.Numeric, "1920-8", "U/L", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("TBIL", "Bilirrubina total", LabTestDatatype.Numeric, "1975-2", "mg/dL", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
+        ("ALP", "Fosfatasa alcalina", LabTestDatatype.Numeric, "6768-6", "U/L", LabDepartment.Chemistry, null, null, LabCollectionMethods.Venipuncture),
 
         // Perfil lipídico (LDL calculado)
-        ("CHOL", "Colesterol total", LabTestDatatype.Numeric, "2093-3", "mg/dL", LabDepartment.Chemistry, 9, 12, "blood"),
-        ("HDL", "Colesterol HDL", LabTestDatatype.Numeric, "2085-9", "mg/dL", LabDepartment.Chemistry, 9, 12, "blood"),
-        ("LDL_CALC", "Colesterol LDL (calculado)", LabTestDatatype.Numeric, "13457-7", "mg/dL", LabDepartment.Chemistry, 9, 12, "blood"),
-        ("TRIG", "Triglicéridos", LabTestDatatype.Numeric, "2571-8", "mg/dL", LabDepartment.Chemistry, 9, 12, "blood"),
+        ("CHOL", "Colesterol total", LabTestDatatype.Numeric, "2093-3", "mg/dL", LabDepartment.Chemistry, 9, 12, LabCollectionMethods.Venipuncture),
+        ("HDL", "Colesterol HDL", LabTestDatatype.Numeric, "2085-9", "mg/dL", LabDepartment.Chemistry, 9, 12, LabCollectionMethods.Venipuncture),
+        ("LDL_CALC", "Colesterol LDL (calculado)", LabTestDatatype.Numeric, "13457-7", "mg/dL", LabDepartment.Chemistry, 9, 12, LabCollectionMethods.Venipuncture),
+        ("TRIG", "Triglicéridos", LabTestDatatype.Numeric, "2571-8", "mg/dL", LabDepartment.Chemistry, 9, 12, LabCollectionMethods.Venipuncture),
 
         // Perfil tiroideo
-        ("TSH", "Hormona estimulante de tiroides (TSH)", LabTestDatatype.Numeric, "3016-3", "mIU/L", LabDepartment.Immunology, null, null, "blood"),
-        ("FT4", "Tiroxina libre (T4 libre)", LabTestDatatype.Numeric, "3024-7", "ng/dL", LabDepartment.Immunology, null, null, "blood"),
-        ("T3", "Triyodotironina (T3)", LabTestDatatype.Numeric, "3053-6", "ng/dL", LabDepartment.Immunology, null, null, "blood"),
+        ("TSH", "Hormona estimulante de tiroides (TSH)", LabTestDatatype.Numeric, "3016-3", "m[IU]/L", LabDepartment.Immunology, null, null, LabCollectionMethods.Venipuncture),
+        ("FT4", "Tiroxina libre (T4 libre)", LabTestDatatype.Numeric, "3024-7", "ng/dL", LabDepartment.Immunology, null, null, LabCollectionMethods.Venipuncture),
+        ("T3", "Triyodotironina (T3)", LabTestDatatype.Numeric, "3053-6", "ng/dL", LabDepartment.Immunology, null, null, LabCollectionMethods.Venipuncture),
 
         // Examen general de orina
-        ("UA_COLOR", "Color (orina)", LabTestDatatype.Text, "5778-6", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
-        ("UA_PH", "pH (orina)", LabTestDatatype.Numeric, "5803-2", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
-        ("UA_SG", "Densidad (orina)", LabTestDatatype.Numeric, "5811-5", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
-        ("UA_GLU", "Glucosa (orina)", LabTestDatatype.Coded, "5792-7", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
-        ("UA_PROT", "Proteína (orina)", LabTestDatatype.Coded, "5804-0", null, LabDepartment.Urinalysis, null, null, "urine-spot"),
+        ("UA_COLOR", "Color (orina)", LabTestDatatype.Text, "5778-6", null, LabDepartment.Urinalysis, null, null, LabCollectionMethods.SpontaneousVoiding),
+        ("UA_PH", "pH (orina)", LabTestDatatype.Numeric, "5803-2", null, LabDepartment.Urinalysis, null, null, LabCollectionMethods.SpontaneousVoiding),
+        ("UA_SG", "Densidad (orina)", LabTestDatatype.Numeric, "5811-5", null, LabDepartment.Urinalysis, null, null, LabCollectionMethods.SpontaneousVoiding),
+        ("UA_GLU", "Glucosa (orina)", LabTestDatatype.Coded, "5792-7", null, LabDepartment.Urinalysis, null, null, LabCollectionMethods.SpontaneousVoiding),
+        ("UA_PROT", "Proteína (orina)", LabTestDatatype.Coded, "5804-0", null, LabDepartment.Urinalysis, null, null, LabCollectionMethods.SpontaneousVoiding),
     ];
+
+    // Subárea del informe (LabSubsections). La misma tabla la aplica la migración LabReportAreas a
+    // los catálogos ya sembrados: si se cambia acá, cambiarla también allá.
+    internal static readonly Dictionary<string, string> Subsections = new(StringComparer.Ordinal)
+    {
+        ["RBC"] = "HEM_RED", ["HGB"] = "HEM_RED", ["HCT"] = "HEM_RED",
+        ["MCV"] = "HEM_RED", ["MCH"] = "HEM_RED", ["MCHC"] = "HEM_RED",
+        ["WBC"] = "HEM_WHITE", ["NEU"] = "HEM_WHITE", ["LYM"] = "HEM_WHITE",
+        ["PLT"] = "HEM_PLATELET",
+        ["UA_COLOR"] = "UA_PHYSICAL",
+        ["UA_PH"] = "UA_CHEMICAL", ["UA_SG"] = "UA_CHEMICAL", ["UA_GLU"] = "UA_CHEMICAL", ["UA_PROT"] = "UA_CHEMICAL",
+    };
 
     // (panelCode, name, description, testCodes)
     private static readonly (string Code, string Name, string Description, string[] TestCodes)[] Panels =
@@ -112,13 +124,13 @@ public sealed class LabCatalogSeeder(
         ("K", ReferenceSex.Any, 18, null, 3.5m, 5.2m, 2.5m, 6.5m, "mmol/L"),
         ("NA", ReferenceSex.Any, 18, null, 135m, 145m, 120m, 160m, "mmol/L"),
         ("CREAT", ReferenceSex.Any, 18, null, 0.6m, 1.3m, null, 7m, "mg/dL"),
-        ("PLT", ReferenceSex.Any, 18, null, 150m, 450m, 20m, 1000m, "10^3/uL"),
-        ("WBC", ReferenceSex.Any, 18, null, 4.5m, 11.0m, 1m, 50m, "10^3/uL"),
+        ("PLT", ReferenceSex.Any, 18, null, 150m, 450m, 20m, 1000m, "10*3/uL"),
+        ("WBC", ReferenceSex.Any, 18, null, 4.5m, 11.0m, 1m, 50m, "10*3/uL"),
         ("CA", ReferenceSex.Any, 18, null, 8.5m, 10.5m, 6m, 13m, "mg/dL"),
         ("BUN", ReferenceSex.Any, 18, null, 7m, 20m, null, null, "mg/dL"),
         ("ALT", ReferenceSex.Any, 18, null, 7m, 56m, null, null, "U/L"),
         ("AST", ReferenceSex.Any, 18, null, 10m, 40m, null, null, "U/L"),
-        ("TSH", ReferenceSex.Any, 18, null, 0.4m, 4.0m, null, null, "mIU/L"),
+        ("TSH", ReferenceSex.Any, 18, null, 0.4m, 4.0m, null, null, "m[IU]/L"),
         ("CHOL", ReferenceSex.Any, 18, null, null, 200m, null, null, "mg/dL"),
         ("TRIG", ReferenceSex.Any, 18, null, null, 150m, null, null, "mg/dL"),
         ("HDL", ReferenceSex.Any, 18, null, 40m, null, null, null, "mg/dL"),
@@ -154,8 +166,16 @@ public sealed class LabCatalogSeeder(
     // (code, name, collectionMode, method?, bodySite?, container, stabilityMin?, discipline) — LIS-RD-26
     private static readonly (string Code, string Name, CollectionMode Mode, string? Method, string? BodySite, ContainerKind Container, int? Stability, LabDepartment Discipline)[] SpecimenTypes =
     [
-        ("BLOOD", "Sangre", CollectionMode.OnSite, "Venopunción", null, ContainerKind.Tube, null, LabDepartment.Other),
+        // "Sangre total": la muestra que se analiza tal cual sale (hemograma, tubo EDTA). Suero y
+        // plasma son lo que queda del tubo según el aditivo; las pruebas que comparten tubo tienen
+        // que compartir tipo de muestra, porque el plan de toma arma un tubo por tipo + tubo.
+        ("BLOOD", "Sangre total", CollectionMode.OnSite, "Venopunción", null, ContainerKind.Tube, null, LabDepartment.Other),
+        ("SERUM", "Suero", CollectionMode.OnSite, "Venopunción", null, ContainerKind.Tube, null, LabDepartment.Other),
+        ("PLASMA", "Plasma", CollectionMode.OnSite, "Venopunción", null, ContainerKind.Tube, null, LabDepartment.Other),
         ("URINE", "Orina", CollectionMode.PatientCollected, null, null, ContainerKind.Cup, 120, LabDepartment.Urinalysis),
+        ("URINE_24H", "Orina de 24 horas", CollectionMode.PatientCollected, "Recolección de orina de 24 horas", null, ContainerKind.Cup, null, LabDepartment.Urinalysis),
+        ("SPUTUM", "Esputo", CollectionMode.PatientCollected, "Expectoración", null, ContainerKind.SterileContainer, null, LabDepartment.Microbiology),
+        ("SECRETION", "Secreciones", CollectionMode.OnSite, "Hisopado", null, ContainerKind.Swab, null, LabDepartment.Microbiology),
         ("SWAB", "Hisopado", CollectionMode.OnSite, "Hisopado", null, ContainerKind.Swab, null, LabDepartment.Microbiology),
         ("SEMEN", "Semen (espermograma)", CollectionMode.OnSite, "Masturbación", null, ContainerKind.Cup, 60, LabDepartment.Other),
         ("SALIVA", "Saliva", CollectionMode.PatientCollected, null, null, ContainerKind.Cup, null, LabDepartment.Other),
@@ -262,10 +282,13 @@ public sealed class LabCatalogSeeder(
     private static readonly (string SpecimenCode, string FormatCode)[] SpecimenLabelAssignments =
     [
         ("URINE", "CUP-76X51"),
+        ("URINE_24H", "CUP-76X51"),
+        ("SPUTUM", "CUP-76X51"),
         ("STOOL", "CUP-76X51"),
         ("SEMEN", "CUP-76X51"),
         ("SALIVA", "CUP-76X51"),
         ("SWAB", "CRYO-33X13"),
+        ("SECRETION", "CRYO-33X13"),
         ("CSF", "MICRO-38X19"),
         ("TISSUE", "CUP-76X51"),
     ];
@@ -273,14 +296,16 @@ public sealed class LabCatalogSeeder(
     /// <summary>Mapea una prueba a su tipo de muestra + tubo por departamento (LIS-RD-16/26).</summary>
     private static (string SpecimenCode, string? TubeCode) MapSpecimen(LabTestDefinition test)
     {
-        var isUrine = test.CollectionType?.StartsWith("urine", StringComparison.OrdinalIgnoreCase) == true;
+        var isUrine = test.CollectionType is LabCollectionMethods.SpontaneousVoiding
+            or LabCollectionMethods.Urine24h or LabCollectionMethods.Catheter;
         return test.Department switch
         {
+            // Hemograma: sangre total en EDTA. Química e inmunología: suero del tubo con gel.
             LabDepartment.Hematology => ("BLOOD", "EDTA"),
-            LabDepartment.Chemistry => ("BLOOD", "SST"),
-            LabDepartment.Immunology => ("BLOOD", "SST"),
+            LabDepartment.Chemistry => ("SERUM", "SST"),
+            LabDepartment.Immunology => ("SERUM", "SST"),
             LabDepartment.Urinalysis => ("URINE", null),
-            _ => isUrine ? ("URINE", null) : ("BLOOD", "SST"),
+            _ => isUrine ? ("URINE", null) : ("SERUM", "SST"),
         };
     }
 
@@ -319,6 +344,7 @@ public sealed class LabCatalogSeeder(
                 var test = LabTestDefinition.Create(
                     t.Code, t.Name, t.Type, t.Loinc, t.Unit, t.Dept, t.FastMin, t.FastMax, t.Collection,
                     timeProvider: timeProvider);
+                test.SetSubsection(Subsections.GetValueOrDefault(t.Code), timeProvider);
                 testsByCode[t.Code] = test;
             }
             db.LabTests.AddRange(testsByCode.Values);

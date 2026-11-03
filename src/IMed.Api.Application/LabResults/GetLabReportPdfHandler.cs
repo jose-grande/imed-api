@@ -3,34 +3,56 @@ using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.LabReception;
 using IMed.Api.Application.Organizations;
 using IMed.Api.Application.Profile;
+using IMed.Api.Domain.Catalogs.Lab;
 
 namespace IMed.Api.Application.LabResults;
 
+/// <summary>
+/// Pide el informe de la orden a la que pertenece <see cref="ReportId"/>. Se entra por un informe
+/// (lo que tienen a mano las pantallas de captura, validación y la historia del paciente) pero lo
+/// que se imprime es la orden completa: hay una sola impresión.
+/// </summary>
 public sealed record GetLabReportPdfQuery(Guid OrganizationId, string ReportId);
 
 public sealed record GetLabReportPdfResult(byte[] Bytes, string FileName);
 
 /// <summary>
-/// Arma el informe de resultados imprimible: el documento que se lleva el paciente y lee el
+/// Arma el informe de resultados de una orden: el documento que se lleva el paciente y lee el
 /// médico que pidió el estudio.
 ///
-/// <para><b>Agrupación:</b> cuando el informe es un panel, la observación "grouper" de FHIR no
-/// tiene valor propio — existe para colgar los componentes. Acá se convierte en el <b>título del
-/// bloque</b> y sus analitos en las filas, en vez de imprimirse como una determinación vacía.</para>
-///
-/// <para><b>Preliminar:</b> se permite imprimir un informe no liberado, porque en la operación
-/// real hace falta (un adelanto al médico tratante), pero sale con un aviso imposible de
-/// ignorar. Bloquearlo empujaría a la captura de pantalla, que es peor: una imagen sin marca
-/// alguna.</para>
+/// <list type="bullet">
+///   <item><b>Una sola impresión por orden.</b> Una orden reúne paneles y pruebas individuales
+///   (un <c>ServiceRequest</c> por cada uno, agrupados por <c>requisition</c>, y cada uno con su
+///   informe FHIR). Todos salen en el mismo documento.</item>
+///   <item><b>Solo lo validado.</b> Lo que no se liberó no se imprime; el documento avisa que
+///   hay pendientes. Si no hay nada validado no hay informe (409).</item>
+///   <item><b>Área → panel → subárea.</b> El área y la subárea salen de la prueba del catálogo
+///   (<see cref="LabSubsections"/>). Lo que no tiene resultados no aparece, ni su título.</item>
+///   <item><b>Fuera de rango con asteriscos</b> (* y **), sin color ni palabras: lo pidió el
+///   cliente por la sensibilidad del paciente.</item>
+/// </list>
 /// </summary>
 public sealed class GetLabReportPdfHandler(
     IHapiFhirClient hapi,
+    ILabCatalogRepository catalog,
     ILabOperationsRepository ops,
     IOrganizationProfileRepository orgRepo,
     IOrganizationBrandingRepository branding,
     ILabReportPdfRenderer renderer,
     TimeProvider timeProvider)
 {
+    /// <summary>Estados FHIR de un informe liberado (validado).</summary>
+    private static readonly HashSet<string> ReleasedStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "final", "amended", "corrected", "appended",
+    };
+
+    /// <summary>Órdenes que ya no cuentan: ni se imprimen ni quedan como pendientes.</summary>
+    private static readonly HashSet<string> DeadOrderStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "revoked", "entered-in-error",
+    };
+
     public async Task<GetLabReportPdfResult?> HandleAsync(
         GetLabReportPdfQuery query, CancellationToken ct = default)
     {
@@ -40,122 +62,223 @@ public sealed class GetLabReportPdfHandler(
             return null;
         }
 
-        var partition = LabRouting.PartitionOf(query.OrganizationId);
+        var orgId = query.OrganizationId;
+        var partition = LabRouting.PartitionOf(orgId);
 
-        var report = await hapi.GetDiagnosticReportAsync(query.ReportId, partition, ct);
-        if (report is null)
+        var entryReport = await hapi.GetDiagnosticReportAsync(query.ReportId, partition, ct);
+        if (entryReport is null || string.IsNullOrWhiteSpace(entryReport.ServiceRequestFhirId))
+        {
+            return null;
+        }
+        var entryOrder = await hapi.GetLabOrderAsync(entryReport.ServiceRequestFhirId!, partition, ct);
+        if (entryOrder is null)
         {
             return null;
         }
 
-        var orgProfile = await orgRepo.GetByIdAsync(query.OrganizationId, ct);
-        var logo = await branding.GetLogoAsync(query.OrganizationId, ct);
-        var patient = await hapi.GetPatientAsync(report.PatientFhirId, partition, ct);
-
-        OrderIntakeContext intakeCtx = default;
-        if (!string.IsNullOrWhiteSpace(report.ServiceRequestFhirId))
+        // Las órdenes de la misma orden de laboratorio (requisition). Una orden vieja sin
+        // requisition se imprime sola.
+        var orders = string.IsNullOrWhiteSpace(entryOrder.Requisition)
+            ? [entryOrder]
+            : (await hapi.SearchLabOrdersByRequisitionAsync(entryOrder.Requisition!, partition, ct))
+                .Where(o => !DeadOrderStatuses.Contains(o.Status))
+                .OrderBy(o => o.AuthoredOn ?? DateTimeOffset.MaxValue)
+                .ThenBy(o => o.Id, StringComparer.Ordinal)
+                .ToList();
+        if (orders.All(o => o.Id != entryOrder.Id))
         {
-            var intake = await ops.GetIntakeByServiceRequestAsync(
-                query.OrganizationId, report.ServiceRequestFhirId!, ct);
-            if (intake is not null)
-            {
-                intakeCtx = new OrderIntakeContext(
-                    intake.AccessionNumber, intake.Requisition,
-                    intake.ReceivedAt, intake.ValidatedAt, intake.ValidatedByPractitionerFhirId);
-            }
+            orders = [entryOrder, .. orders];
         }
 
-        var groups = await BuildGroupsAsync(report, partition, ct);
+        var released = new List<ReleasedOrder>();
+        var pending = 0;
+        foreach (var order in orders)
+        {
+            var intake = await ops.GetIntakeByServiceRequestAsync(orgId, order.Id, ct);
+            if (intake is null)
+            {
+                pending++;
+                continue;
+            }
+            var reportId = await LabReportLookup.ResolveReportIdAsync(hapi, intake, order.PatientFhirId, partition, ct);
+            var report = reportId is null ? null : await hapi.GetDiagnosticReportAsync(reportId, partition, ct);
+            if (report is null || !ReleasedStatuses.Contains(report.Status))
+            {
+                pending++;
+                continue;
+            }
+            released.Add(new ReleasedOrder(order, report, intake.ReceivedAt, intake.ValidatedAt,
+                await ResolvePractitionerAsync(intake.ValidatedByPractitionerFhirId, partition, ct)));
+        }
 
-        var validatedBy = await ResolvePractitionerAsync(intakeCtx.ValidatedByPractitionerFhirId, partition, ct);
-        var requestedBy = await ResolveRequesterAsync(report.ServiceRequestFhirId, partition, ct);
+        if (released.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Esta orden todavía no tiene resultados validados. El informe se imprime cuando se valida al menos una prueba.");
+        }
 
-        var isFinal = string.Equals(report.Status, "final", StringComparison.OrdinalIgnoreCase);
+        var areas = await BuildAreasAsync(orgId, partition, released, ct);
+
+        var orgProfile = await orgRepo.GetByIdAsync(orgId, ct);
+        var logo = await branding.GetLogoAsync(orgId, ct);
+        var patient = await hapi.GetPatientAsync(entryOrder.PatientFhirId, partition, ct);
+        var requestedBy = string.IsNullOrWhiteSpace(entryOrder.RequesterPractitionerId)
+            ? null
+            : await ResolvePractitionerAsync(entryOrder.RequesterPractitionerId, partition, ct);
+
+        var validators = released
+            .Select(r => r.ValidatedBy)
+            .OfType<PdfPractitionerInfo>()
+            .DistinctBy(v => (v.Prefix, v.DisplayName, v.LicenseNumber))
+            .ToList();
+        var releasedAt = released.Select(r => r.ValidatedAt ?? ParseIssued(r.Report.Issued)).Max();
 
         var model = new LabReportPdfModel(
             Organization: new PdfOrgInfo(
                 orgProfile?.Name ?? "Laboratorio",
                 TaxId: null,
-                Logo: logo?.ToPdfLogo(query.OrganizationId)),
+                Logo: logo?.ToPdfLogo(orgId)),
             Patient: new PdfPatientInfo(
-                DisplayName: patient?.DisplayName ?? $"Paciente {report.PatientFhirId}",
+                DisplayName: patient?.DisplayName ?? $"Paciente {entryOrder.PatientFhirId}",
                 BirthDate: patient?.BirthDate,
                 Gender: patient?.Gender,
                 IdentifierLabel: patient?.IdentifierLabel,
                 IdentifierValue: patient?.IdentifierValue),
-            Groups: groups,
-            IsFinal: isFinal,
-            Requisition: intakeCtx.Requisition,
-            AccessionNumber: intakeCtx.AccessionNumber,
-            OrderNumber: null,
-            CollectedAt: null,
-            ReceivedAt: intakeCtx.ReceivedAt,
-            // Un informe liberado sin fecha local cae al `issued` de FHIR antes que quedar vacío.
-            ReleasedAt: intakeCtx.ValidatedAt ?? ParseIssued(report.Issued, isFinal),
+            Areas: areas,
+            PendingCount: pending,
+            Requisition: entryOrder.Requisition,
+            ReceivedAt: released.Select(r => r.ReceivedAt).Where(d => d is not null).Min(),
+            ReleasedAt: releasedAt,
             PrintedAt: timeProvider.GetUtcNow(),
             RequestedBy: requestedBy,
-            ValidatedBy: validatedBy,
-            Conclusion: report.Conclusion,
-            ExternalLabName: report.PerformerDisplay);
+            Validators: validators,
+            ExternalLabName: released.Select(r => r.Report.PerformerDisplay).FirstOrDefault(p => !string.IsNullOrWhiteSpace(p)));
 
         var bytes = renderer.Render(model);
         var safePatient = Sanitize(model.Patient.DisplayName);
-        var stamp = (intakeCtx.ValidatedAt ?? timeProvider.GetUtcNow()).ToLocalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
-        var suffix = isFinal ? string.Empty : "-PRELIMINAR";
-        return new GetLabReportPdfResult(bytes, $"resultados-{safePatient}-{stamp}{suffix}.pdf");
+        var stamp = (releasedAt ?? timeProvider.GetUtcNow()).ToLocalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        return new GetLabReportPdfResult(bytes, $"resultados-{safePatient}-{stamp}.pdf");
     }
 
     /// <summary>
-    /// Convierte las observaciones del informe en bloques imprimibles. La "grouper" del panel
-    /// —sin valor numérico ni textual— pasa a ser el encabezado del bloque.
+    /// Reparte las observaciones de cada orden liberada en área → bloque → subárea. Un panel cuyas
+    /// pruebas son de áreas distintas aparece en cada área con lo que le corresponde.
     /// </summary>
-    private async Task<IReadOnlyList<PdfReportGroup>> BuildGroupsAsync(
-        DiagnosticReportSnapshot report, string partition, CancellationToken ct)
+    private async Task<IReadOnlyList<PdfReportArea>> BuildAreasAsync(
+        Guid orgId, string partition, IReadOnlyList<ReleasedOrder> released, CancellationToken ct)
     {
-        string? groupTitle = null;
-        string? groupLoinc = null;
-        var lines = new List<PdfReportLine>();
-
-        foreach (var obsId in report.ResultObservationIds)
+        var placed = new List<PlacedLine>();
+        for (var blockIndex = 0; blockIndex < released.Count; blockIndex++)
         {
-            var o = await hapi.GetObservationAsync(obsId, partition, ct);
-            if (o is null)
+            var r = released[blockIndex];
+            var expanded = await LabRouting.ExpandOrderAsync(catalog, orgId, r.Order.CatalogCode, ct);
+            var tests = expanded.Select(e => e.Test).ToList();
+
+            string? panelTitle = null;
+            var observations = new List<ObservationSnapshot>();
+            foreach (var obsId in r.Report.ResultObservationIds)
+            {
+                var o = await hapi.GetObservationAsync(obsId, partition, ct);
+                if (o is null)
+                {
+                    continue;
+                }
+                // El "grouper" del panel no tiene valor: es el título del bloque, no una fila.
+                if (o.ValueNumeric is null && string.IsNullOrWhiteSpace(o.ValueString))
+                {
+                    panelTitle ??= o.CodeText;
+                    continue;
+                }
+                observations.Add(o);
+            }
+            if (observations.Count == 0)
             {
                 continue;
             }
 
-            var isGrouper = o.ValueNumeric is null && string.IsNullOrWhiteSpace(o.ValueString);
-            if (isGrouper)
+            // Un panel lleva título y "validado por"; una prueba individual va suelta en su área.
+            var isPanel = panelTitle is not null || tests.Count > 1;
+            var title = isPanel ? panelTitle ?? r.Order.CodeText ?? r.Report.CodeText ?? "Panel" : null;
+
+            for (var i = 0; i < observations.Count; i++)
             {
-                groupTitle ??= o.CodeText ?? report.CodeText;
-                groupLoinc ??= o.LoincCode;
-                continue;
+                var o = observations[i];
+                var test = MatchTest(o, tests);
+                var department = test?.Department ?? tests.FirstOrDefault()?.Department ?? LabDepartment.Other;
+                var subsection = test is null ? null : LabSubsections.Find(department, test.Subsection);
+                var order = test is null ? tests.Count + i : tests.IndexOf(test);
+
+                placed.Add(new PlacedLine(
+                    department, isPanel ? blockIndex : -1, title, isPanel ? r.ValidatedBy : null,
+                    r.Report.Conclusion,
+                    subsection, order, blockIndex, ToLine(o)));
             }
-
-            var critical = o.FlagCode is "HH" or "LL";
-            var abnormal = critical || o.FlagCode is "H" or "L" or "A";
-
-            lines.Add(new PdfReportLine(
-                Name: o.CodeText ?? o.LoincCode ?? "Determinación",
-                LoincCode: o.LoincCode,
-                Value: FormatValue(o),
-                Unit: o.ValueUnit,
-                ReferenceRange: FormatRange(o.ReferenceLow, o.ReferenceHigh),
-                FlagCode: o.FlagCode,
-                FlagLabel: FlagLabel(o.FlagCode),
-                IsAbnormal: abnormal,
-                IsCritical: critical,
-                IsCorrected: string.Equals(o.Status, "corrected", StringComparison.OrdinalIgnoreCase)));
         }
 
-        return
-        [
-            new PdfReportGroup(
-                groupTitle ?? report.CodeText ?? "Resultados",
-                groupLoinc ?? report.LoincCode,
-                lines)
-        ];
+        var areas = new List<PdfReportArea>();
+        foreach (var department in LabSubsections.AreaOrder)
+        {
+            var inArea = placed.Where(p => p.Department == department).ToList();
+            if (inArea.Count == 0)
+            {
+                continue;
+            }
+
+            // Primero las pruebas individuales del área (un solo bloque sin título), después cada
+            // panel en el orden de la orden.
+            var blocks = inArea
+                .GroupBy(p => p.BlockKey)
+                .OrderBy(g => g.Key)
+                .Select(g => new PdfReportBlock(
+                    g.First().BlockTitle,
+                    g.First().ValidatedBy is { } v ? FormatPractitioner(v) : null,
+                    g.GroupBy(p => p.Subsection?.Code)
+                        .OrderBy(s => LabSubsections.OrderOf(s.Key))
+                        .Select(s => new PdfReportSubsection(
+                            s.First().Subsection?.Label,
+                            s.OrderBy(p => p.SourceOrder).ThenBy(p => p.TestOrder).Select(p => p.Line).ToList()))
+                        .ToList(),
+                    JoinConclusions(g)))
+                .ToList();
+            areas.Add(new PdfReportArea(LabSubsections.AreaLabel(department), blocks));
+        }
+        return areas;
     }
+
+    /// <summary>Los comentarios del validador de las órdenes del bloque, sin repetir.</summary>
+    private static string? JoinConclusions(IEnumerable<PlacedLine> lines)
+    {
+        var all = lines.Select(l => l.Conclusion).Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!.Trim()).Distinct(StringComparer.Ordinal).ToList();
+        return all.Count == 0 ? null : string.Join(Environment.NewLine, all);
+    }
+
+    /// <summary>
+    /// La prueba del catálogo de una observación: por LOINC y, si no tiene (el catálogo admite
+    /// pruebas sin LOINC), por el nombre con que se capturó, que es el nombre de la prueba.
+    /// </summary>
+    private static LabTestDefinition? MatchTest(ObservationSnapshot o, List<LabTestDefinition> tests) =>
+        (string.IsNullOrWhiteSpace(o.LoincCode)
+            ? null
+            : tests.FirstOrDefault(t => string.Equals(t.LoincCode, o.LoincCode, StringComparison.OrdinalIgnoreCase)))
+        ?? tests.FirstOrDefault(t => string.Equals(t.Name, o.CodeText?.Trim(), StringComparison.OrdinalIgnoreCase))
+        ?? (tests.Count == 1 ? tests[0] : null);
+
+    private static PdfReportLine ToLine(ObservationSnapshot o) => new(
+        Name: o.CodeText ?? o.LoincCode ?? "Determinación",
+        Value: FormatValue(o),
+        Unit: o.ValueUnit,
+        ReferenceRange: FormatRange(o.ReferenceLow, o.ReferenceHigh),
+        Mark: MarkOf(o.FlagCode),
+        IsCorrected: string.Equals(o.Status, "corrected", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>"**" crítico, "*" fuera de rango o anormal, "" normal. Sin palabras.</summary>
+    public static string MarkOf(string? flag) => flag switch
+    {
+        "HH" or "LL" => "**",
+        "H" or "L" or "A" => "*",
+        _ => string.Empty,
+    };
 
     private async Task<PdfPractitionerInfo?> ResolvePractitionerAsync(
         string? practitionerFhirId, string partition, CancellationToken ct)
@@ -177,27 +300,11 @@ public sealed class GetLabReportPdfHandler(
             Specialty: null);
     }
 
-    private async Task<PdfPractitionerInfo?> ResolveRequesterAsync(
-        string? serviceRequestId, string partition, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(serviceRequestId))
-        {
-            return null;
-        }
-        var order = await hapi.GetLabOrderAsync(serviceRequestId!, partition, ct);
-        if (order is null)
-        {
-            return null;
-        }
-        // El solicitante viaja como referencia al Practitioner, sea interno o el externo que la
-        // recepción registró (LIS-DEC-10): en ambos casos se resuelve igual.
-        return string.IsNullOrWhiteSpace(order.RequesterPractitionerId)
-            ? null
-            : await ResolvePractitionerAsync(order.RequesterPractitionerId, partition, ct);
-    }
+    private static string FormatPractitioner(PdfPractitionerInfo p) =>
+        string.IsNullOrWhiteSpace(p.Prefix) ? p.DisplayName : $"{p.Prefix} {p.DisplayName}";
 
-    private static DateTimeOffset? ParseIssued(string? issued, bool isFinal) =>
-        isFinal && DateTimeOffset.TryParse(issued, out var dt) ? dt : null;
+    private static DateTimeOffset? ParseIssued(string? issued) =>
+        DateTimeOffset.TryParse(issued, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) ? dt : null;
 
     private static string FormatValue(ObservationSnapshot o) =>
         o.ValueNumeric?.ToString("0.####", CultureInfo.InvariantCulture) ?? o.ValueString ?? "—";
@@ -210,17 +317,6 @@ public sealed class GetLabReportPdfHandler(
         (null, { } h) => FormattableString.Invariant($"≤ {h:0.####}"),
     };
 
-    private static string? FlagLabel(string? flag) => flag switch
-    {
-        "H" => "Alto",
-        "L" => "Bajo",
-        "HH" => "Crítico alto",
-        "LL" => "Crítico bajo",
-        "A" => "Anormal",
-        "N" => null,
-        _ => null,
-    };
-
     private static string Sanitize(string value)
     {
         var chars = value.Where(c => char.IsLetterOrDigit(c) || c is '-' or ' ').ToArray();
@@ -228,10 +324,23 @@ public sealed class GetLabReportPdfHandler(
         return string.IsNullOrWhiteSpace(cleaned) ? "paciente" : cleaned.ToLowerInvariant();
     }
 
-    private readonly record struct OrderIntakeContext(
-        string? AccessionNumber,
-        string? Requisition,
+    private sealed record ReleasedOrder(
+        LabOrderSnapshot Order,
+        DiagnosticReportSnapshot Report,
         DateTimeOffset? ReceivedAt,
         DateTimeOffset? ValidatedAt,
-        string? ValidatedByPractitionerFhirId);
+        PdfPractitionerInfo? ValidatedBy);
+
+    /// <summary>Una línea ya ubicada en su área, bloque y subárea.</summary>
+    private sealed record PlacedLine(
+        LabDepartment Department,
+        /// <summary>-1 = pruebas individuales del área (van primero); si no, índice del panel.</summary>
+        int BlockKey,
+        string? BlockTitle,
+        PdfPractitionerInfo? ValidatedBy,
+        string? Conclusion,
+        LabSubsection? Subsection,
+        int TestOrder,
+        int SourceOrder,
+        PdfReportLine Line);
 }

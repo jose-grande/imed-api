@@ -20,14 +20,15 @@ public static class LabWorklistEndpoints
     }
 
     private static async Task<IResult> GetAsync(
-        ClaimsPrincipal principal, GetWorklistHandler handler, [FromQuery] string? status, CancellationToken ct)
+        ClaimsPrincipal principal, GetWorklistHandler handler, [FromQuery] string? status, [FromQuery] string? stage,
+        CancellationToken ct)
     {
         var orgId = Guid.TryParse(principal.FindFirstValue("organization_id"), out var id) ? id : (Guid?)null;
         if (orgId is null)
         {
             return Results.Problem(title: "Sin organización", statusCode: StatusCodes.Status403Forbidden);
         }
-        var result = await handler.HandleAsync(new WorklistQuery(orgId.Value, status), ct);
+        var result = await handler.HandleAsync(new WorklistQuery(orgId.Value, status, stage), ct);
         return Results.Ok(result);
     }
 }

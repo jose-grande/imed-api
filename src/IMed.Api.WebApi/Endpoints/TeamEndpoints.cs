@@ -27,7 +27,44 @@ public static class TeamEndpoints
             .WithSummary("Reemplaza las funciones (cajero, laboratorio, farmacia, inventario…) del miembro. Requiere org_admin.")
             .RequireAuthorization();
 
+        app.MapPut("/api/team/{keycloakUserId:guid}/active", SetMemberActiveAsync)
+            .WithTags("Team")
+            .WithName("SetMemberActive")
+            .WithSummary("Da de baja o reactiva a un miembro (y su cuenta en Keycloak). Requiere org_admin.")
+            .RequireAuthorization();
+
         return app;
+    }
+
+    private static async Task<IResult> SetMemberActiveAsync(
+        Guid keycloakUserId,
+        SetMemberActiveRequest request,
+        ClaimsPrincipal principal,
+        SetMemberActiveHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var (actorId, orgId, error) = ExtractAdminIds(principal);
+        if (error is not null)
+        {
+            return error;
+        }
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(new SetMemberActiveCommand(
+                orgId!.Value, keycloakUserId, actorId!.Value, request.Active), cancellationToken));
+        }
+        catch (ChangeMemberRoleException ex) when (ex.Code == "not_found")
+        {
+            return Results.Problem(title: "Miembro no encontrado", detail: ex.Message, statusCode: StatusCodes.Status404NotFound);
+        }
+        catch (ChangeMemberRoleException ex)
+        {
+            return Results.Problem(
+                title: "No se puede dar de baja",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status409Conflict,
+                extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
+        }
     }
 
     private static async Task<IResult> SetMemberFunctionsAsync(
@@ -193,6 +230,8 @@ public static class TeamEndpoints
 }
 
 public sealed record ChangeMemberRoleRequest(string Role);
+
+public sealed record SetMemberActiveRequest(bool Active);
 
 public sealed record SetMemberFunctionsRequest(IReadOnlyList<string>? Functions);
 

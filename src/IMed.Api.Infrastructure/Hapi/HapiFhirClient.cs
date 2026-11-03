@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Catalogs.Lab;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -2828,6 +2829,12 @@ public sealed class HapiFhirClient(
     private static Dictionary<string, object?> BuildObservationPayload(
         UpsertObservationRequest request, string? idForPut)
     {
+        // `ValueUnit` es el código UCUM de LabUnits (validado al cargar la prueba en el catálogo);
+        // `Quantity.unit` lleva la etiqueta que ve la gente (mIU/L), `code` el código (m[IU]/L).
+        var unitLabel = LabUnits.LabelFor(request.ValueUnit);
+        object Quantity(decimal value) => string.IsNullOrWhiteSpace(request.ValueUnit)
+            ? new { value }
+            : new { value, unit = unitLabel, system = UcumSystem, code = request.ValueUnit };
         var payload = new Dictionary<string, object?>
         {
             ["resourceType"] = "Observation",
@@ -2851,13 +2858,7 @@ public sealed class HapiFhirClient(
         }
         if (request.ValueNumeric is { } num)
         {
-            payload["valueQuantity"] = new
-            {
-                value = num,
-                unit = request.ValueUnit,
-                system = UcumSystem,
-                code = request.ValueUnit
-            };
+            payload["valueQuantity"] = Quantity(num);
         }
         else if (!string.IsNullOrWhiteSpace(request.ValueString))
         {
@@ -2878,11 +2879,11 @@ public sealed class HapiFhirClient(
             var range = new Dictionary<string, object?>();
             if (request.ReferenceLow is { } lo)
             {
-                range["low"] = new { value = lo, unit = request.ValueUnit, system = UcumSystem, code = request.ValueUnit };
+                range["low"] = Quantity(lo);
             }
             if (request.ReferenceHigh is { } hi)
             {
-                range["high"] = new { value = hi, unit = request.ValueUnit, system = UcumSystem, code = request.ValueUnit };
+                range["high"] = Quantity(hi);
             }
             // R2: población del rango — appliesTo (sexo) + age (Range en años).
             if (!string.IsNullOrWhiteSpace(request.AppliesToSex))
@@ -3147,7 +3148,7 @@ public sealed class HapiFhirClient(
             (loinc, codeText) = ParseCodeableConcept(code);
         }
         decimal? valueNumeric = null;
-        string? valueUnit = null, valueString = null;
+        string? valueUnit = null, valueUnitCode = null, valueString = null;
         if (doc.TryGetProperty("valueQuantity", out var vq))
         {
             if (vq.TryGetProperty("value", out var v) && v.TryGetDecimal(out var dv))
@@ -3157,6 +3158,10 @@ public sealed class HapiFhirClient(
             if (vq.TryGetProperty("unit", out var u))
             {
                 valueUnit = u.GetString();
+            }
+            if (vq.TryGetProperty("code", out var uc))
+            {
+                valueUnitCode = uc.GetString();
             }
         }
         else if (doc.TryGetProperty("valueString", out var vs))
@@ -3207,7 +3212,7 @@ public sealed class HapiFhirClient(
 
         return new ObservationSnapshot(
             id, patient, status, loinc, codeText, valueNumeric, valueUnit, valueString, flag, low, high, effective,
-            serviceRequestId, specimenId, performerRef);
+            serviceRequestId, specimenId, performerRef, valueUnitCode);
     }
 
     public async Task<decimal?> GetLatestNumericObservationAsync(

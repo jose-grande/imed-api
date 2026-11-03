@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Organizations;
 using System.Text.Json;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Practitioners;
@@ -29,6 +30,7 @@ public sealed class InvitationLazyProvisionService(
     IHapiFhirClient hapiFhir,
     IOrganizationProfileRepository orgRepo,
     IUserPractitionerAssignmentRepository assignmentRepo,
+    IOrganizationMemberRepository members,
     IInvitationLazyProvisionPersistence persistence,
     IKeycloakAdminClient keycloakAdmin,
     ISpecialtyRepository specialtyRepo,
@@ -43,6 +45,17 @@ public sealed class InvitationLazyProvisionService(
         string? emailClaim,
         CancellationToken cancellationToken = default)
     {
+        // Aceptar una invitación es entrar a la organización: la membresía va primero y no
+        // depende de que HAPI responda para el perfil clínico.
+        if (await members.GetAsync(keycloakUserId, invitation.OrganizationId, cancellationToken) is null)
+        {
+            await members.AddAsync(OrganizationMember.Join(
+                keycloakUserId, invitation.OrganizationId,
+                displayName: string.Join(' ', new[] { givenNameClaim, familyNameClaim }
+                    .Where(n => !string.IsNullOrWhiteSpace(n))),
+                email: emailClaim ?? invitation.Email, timeProvider), cancellationToken);
+        }
+
         // Idempotencia defensiva: si ya hay assignment para (user, org), la
         // invitación se aceptó en una corrida anterior pero quedó pending por
         // alguna razón. Solo cerramos el ciclo en BD.

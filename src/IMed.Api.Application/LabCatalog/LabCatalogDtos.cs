@@ -23,14 +23,25 @@ public sealed record LabTestDto(
     decimal? PreferredVolumeMl,
     decimal? AnalyzerMinVolumeMl,
     int? StabilityMinutes,
-    bool Active)
+    bool Active,
+    string? Subsection = null)
 {
+    /// <summary>Título de la subárea en el informe, o null si va directo bajo el área.</summary>
+    public string? SubsectionLabel =>
+        Enum.TryParse<LabDepartment>(Department, out var d) ? LabSubsections.Find(d, Subsection)?.Label : null;
+
+    /// <summary>Lo que se muestra: <see cref="Unit"/> es el código UCUM.</summary>
+    public string? UnitLabel => LabUnits.LabelFor(Unit);
+
+    /// <summary>False si la unidad es un dato viejo fuera de la lista: hay que corregirla.</summary>
+    public bool UnitAllowed => LabUnits.IsAllowed(Unit);
+
     public static LabTestDto FromDomain(LabTestDefinition t) => new(
         t.Id, t.OrganizationId, t.Code, t.LoincCode, t.Name,
         t.Datatype.ToString(), t.Unit, t.Department.ToString(),
         t.FastingHoursMin, t.FastingHoursMax, t.CollectionType, t.PatientInstruction,
         t.SpecimenTypeId, t.TubeTypeId, t.CollectionMode?.ToString(),
-        t.MinVolumeMl, t.PreferredVolumeMl, t.AnalyzerMinVolumeMl, t.StabilityMinutes, t.Active);
+        t.MinVolumeMl, t.PreferredVolumeMl, t.AnalyzerMinVolumeMl, t.StabilityMinutes, t.Active, t.Subsection);
 }
 
 /// <summary>Resumen de un panel para listados.</summary>
@@ -53,7 +64,10 @@ public sealed record LabPanelItemDto(
     string Code,
     string Name,
     string? Unit,
-    int DisplayOrder);
+    int DisplayOrder)
+{
+    public string? UnitLabel => LabUnits.LabelFor(Unit);
+}
 
 /// <summary>Detalle de un panel con su versión activa y composición de pruebas.</summary>
 public sealed record LabPanelDetailDto(
@@ -83,6 +97,10 @@ public sealed record ReferenceRangeDto(
     decimal? CriticalHigh,
     string? Unit)
 {
+    public string? UnitLabel => LabUnits.LabelFor(Unit);
+
+    public bool UnitAllowed => LabUnits.IsAllowed(Unit);
+
     public static ReferenceRangeDto FromDomain(ReferenceRange r) => new(
         r.Id, r.OrganizationId, r.LabTestId, r.Sex.ToString(),
         r.AgeMinYears, r.AgeMaxYears, r.Pregnancy, r.Method,

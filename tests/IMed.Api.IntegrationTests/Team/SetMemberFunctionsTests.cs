@@ -134,6 +134,9 @@ public sealed class SetMemberFunctionsTests(ImedApiFixture fixture) : IAsyncLife
             keycloakUserId: userId,
             organizationId: orgId,
             practitionerFhirId: $"prac-{userId:N}"));
+        // La pertenencia es la membresía; el perfil clínico es aparte.
+        db.OrganizationMembers.Add(IMed.Api.Domain.Organizations.OrganizationMember.Join(
+            userId, orgId, displayName: null, email: null));
         await db.SaveChangesAsync();
 
         var kc = scope.ServiceProvider.GetRequiredService<IMed.Api.Application.Abstractions.IKeycloakAdminClient>();

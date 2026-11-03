@@ -32,7 +32,7 @@ public sealed record SetMemberFunctionsResult(
 /// hot-path y el worker reintenta si Keycloak falla.</para>
 /// </summary>
 public sealed class SetMemberFunctionsHandler(
-    IUserPractitionerAssignmentRepository assignmentRepo,
+    IOrganizationMemberRepository memberRepo,
     IKeycloakAdminClient keycloakAdmin,
     IChangeMemberRolePersistence persistence,
     IUserNotificationBus notificationBus,
@@ -45,7 +45,7 @@ public sealed class SetMemberFunctionsHandler(
     {
         var deseadas = FunctionalRoles.Normalize(command.Functions);
 
-        if (await assignmentRepo.GetAsync(command.TargetKeycloakUserId, command.OrganizationId, cancellationToken) is null)
+        if (await memberRepo.GetAsync(command.TargetKeycloakUserId, command.OrganizationId, cancellationToken) is null)
         {
             throw new ChangeMemberRoleException(
                 $"El miembro {command.TargetKeycloakUserId} no pertenece a esta organización.",

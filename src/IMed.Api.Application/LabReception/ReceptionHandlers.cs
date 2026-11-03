@@ -273,12 +273,18 @@ public sealed class ReceiveSpecimenHandler(
         var seq = await ops.NextAccessionSeqAsync(cmd.OrganizationId, locationId, day, ct);
         var accession = LabAccession.Build(cmd.OrganizationId, locationCode, day, seq);
 
+        // El tipo del Specimen es el material (sangre total, suero, orina), no cómo se recolectó.
+        // Antes caía al tipo de recolección de la prueba, que dice "Venopunción".
+        var specimenTypeName = resolution.SpecimenTypeId is { } stId
+            ? (await catalog.ListSpecimenTypesAsync(cmd.OrganizationId, ct)).FirstOrDefault(s => s.Id == stId)?.Name
+            : null;
+
         var specimenId = await hapi.CreateSpecimenAsync(new UpsertSpecimenRequest(
             PartitionName: partition,
             PatientFhirId: order.PatientFhirId,
             ServiceRequestFhirId: cmd.ServiceRequestId,
             Status: "available",
-            TypeText: cmd.TypeText ?? resolution.CollectionType,
+            TypeText: cmd.TypeText ?? specimenTypeName,
             AccessionNumber: accession,
             ReceivedTime: now.ToString("o"),
             CollectedDateTime: cmd.CollectedDateTime,

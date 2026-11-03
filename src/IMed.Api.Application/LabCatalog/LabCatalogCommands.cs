@@ -12,6 +12,29 @@ internal static class LabCatalogParsing
     public static LabDepartment Department(string value) => ParseEnum<LabDepartment>(value, nameof(LabDepartment));
     public static ReferenceSex Sex(string value) => ParseEnum<ReferenceSex>(value, nameof(ReferenceSex));
 
+    /// <summary>
+    /// Tipo de recolección: vacío o uno de <see cref="LabCollectionMethods"/>. Al editar se acepta
+    /// además el valor que la prueba ya tenía, para no obligar a corregir un valor viejo (texto
+    /// libre de antes de la lista) solo para cambiar otro campo.
+    /// </summary>
+    public static string? CollectionMethod(string? value, string? current = null)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+        if (LabCollectionMethods.Canonical(value) is { } canonical)
+        {
+            return canonical;
+        }
+        if (current is not null && string.Equals(value.Trim(), current, StringComparison.Ordinal))
+        {
+            return current;
+        }
+        throw new ArgumentException(
+            $"Tipo de recolección inválido: '{value}'. Válidos: {string.Join(", ", LabCollectionMethods.All)}.");
+    }
+
     /// <summary>Modo de colección opcional (override); null/vacío = hereda del tipo de muestra.</summary>
     public static CollectionMode? CollectionModeOrNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : ParseEnum<CollectionMode>(value, nameof(CollectionMode));
@@ -33,7 +56,8 @@ public sealed record CreateLabTestCommand(
     Guid? OrganizationId, string Code, string Name, string Datatype, string? LoincCode, string? Unit,
     string Department, int? FastingHoursMin, int? FastingHoursMax, string? CollectionType, string? PatientInstruction,
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
-    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
+    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes,
+    string? Subsection = null);
 
 public sealed class CreateLabTestHandler(
     ILabCatalogRepository repo, TimeProvider timeProvider, IBillableItemProvisioner billableItems,
@@ -47,12 +71,14 @@ public sealed class CreateLabTestHandler(
         }
         var test = LabTestDefinition.Create(
             cmd.Code, cmd.Name, LabCatalogParsing.Datatype(cmd.Datatype), cmd.LoincCode, cmd.Unit,
-            LabCatalogParsing.Department(cmd.Department), cmd.FastingHoursMin, cmd.FastingHoursMax, cmd.CollectionType,
+            LabCatalogParsing.Department(cmd.Department), cmd.FastingHoursMin, cmd.FastingHoursMax,
+            LabCatalogParsing.CollectionMethod(cmd.CollectionType),
             cmd.PatientInstruction, cmd.OrganizationId, active: true, timeProvider: timeProvider);
         test.SetSpecimenMapping(
             cmd.SpecimenTypeId, cmd.TubeTypeId, LabCatalogParsing.CollectionModeOrNull(cmd.CollectionMode), timeProvider);
         test.SetCollectionRequirements(
             cmd.MinVolumeMl, cmd.PreferredVolumeMl, cmd.AnalyzerMinVolumeMl, cmd.StabilityMinutes, timeProvider);
+        test.SetSubsection(cmd.Subsection, timeProvider);
         await repo.AddTestAsync(test, cancellationToken);
 
         // Cada prueba propia nace con su cobrable sin precio (A6): sin él, el examen se haría y
@@ -77,7 +103,8 @@ public sealed record UpdateLabTestCommand(
     Guid Id, string Name, string Datatype, string? LoincCode, string? Unit,
     string Department, int? FastingHoursMin, int? FastingHoursMax, string? CollectionType, string? PatientInstruction,
     Guid? SpecimenTypeId, Guid? TubeTypeId, string? CollectionMode,
-    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes);
+    decimal? MinVolumeMl, decimal? PreferredVolumeMl, decimal? AnalyzerMinVolumeMl, int? StabilityMinutes,
+    string? Subsection = null);
 
 public sealed class UpdateLabTestHandler(ILabCatalogRepository repo, TimeProvider timeProvider)
 {
@@ -86,12 +113,14 @@ public sealed class UpdateLabTestHandler(ILabCatalogRepository repo, TimeProvide
         var test = await repo.GetTestByIdAsync(cmd.Id, cancellationToken)
             ?? throw new KeyNotFoundException($"Prueba '{cmd.Id}' no existe.");
         test.Edit(cmd.Name, LabCatalogParsing.Datatype(cmd.Datatype), cmd.LoincCode, cmd.Unit,
-            LabCatalogParsing.Department(cmd.Department), cmd.FastingHoursMin, cmd.FastingHoursMax, cmd.CollectionType,
+            LabCatalogParsing.Department(cmd.Department), cmd.FastingHoursMin, cmd.FastingHoursMax,
+            LabCatalogParsing.CollectionMethod(cmd.CollectionType, test.CollectionType),
             cmd.PatientInstruction, timeProvider);
         test.SetSpecimenMapping(
             cmd.SpecimenTypeId, cmd.TubeTypeId, LabCatalogParsing.CollectionModeOrNull(cmd.CollectionMode), timeProvider);
         test.SetCollectionRequirements(
             cmd.MinVolumeMl, cmd.PreferredVolumeMl, cmd.AnalyzerMinVolumeMl, cmd.StabilityMinutes, timeProvider);
+        test.SetSubsection(cmd.Subsection, timeProvider);
         await repo.UpdateTestAsync(test, cancellationToken);
         return LabTestDto.FromDomain(test);
     }

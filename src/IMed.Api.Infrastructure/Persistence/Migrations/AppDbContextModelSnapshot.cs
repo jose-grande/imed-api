@@ -2655,6 +2655,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("stability_minutes");
 
+                    b.Property<string>("Subsection")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("subsection");
+
                     b.Property<Guid?>("TubeTypeId")
                         .HasColumnType("uuid")
                         .HasColumnName("tube_type_id");
@@ -5241,6 +5246,52 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.HasKey("OrganizationId");
 
                     b.ToTable("organization_branding", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Organizations.OrganizationMember", b =>
+                {
+                    b.Property<Guid>("KeycloakUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("keycloak_user_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("display_name");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)")
+                        .HasColumnName("email");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("joined_at");
+
+                    b.Property<DateTimeOffset?>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("KeycloakUserId", "OrganizationId");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_organization_member_org");
+
+                    b.ToTable("organization_member", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Outbox.OutboxEvent", b =>

@@ -23,10 +23,38 @@ public sealed class GetPendingValidationHandler(IHapiFhirClient hapi, ILabOperat
         var open = await ops.ListOpenValidationRejectionsAsync(q.OrganizationId, ct);
         var returned = open.Select(r => r.ReportFhirId).ToHashSet(StringComparer.Ordinal);
 
-        return reports
-            .Where(r => !returned.Contains(r.Id))
-            .Select(r => new LabReportSummaryDto(r.Id, r.Status, r.LoincCode, r.CodeText, r.Issued, r.Conclusion))
-            .ToList();
+        var pending = reports.Where(r => !returned.Contains(r.Id)).ToList();
+
+        // Paciente, muestra y orden de cada caso (observación de staging: la cola no decía de
+        // quién era cada informe). Un nombre por paciente, no por fila; un blip de HAPI deja el
+        // caso visible sin nombre.
+        var partition = $"org-{q.OrganizationId}";
+        var names = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var result = new List<LabReportSummaryDto>(pending.Count);
+        foreach (var r in pending)
+        {
+            if (!string.IsNullOrWhiteSpace(r.PatientFhirId) && !names.ContainsKey(r.PatientFhirId))
+            {
+                try
+                {
+                    names[r.PatientFhirId] = (await hapi.GetPatientAsync(r.PatientFhirId, partition, ct))?.DisplayName;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    names[r.PatientFhirId] = null;
+                }
+            }
+            var intake = string.IsNullOrWhiteSpace(r.ServiceRequestFhirId)
+                ? null
+                : await ops.GetIntakeByServiceRequestAsync(q.OrganizationId, r.ServiceRequestFhirId!, ct);
+            result.Add(new LabReportSummaryDto(
+                r.Id, r.Status, r.LoincCode, r.CodeText, r.Issued, r.Conclusion,
+                PatientFhirId: r.PatientFhirId,
+                PatientName: names.GetValueOrDefault(r.PatientFhirId ?? string.Empty),
+                AccessionNumber: intake?.AccessionNumber,
+                Requisition: intake?.Requisition));
+        }
+        return result;
     }
 }
 

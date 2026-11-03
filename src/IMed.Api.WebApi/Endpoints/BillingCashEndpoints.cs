@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Billing;
 using IMed.Api.Domain.Authorization;
 using IMed.Api.WebApi.Http;
@@ -65,15 +66,16 @@ public static class BillingCashEndpoints
 
     private static async Task<IResult> OpenAsync(
         OpenSessionRequest request, ClaimsPrincipal principal,
-        OpenCashSessionHandler handler, CancellationToken ct)
+        OpenCashSessionHandler handler, IPermissionResolver permisos, CancellationToken ct)
     {
         var (orgId, userId) = Identity(principal);
         if (orgId is null || userId is null)
         {
             return Forbidden();
         }
+        var cualquierSede = await EndpointRun.HasAsync(principal, permisos, orgId.Value, PermissionCatalog.BillingSupervise, ct);
         var r = await handler.HandleAsync(
-            orgId.Value, request.CashPointId, userId.Value, request.OpeningAmount, ct);
+            orgId.Value, request.CashPointId, userId.Value, request.OpeningAmount, cualquierSede, ct);
         return r.Succeeded ? Results.Ok(r.Session) : Conflict(r.Code, r.Message);
     }
 

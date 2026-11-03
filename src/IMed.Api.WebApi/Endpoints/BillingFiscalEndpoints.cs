@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Billing;
 using IMed.Api.Domain.Authorization;
 using IMed.Api.WebApi.Http;
@@ -133,10 +134,15 @@ public static class BillingFiscalEndpoints
     }
 
     private static async Task<IResult> ListCashPointsAsync(
-        ClaimsPrincipal principal, ListCashPointsHandler handler, CancellationToken ct)
+        ClaimsPrincipal principal, ListCashPointsHandler handler, IPermissionResolver permisos, CancellationToken ct)
     {
         var orgId = ParseOrganizationId(principal);
-        return orgId is null ? Forbidden() : Results.Ok(await handler.HandleAsync(orgId.Value, ct));
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        var todas = await EndpointRun.HasAsync(principal, permisos, orgId.Value, PermissionCatalog.BillingSupervise, ct);
+        return Results.Ok(await handler.HandleAsync(orgId.Value, EndpointRun.User(principal), todas, ct));
     }
 
     private static async Task<IResult> CreateCashPointAsync(

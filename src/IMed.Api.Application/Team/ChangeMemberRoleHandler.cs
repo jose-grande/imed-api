@@ -43,7 +43,7 @@ public sealed class ChangeMemberRoleException(string detail, string code) : Exce
 /// el hot-path OK o por el dispatcher en retry exitoso.</para>
 /// </summary>
 public sealed class ChangeMemberRoleHandler(
-    IUserPractitionerAssignmentRepository assignmentRepo,
+    IOrganizationMemberRepository memberRepo,
     IKeycloakAdminClient keycloakAdmin,
     IChangeMemberRolePersistence persistence,
     IUserNotificationBus notificationBus,
@@ -55,10 +55,10 @@ public sealed class ChangeMemberRoleHandler(
         ChangeMemberRoleCommand command,
         CancellationToken cancellationToken = default)
     {
-        // 1. Pertenencia a la org. Sin assignment, no podemos cambiarle el role.
-        var targetAssignment = await assignmentRepo.GetAsync(
+        // 1. Pertenencia a la org (membresía; no hace falta que tenga perfil clínico).
+        var targetMember = await memberRepo.GetAsync(
             command.TargetKeycloakUserId, command.OrganizationId, cancellationToken);
-        if (targetAssignment is null)
+        if (targetMember is null)
         {
             throw new ChangeMemberRoleException(
                 $"El miembro {command.TargetKeycloakUserId} no pertenece a esta organización.",
@@ -168,8 +168,9 @@ public sealed class ChangeMemberRoleHandler(
 
     private async Task<int> CountOrgAdminsAsync(Guid organizationId, CancellationToken cancellationToken)
     {
-        // Cruzar usuarios con role org_admin (KC) ∩ assignments de la org (BD).
-        // Necesitamos ambos: KC sabe los roles, BD sabe la pertenencia a la org.
+        // Cruzar usuarios con role org_admin (KC) ∩ miembros activos de la org (BD).
+        // Necesitamos ambos: KC sabe los roles, BD sabe la pertenencia a la org. Antes se
+        // cruzaba con los Practitioner, y un administrador sin perfil clínico no contaba.
         var allOrgAdmins = await keycloakAdmin.GetUsersWithRealmRoleAsync(
             InvitationRoleNames.OrgAdmin, cancellationToken);
         if (allOrgAdmins.Count == 0)
@@ -180,8 +181,8 @@ public sealed class ChangeMemberRoleHandler(
         var count = 0;
         foreach (var userId in allOrgAdmins)
         {
-            var assignment = await assignmentRepo.GetAsync(userId, organizationId, cancellationToken);
-            if (assignment is not null)
+            var member = await memberRepo.GetAsync(userId, organizationId, cancellationToken);
+            if (member is { IsActive: true })
             {
                 count++;
             }

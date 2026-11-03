@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.LabReception;
 
@@ -97,6 +98,14 @@ public sealed class CorrectResultHandler(
         // FHIR marca el resultado rectificado con status `corrected`: el consumidor sabe que
         // este valor reemplaza a uno emitido antes, no que es una primera carga.
         const string CorrectedStatus = "corrected";
+
+        // La unidad es la del resultado original (su código UCUM, que HAPI ya aceptó), salvo que
+        // la corrección traiga otra: esa tiene que estar en la lista de unidades admitidas.
+        var unitCode = cmd.ValueNumeric is null
+            ? null
+            : cmd.Unit is not null
+                ? LabUnits.Require(cmd.Unit, nameof(cmd))
+                : observation.ValueUnitCode ?? observation.ValueUnit;
         var now = timeProvider.GetUtcNow().ToString("o");
 
         await hapi.UpdateObservationAsync(cmd.ObservationId, new UpsertObservationRequest(
@@ -106,7 +115,7 @@ public sealed class CorrectResultHandler(
             LoincCode: observation.LoincCode,
             CodeText: observation.CodeText ?? "Resultado",
             ValueNumeric: cmd.ValueNumeric,
-            ValueUnit: cmd.Unit ?? observation.ValueUnit,
+            ValueUnit: unitCode,
             ValueString: cmd.ValueString,
             InterpretationCode: flagCode,
             ReferenceLow: low,

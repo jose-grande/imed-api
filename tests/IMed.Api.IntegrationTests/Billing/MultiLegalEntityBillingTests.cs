@@ -102,6 +102,17 @@ public sealed class MultiLegalEntityBillingTests(ImedApiFixture fixture) : IAsyn
 
     private static async Task<Guid> AbrirTurnoAsync(IServiceProvider sp, Cadena c, Guid caja, Guid cajero)
     {
+        // El cajero tiene que estar asignado a la sede de la caja para abrir turno en ella. Se le
+        // suma esa sede sin quitarle la principal: lo que estas pruebas miran es la razón social.
+        var locations = sp.GetRequiredService<ILocationRepository>();
+        await sp.GetRequiredService<ILocationProvisioning>().EnsureUserAssignedAsync(c.OrgId, cajero);
+        var sedeDeLaCaja = (await sp.GetRequiredService<IFiscalRepository>().GetCashPointAsync(c.OrgId, caja))!.LocationId;
+        if (await locations.GetAssignmentAsync(c.OrgId, cajero, sedeDeLaCaja) is null)
+        {
+            await locations.AddAssignmentAsync(
+                UserLocationAssignment.Create(c.OrgId, cajero, sedeDeLaCaja, isPrimary: false, assignedBy: null));
+        }
+
         var r = await sp.GetRequiredService<OpenCashSessionHandler>().HandleAsync(c.OrgId, caja, cajero, 1000m);
         r.Succeeded.Should().BeTrue(r.Message);
         return r.Session!.Id;

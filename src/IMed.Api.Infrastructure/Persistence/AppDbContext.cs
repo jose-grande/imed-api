@@ -40,6 +40,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AllergyCatalogEntry> AllergyCatalog => Set<AllergyCatalogEntry>();
     public DbSet<MedicationCatalogEntry> MedicationCatalog => Set<MedicationCatalogEntry>();
     public DbSet<UserPractitionerAssignment> UserPractitionerAssignments => Set<UserPractitionerAssignment>();
+    public DbSet<IMed.Api.Domain.Organizations.OrganizationMember> OrganizationMembers => Set<IMed.Api.Domain.Organizations.OrganizationMember>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
     public DbSet<JoinRequest> JoinRequests => Set<JoinRequest>();
 
@@ -139,6 +140,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
         ConfigureAllergyCatalogEntry(modelBuilder);
         ConfigureMedicationCatalogEntry(modelBuilder);
         ConfigureUserPractitionerAssignment(modelBuilder);
+        ConfigureOrganizationMember(modelBuilder);
         ConfigureInvitation(modelBuilder);
         ConfigureJoinRequest(modelBuilder);
 
@@ -1353,6 +1355,23 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
         });
     }
 
+    private static void ConfigureOrganizationMember(ModelBuilder b)
+    {
+        b.Entity<IMed.Api.Domain.Organizations.OrganizationMember>(e =>
+        {
+            e.ToTable("organization_member");
+            e.HasKey(x => new { x.KeycloakUserId, x.OrganizationId });
+            e.Property(x => x.DisplayName).HasMaxLength(200);
+            e.Property(x => x.Email).HasMaxLength(320);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.JoinedAt).IsRequired();
+            e.Property(x => x.LastSeenAt);
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Ignore(x => x.IsActive);
+            e.HasIndex(x => x.OrganizationId).HasDatabaseName("ix_organization_member_org");
+        });
+    }
+
     private static void ConfigureUserPractitionerAssignment(ModelBuilder b)
     {
         b.Entity<UserPractitionerAssignment>(e =>
@@ -1454,6 +1473,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Datatype).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.Unit).HasMaxLength(40);
             e.Property(x => x.Department).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Subsection).HasMaxLength(30);
             e.Property(x => x.FastingHoursMin);
             e.Property(x => x.FastingHoursMax);
             e.Property(x => x.CollectionType).HasMaxLength(40);

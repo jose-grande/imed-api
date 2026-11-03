@@ -38,7 +38,12 @@ public sealed record LabReportSummaryDto(
     string? LoincCode,
     string? CodeText,
     string? Issued,
-    string? Conclusion);
+    string? Conclusion,
+    /// <summary>Paciente: la cola de validación no lo mostraba y no había forma de reconocer el caso.</summary>
+    string? PatientFhirId = null,
+    string? PatientName = null,
+    string? AccessionNumber = null,
+    string? Requisition = null);
 
 public sealed record LabReportDetailDto(
     string ReportId,

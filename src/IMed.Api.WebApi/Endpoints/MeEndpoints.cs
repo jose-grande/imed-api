@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using IMed.Api.Application.Profile;
+using IMed.Api.Application.Team;
 
 namespace IMed.Api.WebApi.Endpoints;
 
@@ -14,6 +15,10 @@ public static class MeEndpoints
         group.MapGet("/", GetMyProfileAsync)
             .WithName("GetMyProfile")
             .WithSummary("Devuelve el perfil consolidado del usuario autenticado.");
+
+        group.MapPost("/session", StartSessionAsync)
+            .WithName("StartSession")
+            .WithSummary("Registra al usuario en su organización al iniciar sesión (membresía, invitación pendiente y perfil clínico). Idempotente; 403 si fue dado de baja.");
 
         return app;
     }
@@ -49,6 +54,43 @@ public static class MeEndpoints
             cancellationToken);
 
         return Results.Ok(response);
+    }
+
+    private static async Task<IResult> StartSessionAsync(
+        ClaimsPrincipal principal,
+        StartSessionHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var sub = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub");
+        if (!Guid.TryParse(sub, out var userId))
+        {
+            return Results.Problem(title: "Token inválido", detail: "El JWT no contiene un `sub` válido.",
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+        // Sin organización todavía (antes del bootstrap) no hay nada que registrar.
+        if (ParseOrganizationId(principal) is not { } orgId)
+        {
+            return Results.NoContent();
+        }
+
+        try
+        {
+            var result = await handler.HandleAsync(new StartSessionCommand(
+                userId,
+                orgId,
+                Email: principal.FindFirstValue("email") ?? principal.FindFirstValue(ClaimTypes.Email),
+                DisplayName: principal.FindFirstValue("name") ?? principal.FindFirstValue("preferred_username"),
+                GivenName: principal.FindFirstValue("given_name") ?? principal.FindFirstValue(ClaimTypes.GivenName),
+                FamilyName: principal.FindFirstValue("family_name") ?? principal.FindFirstValue(ClaimTypes.Surname),
+                Roles: ExtractRoles(principal)), cancellationToken);
+            return Results.Ok(result);
+        }
+        catch (MemberInactiveException ex)
+        {
+            return Results.Problem(title: "Acceso desactivado", detail: ex.Message,
+                statusCode: StatusCodes.Status403Forbidden,
+                extensions: new Dictionary<string, object?> { ["code"] = "member_inactive" });
+        }
     }
 
     private static Guid? ParseOrganizationId(ClaimsPrincipal principal)

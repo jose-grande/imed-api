@@ -1,3 +1,4 @@
+using IMed.Api.Domain.Catalogs.Lab;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.LabReception;
 using IMed.Api.Domain.Lab;
@@ -223,7 +224,7 @@ public sealed record ResultAnalyteDto(
     string Name,
     string? LoincCode,
     string Datatype,
-    /// <summary>Unidad del catálogo — se precarga para que nadie escriba "mg/dl" a mano.</summary>
+    /// <summary>Código UCUM del catálogo — se precarga para que nadie escriba "mg/dl" a mano.</summary>
     string? Unit,
     decimal? ReferenceLow,
     decimal? ReferenceHigh,
@@ -233,4 +234,11 @@ public sealed record ResultAnalyteDto(
     bool SendOut,
     decimal? PreviousValue,
     string? PreviousDate,
-    string? PreviousFlagCode);
+    string? PreviousFlagCode)
+{
+    /// <summary>Lo que se muestra; <see cref="Unit"/> es el código UCUM que se devuelve al guardar.</summary>
+    public string? UnitLabel => LabUnits.LabelFor(Unit);
+
+    /// <summary>False si la prueba tiene una unidad vieja fuera de la lista: no se puede guardar.</summary>
+    public bool UnitAllowed => LabUnits.IsAllowed(Unit);
+}

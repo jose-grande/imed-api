@@ -311,17 +311,20 @@ public sealed class OrganizationLogoTests
         private static LabReportPdfModel Informe(PdfLogo? logo) => new(
             Organization: new PdfOrgInfo("Laboratorio Clínico de Prueba", TaxId: null, Logo: logo),
             Patient: new PdfPatientInfo("Juan Pérez", "1990-05-12", "male", "Identidad", "0801199012345"),
-            Groups:
+            Areas:
             [
-                new PdfReportGroup("Hemograma", "58410-2",
+                new PdfReportArea("Hematología",
                 [
-                    new PdfReportLine("Hemoglobina", "718-7", "14.2", "g/dL", "13.0 – 17.0",
-                        null, null, false, false, false),
+                    new PdfReportBlock("Hemograma", "Lic. Ana López",
+                    [
+                        new PdfReportSubsection("Serie roja",
+                        [
+                            new PdfReportLine("Hemoglobina", "14.2", "g/dL", "13.0 – 17.0", "", false),
+                        ]),
+                    ]),
                 ]),
             ],
-            IsFinal: true,
             Requisition: "REQ-001",
-            AccessionNumber: "ACC-001",
             PrintedAt: new DateTimeOffset(2026, 10, 4, 10, 0, 0, TimeSpan.FromHours(-6)));
 
         private static InvoicePdfModel Factura(PdfLogo? logo) => new(

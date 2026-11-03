@@ -55,6 +55,7 @@ public sealed class LabCatalogProvisioning(
             // Tipos de muestra/tubos son referencia compartida → se conservan los ids.
             clone.SetSpecimenMapping(t.SpecimenTypeId, t.TubeTypeId, t.CollectionMode, timeProvider);
             clone.SetCollectionRequirements(t.MinVolumeMl, t.PreferredVolumeMl, t.AnalyzerMinVolumeMl, t.StabilityMinutes, timeProvider);
+            clone.SetSubsection(t.Subsection, timeProvider);
             db.LabTests.Add(clone);
             newTestByOldId[t.Id] = clone;
         }
