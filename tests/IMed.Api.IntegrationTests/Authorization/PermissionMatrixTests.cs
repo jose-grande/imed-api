@@ -268,6 +268,134 @@ public sealed class PermissionMatrixTests(ImedApiFixture fixture) : IAsyncLifeti
                 "quien puede cambiar la política puede darse cualquier otro permiso");
     }
 
+    // --- ADR-009: roles bloqueados y edición por rol ---------------------------------------
+
+    [Fact]
+    public async Task LaMatriz_noMuestraElRolDeSoporte_yMarcaAlAdministradorComoBloqueado()
+    {
+        var (client, _) = await AdminOrgAsync();
+
+        var matriz = await (await client.GetAsync("/api/authorization/matrix"))
+            .Content.ReadFromJsonAsync<MatrixProbe>();
+
+        matriz!.Roles.Should().NotContain("imed_superadmin", "el rol de soporte de IMed no es de la clínica");
+        matriz.Permissions.Should().OnlyContain(p => !p.ByRole.ContainsKey("imed_superadmin"));
+        matriz.LockedRoles.Should().BeEquivalentTo(["org_admin"]);
+    }
+
+    [Theory]
+    [InlineData("imed_superadmin", "lab.read")]
+    [InlineData("org_admin", "org.team.manage")]
+    [InlineData("org_admin", "lab.read")]
+    public async Task UnRolBloqueado_noSePuedePersonalizar(string rol, string permiso)
+    {
+        var (client, _) = await AdminOrgAsync();
+
+        (await client.PutAsJsonAsync("/api/authorization/matrix", new
+        {
+            roleCode = rol, permissionCode = permiso, action = "Deny",
+        })).StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        (await client.PutAsJsonAsync($"/api/authorization/roles/{rol}/permissions", new
+        {
+            changes = new[] { new { permissionCode = permiso, enabled = false } },
+        })).StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        (await client.DeleteAsync($"/api/authorization/roles/{rol}/overrides"))
+            .StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task UnaVarianteViejaSobreOrgAdmin_seIgnora()
+    {
+        // Antes de ADR-009 una clínica podía quitarle permisos a su administrador. Esas filas
+        // pueden existir en staging; no pueden dejar a la organización sin administración.
+        var org = Guid.NewGuid();
+        using var scope = fixture.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var resolver = scope.ServiceProvider.GetRequiredService<IPermissionResolver>();
+
+        db.RolePermissions.Add(RolePermission.Create(
+            "org_admin", PermissionCatalog.OrgTeamManage, PermissionScope.Organization,
+            organizationId: org, denied: true));
+        await db.SaveChangesAsync();
+        await resolver.InvalidateAsync(org, null);
+
+        (await resolver.ResolveAsync(org, ["org_admin"]))
+            .Has(PermissionCatalog.OrgTeamManage).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EditarPorRol_guardaLoMinimo_frenteALaPlantilla()
+    {
+        var (client, _) = await AdminOrgAsync();
+
+        // Quitar algo que la plantilla da → variante "Denied".
+        await PutRolAsync(client, "cashier", (PermissionCatalog.BillingCollect, false));
+        (await OrigenAsync(client, PermissionCatalog.BillingCollect, "cashier")).Should().Be("Denied");
+
+        // Volver a pedirlo → coincide con la plantilla: se borra la variante, no queda "Granted".
+        await PutRolAsync(client, "cashier", (PermissionCatalog.BillingCollect, true));
+        (await OrigenAsync(client, PermissionCatalog.BillingCollect, "cashier")).Should().Be("Template",
+            "una personalización igual a la plantilla no puede congelarla");
+
+        // Conceder algo que la plantilla no da → "Granted".
+        await PutRolAsync(client, "cashier", (PermissionCatalog.BillingCharge, true));
+        (await OrigenAsync(client, PermissionCatalog.BillingCharge, "cashier")).Should().Be("Granted");
+    }
+
+    [Fact]
+    public async Task EditarPorRol_esAtomico()
+    {
+        var (client, _) = await AdminOrgAsync();
+
+        var resp = await client.PutAsJsonAsync("/api/authorization/roles/practitioner/permissions", new
+        {
+            changes = new object[]
+            {
+                new { permissionCode = PermissionCatalog.RecordReadAny, enabled = false },
+                new { permissionCode = "no.existe", enabled = true },
+            },
+        });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await OrigenAsync(client, PermissionCatalog.RecordReadAny, "practitioner")).Should().Be("Template",
+            "si un cambio es inválido no se aplica ninguno");
+    }
+
+    [Fact]
+    public async Task RestaurarUnRol_borraSusVariantes_ySoloLasSuyas()
+    {
+        var (client, _) = await AdminOrgAsync();
+        await PutRolAsync(client, "cashier",
+            (PermissionCatalog.BillingCollect, false), (PermissionCatalog.BillingCharge, true));
+        await PutRolAsync(client, "auxiliar", (PermissionCatalog.RecordWrite, false));
+
+        (await client.DeleteAsync("/api/authorization/roles/cashier/overrides"))
+            .StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        (await OrigenAsync(client, PermissionCatalog.BillingCollect, "cashier")).Should().Be("Template");
+        (await OrigenAsync(client, PermissionCatalog.BillingCharge, "cashier")).Should().Be("None");
+        (await OrigenAsync(client, PermissionCatalog.RecordWrite, "auxiliar")).Should().Be("Denied",
+            "restaurar un rol no toca a los demás");
+    }
+
+    private static async Task PutRolAsync(HttpClient client, string rol, params (string Code, bool Enabled)[] cambios)
+    {
+        var resp = await client.PutAsJsonAsync($"/api/authorization/roles/{rol}/permissions", new
+        {
+            changes = cambios.Select(c => new { permissionCode = c.Code, enabled = c.Enabled }).ToArray(),
+        });
+        resp.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    private static async Task<string> OrigenAsync(HttpClient client, string permiso, string rol)
+    {
+        var matriz = await (await client.GetAsync("/api/authorization/matrix"))
+            .Content.ReadFromJsonAsync<MatrixProbe>();
+        return matriz!.Permissions.Single(p => p.Code == permiso).ByRole[rol];
+    }
+
     /// <summary>Organización real con un usuario org_admin sobre ella.</summary>
     private async Task<(HttpClient Client, Guid OrgId)> AdminOrgAsync()
     {
@@ -290,7 +418,7 @@ public sealed class PermissionMatrixTests(ImedApiFixture fixture) : IAsyncLifeti
     private sealed record BootstrapProbe(Guid OrganizationId);
 
     private sealed record MatrixProbe(
-        IReadOnlyList<string> Roles, IReadOnlyList<MatrixRowProbe> Permissions);
+        IReadOnlyList<string> Roles, IReadOnlyList<MatrixRowProbe> Permissions, IReadOnlyList<string> LockedRoles);
 
     private sealed record MatrixRowProbe(
         string Code, string Module, string Description, IReadOnlyDictionary<string, string> ByRole);

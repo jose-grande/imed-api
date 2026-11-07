@@ -99,6 +99,27 @@ public static class PermissionCatalog
         "imed_superadmin",
     ];
 
+    /// <summary>
+    /// Roles que ninguna organización puede personalizar (ADR-009 §1).
+    ///
+    /// <para><c>org_admin</c> porque cualquier recorte puede dejar a la organización sin nadie
+    /// que administre el equipo o la política: proteger permiso por permiso no escala.
+    /// <c>imed_superadmin</c> porque es el rol de soporte de IMed, no de la clínica.</para>
+    ///
+    /// <para>La guarda está en el backend: una escritura sobre estos roles responde 409, y las
+    /// variantes que existieran antes se ignoran al resolver.</para>
+    /// </summary>
+    public static IReadOnlyList<string> LockedRoles => ["org_admin", "imed_superadmin"];
+
+    /// <summary>Roles que la pantalla de una clínica ni siquiera muestra.</summary>
+    public static IReadOnlyList<string> HiddenRoles => ["imed_superadmin"];
+
+    public static bool IsLocked(string role) => LockedRoles.Contains(role, StringComparer.Ordinal);
+
+    /// <summary>Roles que ve el administrador de una organización, en orden de presentación.</summary>
+    public static IReadOnlyList<string> VisibleRoles =>
+        Roles.Where(r => !HiddenRoles.Contains(r, StringComparer.Ordinal)).ToList();
+
     public static IReadOnlyList<(string Code, string Module, string Description)> All =>
     [
         (LabRead, "lab", "Ver el laboratorio: worklists, órdenes, resultados"),

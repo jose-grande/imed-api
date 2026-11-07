@@ -27,35 +27,47 @@ public sealed class PermissionMatrixRepository(AppDbContext db) : IPermissionMat
         return rows.Select(r => (r.OrganizationId, r.RoleCode, r.PermissionCode, r.Denied)).ToList();
     }
 
-    public async Task SetGrantAsync(SetGrantCommand cmd, TimeProvider timeProvider, CancellationToken ct = default)
+    public async Task ApplyGrantsAsync(
+        Guid organizationId,
+        string roleCode,
+        IReadOnlyList<(string PermissionCode, GrantAction Action)> changes,
+        TimeProvider timeProvider,
+        CancellationToken ct = default)
     {
-        var existing = await db.RolePermissions.FirstOrDefaultAsync(
-            x => x.OrganizationId == cmd.OrganizationId
-                 && x.RoleCode == cmd.RoleCode
-                 && x.PermissionCode == cmd.PermissionCode,
-            ct);
+        var codes = changes.Select(c => c.PermissionCode).ToList();
+        var existing = await db.RolePermissions
+            .Where(x => x.OrganizationId == organizationId
+                        && x.RoleCode == roleCode
+                        && codes.Contains(x.PermissionCode))
+            .ToListAsync(ct);
 
-        if (cmd.Action == GrantAction.Inherit)
+        foreach (var (permissionCode, action) in changes)
         {
-            // Volver a la plantilla es borrar la variante, no escribir el valor que la plantilla
-            // tiene hoy: si mañana el producto cambia esa regla, la organización la sigue.
-            if (existing is not null)
+            var current = existing.FirstOrDefault(x => x.PermissionCode == permissionCode);
+            if (current is not null)
             {
-                db.RolePermissions.Remove(existing);
-                await db.SaveChangesAsync(ct);
+                // Volver a la plantilla es borrar la variante, no escribir el valor que la
+                // plantilla tiene hoy: si mañana el producto cambia esa regla, la organización la sigue.
+                db.RolePermissions.Remove(current);
             }
-            return;
+            if (action == GrantAction.Inherit)
+            {
+                continue;
+            }
+            db.RolePermissions.Add(RolePermission.Create(
+                roleCode, permissionCode, PermissionScope.Organization,
+                organizationId: organizationId, denied: action == GrantAction.Deny,
+                timeProvider: timeProvider));
         }
 
-        var denied = cmd.Action == GrantAction.Deny;
-        if (existing is not null)
-        {
-            db.RolePermissions.Remove(existing);
-        }
-        db.RolePermissions.Add(RolePermission.Create(
-            cmd.RoleCode, cmd.PermissionCode, PermissionScope.Organization,
-            organizationId: cmd.OrganizationId, denied: denied, timeProvider: timeProvider));
-
+        // Un solo SaveChanges: EF lo envuelve en una transacción, así que se aplican todos o ninguno.
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task ResetRoleAsync(Guid organizationId, string roleCode, CancellationToken ct = default)
+    {
+        await db.RolePermissions
+            .Where(x => x.OrganizationId == organizationId && x.RoleCode == roleCode)
+            .ExecuteDeleteAsync(ct);
     }
 }

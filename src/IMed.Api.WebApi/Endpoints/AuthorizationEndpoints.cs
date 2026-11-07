@@ -27,6 +27,14 @@ public static class AuthorizationEndpoints
             .WithName("SetPermissionGrant")
             .WithSummary("Concede, quita o devuelve a la plantilla un permiso de un rol.");
 
+        group.MapPut("/roles/{role}/permissions", SetRolePermissionsAsync)
+            .WithName("SetRolePermissions")
+            .WithSummary("Fija el estado deseado de varios permisos de un rol, de forma atómica (ADR-009).");
+
+        group.MapDelete("/roles/{role}/overrides", ResetRoleAsync)
+            .WithName("ResetRole")
+            .WithSummary("Devuelve un rol a los valores de IMed en esta organización (ADR-009).");
+
         return app;
     }
 
@@ -64,6 +72,47 @@ public static class AuthorizationEndpoints
         }
     }
 
+    private static async Task<IResult> SetRolePermissionsAsync(
+        string role, SetRolePermissionsRequest request, ClaimsPrincipal principal,
+        SetRolePermissionsHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        try
+        {
+            await handler.HandleAsync(
+                new SetRolePermissionsCommand(orgId.Value, role, request.Changes ?? [], ParseSub(principal)),
+                ct);
+            return Results.NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(title: "Cambio no permitido", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
+    private static async Task<IResult> ResetRoleAsync(
+        string role, ClaimsPrincipal principal, ResetRoleHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        try
+        {
+            await handler.HandleAsync(new ResetRoleCommand(orgId.Value, role, ParseSub(principal)), ct);
+            return Results.NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(title: "Cambio no permitido", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
     private static IResult Forbidden() =>
         Results.Problem(title: "Sin organización", detail: "El token no trae organization_id.", statusCode: StatusCodes.Status403Forbidden);
 
@@ -78,3 +127,5 @@ public static class AuthorizationEndpoints
 }
 
 public sealed record SetGrantRequest(string RoleCode, string PermissionCode, GrantAction Action);
+
+public sealed record SetRolePermissionsRequest(IReadOnlyList<RolePermissionChange>? Changes);

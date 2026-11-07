@@ -106,9 +106,13 @@ public sealed class PermissionResolver(
         {
             // La fila del tenant reemplaza a la global para ese (rol, permiso). Es lo que permite
             // que una clínica le quite a un rol algo que la plantilla le da, sin tocar la plantilla.
-            var effective = group.FirstOrDefault(r => r.OrganizationId == organizationId)
-                            ?? group.First();
-            if (effective.Denied)
+            // Los roles bloqueados (ADR-009 §1) ignoran las variantes: si quedara alguna escrita
+            // antes del bloqueo, no puede dejar a la organización sin administrador.
+            var effective = PermissionCatalog.IsLocked(group.Key.RoleCode)
+                ? group.FirstOrDefault(r => r.OrganizationId is null)
+                : group.FirstOrDefault(r => r.OrganizationId == organizationId)
+                  ?? group.First();
+            if (effective is null || effective.Denied)
             {
                 continue;
             }

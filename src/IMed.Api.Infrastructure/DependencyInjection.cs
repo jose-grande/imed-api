@@ -287,6 +287,8 @@ public static class DependencyInjection
         services.AddScoped<FhirLocationGuard>();
         services.AddScoped<GetPermissionMatrixHandler>();
         services.AddScoped<SetPermissionGrantHandler>();
+        services.AddScoped<SetRolePermissionsHandler>();
+        services.AddScoped<ResetRoleHandler>();
         services.AddScoped<ILocationRepository, LocationRepository>();
         services.AddScoped<ILocationProvisioning, LocationProvisioning>();
         services.AddScoped<ILegalEntityRepository, LegalEntityRepository>();
