@@ -178,16 +178,10 @@ public sealed class CreateExternalOrderHandler(IHapiFhirClient hapi)
         {
             throw new ArgumentException("PatientFhirId es obligatorio.", nameof(cmd));
         }
-        if (string.IsNullOrWhiteSpace(cmd.RequesterName))
-        {
-            throw new ArgumentException("RequesterName (médico externo) es obligatorio.", nameof(cmd));
-        }
         var partition = LabRouting.PartitionOf(cmd.OrganizationId);
 
-        // Médico externo: reusar si ya existe (dedupe), si no crear (LIS-DEC-10).
-        var practId = await hapi.FindExternalPractitionerByNameAsync(cmd.RequesterName, partition, ct)
-            ?? await hapi.CreateExternalPractitionerAsync(
-                new ExternalPractitionerRequest(partition, cmd.RequesterName, cmd.RequesterIdentifier), ct);
+        var practId = await ExternalRequester.ResolveAsync(
+            hapi, partition, cmd.RequesterName, cmd.RequesterIdentifier, ct);
 
         var srId = await hapi.CreateLabOrderAsync(new UpsertLabOrderRequest(
             PartitionName: partition,

@@ -37,10 +37,13 @@ public sealed class ExternalOrderCatalogTests(ImedApiFixture fixture) : IAsyncLi
     }
 
     private static Task<HttpResponseMessage> OrdenAsync(HttpClient client, params object[] exams) =>
+        OrdenConMedicoAsync(client, "Dr. Externo", exams);
+
+    private static Task<HttpResponseMessage> OrdenConMedicoAsync(HttpClient client, string? requesterName, params object[] exams) =>
         client.PostAsJsonAsync("/api/lab/reception/external-order-multi", new
         {
             patientFhirId = "pat-cat-1",
-            requesterName = "Dr. Externo",
+            requesterName,
             requesterIdentifier = (string?)null,
             requesterInstitution = (string?)null,
             priority = "routine",
@@ -68,6 +71,41 @@ public sealed class ExternalOrderCatalogTests(ImedApiFixture fixture) : IAsyncLi
 
         (await OrdenAsync(client, Prueba(glu.LoincCode, glu.Code, glu.Name)))
             .StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    /// <summary>
+    /// El médico solicitante es opcional: hay pacientes que se hacen exámenes por cuenta propia.
+    /// Sin médico no se crea un <c>Practitioner</c> (antes recepción escribía "N/A" y quedaba
+    /// como médico externo) y la orden va sin <c>requester</c>.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SinMedicoSolicitante_seAceptaSinCrearMedico(string? requesterName)
+    {
+        var client = await AuthedClient();
+        var glu = await PruebaDelCatalogoAsync(client, "Glucosa");
+        var medicosAntes = fixture.Hapi.CreatePractitionerCallCount;
+
+        var resp = await OrdenConMedicoAsync(client, requesterName, Prueba(glu.LoincCode, glu.Code, glu.Name));
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Created, await resp.Content.ReadAsStringAsync());
+        var srId = (await resp.Content.ReadFromJsonAsync<CreatedExternalOrderMulti>())!.ServiceRequestIds.Single();
+        fixture.Hapi.ServiceRequestRequester(srId).Should().BeNull();
+        fixture.Hapi.CreatePractitionerCallCount.Should().Be(medicosAntes);
+    }
+
+    [Fact]
+    public async Task ConMedicoSolicitante_laOrdenLoReferencia()
+    {
+        var client = await AuthedClient();
+        var glu = await PruebaDelCatalogoAsync(client, "Glucosa");
+
+        var resp = await OrdenAsync(client, Prueba(glu.LoincCode, glu.Code, glu.Name));
+
+        var srId = (await resp.Content.ReadFromJsonAsync<CreatedExternalOrderMulti>())!.ServiceRequestIds.Single();
+        fixture.Hapi.ServiceRequestRequester(srId).Should().StartWith("Practitioner/");
     }
 
     [Fact]

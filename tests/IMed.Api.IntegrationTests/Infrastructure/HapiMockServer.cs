@@ -58,6 +58,10 @@ public sealed partial class HapiMockServer : IDisposable
     }
 
     public IReadOnlyCollection<string> CreatedPartitions => _createdPartitions;
+
+    /// <summary><c>requester.reference</c> guardado en una orden, o <c>null</c> si no trae médico.</summary>
+    public string? ServiceRequestRequester(string id) =>
+        _serviceRequests.TryGetValue(id, out var sr) ? sr.Requester : null;
     public IReadOnlyCollection<CreatedOrganization> Organizations => _organizations;
     public IReadOnlyCollection<CreatedProvenance> Provenances => _provenances;
 
@@ -517,6 +521,8 @@ public sealed partial class HapiMockServer : IDisposable
                 var status = root.TryGetProperty("status", out var st) ? st.GetString() ?? "active" : "active";
                 var intent = root.TryGetProperty("intent", out var it) ? it.GetString() ?? "order" : "order";
                 var encounter = ParseReference(root, "encounter", "Encounter/");
+                string? requester = root.TryGetProperty("requester", out var rqr) && rqr.TryGetProperty("reference", out var rqrRef)
+                    ? rqrRef.GetString() : null;
                 string? requisition = root.TryGetProperty("requisition", out var rq) && rq.TryGetProperty("value", out var rqv)
                     ? rqv.GetString() : null;
 
@@ -524,7 +530,7 @@ public sealed partial class HapiMockServer : IDisposable
                 var authoredOn = root.TryGetProperty("authoredOn", out var ao) ? ao.GetString() : null;
                 _serviceRequests[id] = new FakeServiceRequest(
                     id, patientId, loinc, codeText, priority, status, intent, encounter, requisition,
-                    localCode, localSystem, authoredOn);
+                    localCode, localSystem, authoredOn, requester);
                 return JsonMessage(HttpStatusCode.Created, new { resourceType = "ServiceRequest", id, meta = new { versionId = "1" } });
             }));
     }
@@ -550,6 +556,7 @@ public sealed partial class HapiMockServer : IDisposable
                     intent = sr.Intent,
                     subject = new { reference = $"Patient/{sr.PatientFhirId}" },
                     encounter = sr.Encounter is null ? null : new { reference = $"Encounter/{sr.Encounter}" },
+                    requester = sr.Requester is null ? null : new { reference = sr.Requester },
                     requisition = sr.Requisition is null ? null : new { system = "http://imed.local/requisition", value = sr.Requisition },
                     priority = sr.Priority,
                     authoredOn = sr.AuthoredOn,
@@ -726,6 +733,7 @@ public sealed partial class HapiMockServer : IDisposable
                         intent = sr.Intent,
                         subject = new { reference = $"Patient/{sr.PatientFhirId}" },
                         encounter = sr.Encounter is null ? null : new { reference = $"Encounter/{sr.Encounter}" },
+                        requester = sr.Requester is null ? null : new { reference = sr.Requester },
                         // La búsqueda omitía `requisition` (el GET individual sí lo devuelve), así
                         // que toda orden hallada por búsqueda llegaba sin agrupación y los flujos
                         // que filtran por requisición —cola de pendientes, resolve— la descartaban.
@@ -1321,7 +1329,9 @@ public sealed partial class HapiMockServer : IDisposable
         /// nunca llega sin él. El mock lo omitía, y con eso cualquier regla que dependa de la edad
         /// de la orden —como el margen de gracia de la reconciliación— quedaba sin poder probarse.
         /// </summary>
-        string? AuthoredOn = null);
+        string? AuthoredOn = null,
+        /// <summary><c>requester.reference</c> (<c>Practitioner/…</c>), o <c>null</c> si la orden no trae médico.</summary>
+        string? Requester = null);
 
     private sealed record FakeObservation(
         string Id, string PatientFhirId, string? Loinc, string? CodeText, double? ValueNumeric, string? Unit,

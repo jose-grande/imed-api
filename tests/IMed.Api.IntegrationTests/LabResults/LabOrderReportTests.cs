@@ -137,6 +137,70 @@ public sealed class LabOrderReportTests(ImedApiFixture fixture) : IAsyncLifetime
         glucosa.Name.Should().Be("Glucosa");
         glucosa.Mark.Should().Be("**");
         glucosa.Value.Should().Be("600");
+
+        model.RequestedBy.Should().NotBeNull("la orden trae médico solicitante");
+    }
+
+    /// <summary>
+    /// Orden externa sin médico solicitante (el paciente pidió los exámenes por su cuenta): el
+    /// informe sale igual, sin el renglón "Solicitado por".
+    /// </summary>
+    [Fact]
+    public async Task InformeSinMedicoSolicitante_saleSinSolicitante()
+    {
+        await Task.Delay(800);
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId);
+        var organizationId = Guid.NewGuid();
+        await fixture.ProvisionLabCatalogAsync(organizationId);
+        var token = fixture.Keycloak.IssueUserToken(
+            userId, organizationId: organizationId.ToString(), realmRoles: ["org_admin"]);
+
+        var renderer = new CapturingRenderer();
+        using var host = fixture.Factory.WithWebHostBuilder(b => b.ConfigureTestServices(s =>
+        {
+            s.RemoveAll<ILabReportPdfRenderer>();
+            s.AddSingleton<ILabReportPdfRenderer>(renderer);
+        }));
+        using var client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var orderResp = await client.PostAsJsonAsync("/api/lab/reception/external-order-multi", new
+        {
+            patientFhirId = "pat-informe-sin-medico",
+            requesterName = (string?)null,
+            requesterIdentifier = (string?)null,
+            requesterInstitution = (string?)null,
+            priority = "routine",
+            occurrenceDateTime = (string?)null,
+            reasonText = (string?)null,
+            note = (string?)null,
+            exams = new[] { new Exam("2345-7", "GLU", TestSystem, "Glucosa", "Glucosa") },
+        });
+        orderResp.StatusCode.Should().Be(HttpStatusCode.Created, await orderResp.Content.ReadAsStringAsync());
+        var srId = (await orderResp.Content.ReadFromJsonAsync<CreatedExternalOrderMulti>())!.ServiceRequestIds.Single();
+
+        await client.PostAsJsonAsync("/api/lab/reception/receive", new
+        {
+            serviceRequestId = srId, fastingSatisfied = (bool?)null, isWalkIn = true,
+            scheduledFor = (DateTimeOffset?)null, typeText = (string?)null, collectedDateTime = (string?)null, note = (string?)null,
+        });
+        var sheet = (await client.GetFromJsonAsync<ResultEntrySheetDto>($"/api/lab/results/entry-sheet/{srId}"))!;
+        var lines = sheet.Analytes.Select(a => new
+        {
+            loinc = a.LoincCode, codeText = a.Name, labTestId = a.LabTestId, valueString = (string?)null, unit = a.Unit,
+            valueNumeric = 600m,
+        }).ToArray();
+        var saved = await client.PostAsJsonAsync("/api/lab/results",
+            new { serviceRequestId = srId, externalLabName = (string?)null, results = lines, conclusion = (string?)null });
+        saved.StatusCode.Should().Be(HttpStatusCode.OK, await saved.Content.ReadAsStringAsync());
+        var reportId = (await saved.Content.ReadFromJsonAsync<EnterResultsResult>())!.DiagnosticReportId;
+        await client.PostAsJsonAsync($"/api/lab/results/{reportId}/release", new { comment = (string?)null });
+
+        var pdf = await client.GetAsync($"/api/lab/results/{reportId}/pdf");
+        pdf.StatusCode.Should().Be(HttpStatusCode.OK, await pdf.Content.ReadAsStringAsync());
+
+        renderer.Last!.RequestedBy.Should().BeNull();
     }
 
     [Theory]

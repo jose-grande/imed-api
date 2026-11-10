@@ -15,7 +15,7 @@ public sealed record ReceptionOrderView(
 public sealed record CreateExternalOrderCommand(
     Guid OrganizationId,
     string PatientFhirId,
-    string RequesterName,
+    string? RequesterName,
     string? RequesterIdentifier,
     string? LoincCode,
     string CodeText,

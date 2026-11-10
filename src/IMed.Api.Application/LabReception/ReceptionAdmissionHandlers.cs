@@ -135,10 +135,6 @@ public sealed class CreateExternalOrderMultiHandler(
         {
             throw new ArgumentException("PatientFhirId es obligatorio.", nameof(cmd));
         }
-        if (string.IsNullOrWhiteSpace(cmd.RequesterName))
-        {
-            throw new ArgumentException("El médico solicitante externo es obligatorio.", nameof(cmd));
-        }
         if (cmd.Exams.Count == 0)
         {
             throw new ArgumentException("Agregá al menos un examen o panel.", nameof(cmd));
@@ -149,10 +145,8 @@ public sealed class CreateExternalOrderMultiHandler(
 
         var partition = LabRouting.PartitionOf(cmd.OrganizationId);
 
-        // Médico externo: reusar si ya existe (dedupe), si no crear (LIS-DEC-10).
-        var practId = await hapi.FindExternalPractitionerByNameAsync(cmd.RequesterName, partition, ct)
-            ?? await hapi.CreateExternalPractitionerAsync(
-                new ExternalPractitionerRequest(partition, cmd.RequesterName, cmd.RequesterIdentifier), ct);
+        var practId = await ExternalRequester.ResolveAsync(
+            hapi, partition, cmd.RequesterName, cmd.RequesterIdentifier, ct);
 
         // El correlativo lleva la fecha adentro y se reinicia cada día: tiene que ser el día de la
         // clínica. Con UTC, una admisión de la tarde salía con la fecha de mañana y el contador
@@ -311,7 +305,7 @@ public static class LabOrderCodeSystems
 public sealed record ExternalOrderExam(string? LoincCode, string? LocalCode, string? LocalSystem, string CodeText, string? CodeDisplay);
 
 public sealed record CreateExternalOrderMultiCommand(
-    Guid OrganizationId, string PatientFhirId, string RequesterName, string? RequesterIdentifier,
+    Guid OrganizationId, string PatientFhirId, string? RequesterName, string? RequesterIdentifier,
     string? RequesterInstitution, string? Priority, string? OccurrenceDateTime, string? ReasonText, string? Note,
     IReadOnlyList<ExternalOrderExam> Exams,
     Guid? UserId = null);

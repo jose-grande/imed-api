@@ -566,7 +566,7 @@ public static class LabReceptionEndpoints
 
 public sealed record CreateExternalOrderRequest(
     string PatientFhirId,
-    string RequesterName,
+    string? RequesterName,
     string? RequesterIdentifier,
     string? LoincCode,
     string CodeText,
@@ -593,7 +593,7 @@ public sealed record CheckInRequest(string Requisition);
 /// <summary>Fase 1: crear orden externa con varios exámenes/paneles.</summary>
 public sealed record CreateExternalOrderMultiRequest(
     string PatientFhirId,
-    string RequesterName,
+    string? RequesterName,
     string? RequesterIdentifier,
     string? RequesterInstitution,
     string? Priority,
