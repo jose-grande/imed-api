@@ -70,6 +70,54 @@ public sealed class SpecimenLabelPdfRendererTests
         Assert.Equal((double)heightMm, page.Height.Point * MmPerPoint, ToleranceMm);
     }
 
+    /// <summary>
+    /// Observación de los técnicos: cuando el contenido no entraba, el barcode y el texto se
+    /// repartían en varias etiquetas. Una muestra = una etiqueta, siempre, aunque el nombre,
+    /// el recipiente o la lista de pruebas sean larguísimos o vengan en mayúsculas (que en
+    /// Arial ocupan bastante más que las minúsculas).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(StandardFormats))]
+    public void Render_WithOverlongContent_StaysOnOneLabel(
+        string name, decimal widthMm, decimal heightMm, decimal marginMm)
+    {
+        var renderer = new SpecimenLabelPdfRenderer();
+        var format = new SpecimenLabelFormat(name, widthMm, heightMm, marginMm, 0m, 0m);
+        var page = new SpecimenLabelPage(
+            format,
+            Accession: "HOSPITALCENTRAL-20261109-000123",
+            BarcodeValue: "HOSPITALCENTRAL-20261109-000123",
+            PatientName: "MARÍA FERNANDA DE LOS ÁNGELES GUTIÉRREZ WWWWWWWW MMMMMMMMMM",
+            PatientBirthDate: "1988-03-14",
+            ContainerLabel: "TUBO CON CITRATO DE SODIO 3.2% (TAPA CELESTE) · CITRATO TRISÓDICO WWWW",
+            Sequence: 12,
+            RequiredVolumeMl: 12.5m,
+            Tests: string.Join(", ", Enumerable.Repeat("HEMOGRAMA COMPLETO CON DIFERENCIAL MMMM", 12)),
+            OrderNumber: "ORD-20261109-000123-WWWWWWWWWW",
+            PrintedAt: DateTimeOffset.UtcNow);
+
+        var bytes = renderer.Render(new SpecimenLabelSheet([page, page with { Sequence = 13 }]));
+
+        using var ms = new MemoryStream(bytes);
+        using var pdf = PdfReader.Open(ms, PdfDocumentOpenMode.InformationOnly);
+        Assert.Equal(2, pdf.PageCount);
+    }
+
+    [Theory]
+    [MemberData(nameof(StandardFormats))]
+    public void Render_WithTypicalContent_StaysOnOneLabel(
+        string name, decimal widthMm, decimal heightMm, decimal marginMm)
+    {
+        var renderer = new SpecimenLabelPdfRenderer();
+        var format = new SpecimenLabelFormat(name, widthMm, heightMm, marginMm, 0.5m, -0.5m);
+
+        var bytes = renderer.Render(new SpecimenLabelSheet([Page(format)]));
+
+        using var ms = new MemoryStream(bytes);
+        using var pdf = PdfReader.Open(ms, PdfDocumentOpenMode.InformationOnly);
+        Assert.Equal(1, pdf.PageCount);
+    }
+
     [Fact]
     public void Render_WithMixedFormats_ProducesOnePageOfEachSize()
     {
