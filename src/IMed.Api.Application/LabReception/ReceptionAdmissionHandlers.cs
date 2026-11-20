@@ -141,6 +141,7 @@ public sealed class CreateExternalOrderMultiHandler(
         }
 
         // Antes de crear nada en HAPI: una orden a medio crear deja exámenes sueltos.
+        RejectDuplicates(cmd.Exams);
         await ValidateAgainstCatalogAsync(cmd.OrganizationId, cmd.Exams, ct);
 
         var partition = LabRouting.PartitionOf(cmd.OrganizationId);
@@ -196,6 +197,30 @@ public sealed class CreateExternalOrderMultiHandler(
     /// ayuno y rangos. Si dos pruebas comparten LOINC, o una prueba comparte código con un panel,
     /// la orden terminaría resolviendo a otra, con la parametrización de otra.</para>
     /// </summary>
+    /// <summary>
+    /// El mismo examen o panel dos veces en una orden se procesaría y cobraría dos veces: dos
+    /// tubos, dos cargos, dos resultados. Se identifica por su código del catálogo (o LOINC, o el
+    /// texto si no trae códigos).
+    /// </summary>
+    public static void RejectDuplicates(IReadOnlyList<ExternalOrderExam> exams)
+    {
+        var vistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in exams)
+        {
+            var clave = !string.IsNullOrWhiteSpace(e.LocalCode)
+                ? $"{e.LocalSystem}|{e.LocalCode.Trim()}"
+                : !string.IsNullOrWhiteSpace(e.LoincCode)
+                    ? $"loinc|{e.LoincCode.Trim()}"
+                    : $"texto|{e.CodeText.Trim()}";
+            if (!vistos.Add(clave))
+            {
+                throw new ArgumentException(
+                    $"{e.CodeDisplay ?? e.CodeText} está repetido en la orden: cada examen o panel va una sola vez.",
+                    nameof(exams));
+            }
+        }
+    }
+
     private async Task ValidateAgainstCatalogAsync(
         Guid orgId, IReadOnlyList<ExternalOrderExam> exams, CancellationToken ct)
     {
