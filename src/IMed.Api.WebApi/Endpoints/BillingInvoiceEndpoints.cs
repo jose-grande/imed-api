@@ -10,8 +10,9 @@ namespace IMed.Api.WebApi.Endpoints;
 /// <summary>
 /// Facturas y timbrado (FAC-5, pantallas B8 y B9). Bajo <c>/api/billing/invoices</c>.
 ///
-/// <para>Emitir es de quien cobra; anular es del jefe administrativo. La diferencia importa: una
-/// anulación consume un correlativo que después hay que explicar ante una auditoría.</para>
+/// <para>Emitir es de quien cobra o de quien factura (<c>billing.invoice</c>); anular es del jefe
+/// administrativo. La diferencia importa: una anulación consume un correlativo que después hay que
+/// explicar ante una auditoría.</para>
 /// </summary>
 public static class BillingInvoiceEndpoints
 {
@@ -23,8 +24,11 @@ public static class BillingInvoiceEndpoints
 
         group.MapPost("/", IssueAsync)
             .WithName("IssueInvoice")
-            .WithSummary("Emite y timbra una factura con los cargos pendientes de una cuenta.")
-            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingCollect));
+            .WithSummary("Emite y timbra una factura con los cargos pendientes de una cuenta. Pide billing.collect o billing.invoice.");
+
+        group.MapGet("/", SearchAsync)
+            .WithName("SearchInvoices")
+            .WithSummary("Busca facturas emitidas por número, comprador, fecha, estado o sede.");
 
         group.MapGet("/{invoiceId:guid}", GetAsync)
             .WithName("GetInvoice")
@@ -109,12 +113,18 @@ public static class BillingInvoiceEndpoints
 
     private static async Task<IResult> IssueAsync(
         IssueInvoiceRequest request, ClaimsPrincipal principal,
-        IssueInvoiceHandler handler, ResolveActiveLocationHandler activeLocation, CancellationToken ct)
+        IssueInvoiceHandler handler, ResolveActiveLocationHandler activeLocation,
+        IPermissionResolver permisos, CancellationToken ct)
     {
         var orgId = ParseOrganizationId(principal);
         if (orgId is null)
         {
             return Forbidden();
+        }
+        if (!await EndpointRun.HasAsync(principal, permisos, orgId.Value, PermissionCatalog.BillingCollect, ct)
+            && !await EndpointRun.HasAsync(principal, permisos, orgId.Value, PermissionCatalog.BillingInvoice, ct))
+        {
+            return EndpointRun.Forbidden("Emitir facturas pide el permiso de cobrar o el de facturar.");
         }
 
         // La sede de emisión no se acepta a ciegas del cuerpo (FAC-9, D4): es la sede activa del
@@ -151,6 +161,12 @@ public static class BillingInvoiceEndpoints
 
         return Results.Created($"/api/billing/invoices/{resultado.Invoice!.Id}", resultado.Invoice);
     }
+
+    private static Task<IResult> SearchAsync(
+        string? q, DateOnly? from, DateOnly? to, string? status, bool? withBalance, Guid? locationId, int? limit,
+        ClaimsPrincipal principal, SearchInvoicesHandler handler, CancellationToken ct) =>
+        EndpointRun.Org(principal, async org => Results.Ok(await handler.HandleAsync(
+            new SearchInvoicesQuery(org, q, from, to, status, withBalance == true, locationId, limit ?? 50), ct)));
 
     private static async Task<IResult> GetAsync(
         Guid invoiceId, ClaimsPrincipal principal, GetInvoiceHandler handler, CancellationToken ct)

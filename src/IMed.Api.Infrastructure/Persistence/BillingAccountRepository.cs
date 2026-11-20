@@ -1,5 +1,6 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Billing.Accounts;
+using IMed.Api.Domain.Billing.Invoicing;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -24,23 +25,122 @@ public sealed class BillingAccountRepository(AppDbContext db) : IBillingAccountR
             .FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.EncounterFhirId == enc, ct);
     }
 
-    public async Task<IReadOnlyList<BillingAccount>> SearchAccountsAsync(
-        Guid organizationId, string? patientFhirId, string? status, int limit, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AccountSearchRow>> SearchAccountsAsync(
+        AccountSearchCriteria criteria, CancellationToken ct = default)
     {
-        var q = db.BillingAccounts.AsNoTracking().Where(x => x.OrganizationId == organizationId);
+        var c = criteria;
+        var org = c.OrganizationId;
+        var q = db.BillingAccounts.AsNoTracking().Where(x => x.OrganizationId == org);
 
-        if (!string.IsNullOrWhiteSpace(patientFhirId))
+        if (!string.IsNullOrWhiteSpace(c.PatientFhirId))
         {
-            var p = patientFhirId.Trim();
+            var p = c.PatientFhirId.Trim();
             q = q.Where(x => x.PatientFhirId == p);
         }
-        if (Enum.TryParse<BillingAccountStatus>(status, ignoreCase: true, out var st))
+        if (c.Status is { } st)
         {
             q = q.Where(x => x.Status == st);
         }
+        if (c.Origin is { } origen)
+        {
+            q = q.Where(x => x.Origin == origen);
+        }
+        if (c.OpenedFrom is { } desde)
+        {
+            q = q.Where(x => x.OpenedAt >= desde);
+        }
+        if (c.OpenedBefore is { } hasta)
+        {
+            q = q.Where(x => x.OpenedAt < hasta);
+        }
+        if (!string.IsNullOrWhiteSpace(c.Text))
+        {
+            var texto = c.Text.Trim();
+            var patron = $"%{EscapeLike(texto)}%";
+            q = q.Where(x =>
+                x.PatientFhirId == texto
+                || (x.OriginRef != null && EF.Functions.ILike(x.OriginRef, patron))
+                || db.Parties.Any(p => p.Id == x.PartyId
+                                       && p.OrganizationId == org
+                                       && (EF.Functions.ILike(p.LegalName, patron)
+                                           || (p.TaxId != null && EF.Functions.ILike(p.TaxId, patron)))));
+        }
+        if (c.LocationId is { } sede)
+        {
+            q = q.Where(x =>
+                db.BillingCharges.Any(ch => ch.OrganizationId == org && ch.AccountId == x.Id && ch.LocationId == sede)
+                || db.Invoices.Any(i => i.OrganizationId == org && i.AccountId == x.Id && i.LocationId == sede));
+        }
 
-        return await q.OrderByDescending(x => x.OpenedAt).Take(Math.Clamp(limit, 1, 200)).ToListAsync(ct);
+        var filas = q.Select(x => new
+        {
+            Account = x,
+            Uninvoiced = db.BillingCharges.Any(ch =>
+                ch.OrganizationId == org && ch.AccountId == x.Id && ch.Status == ChargeStatus.Captured),
+            PricePending = db.BillingCharges.Any(ch =>
+                ch.OrganizationId == org && ch.AccountId == x.Id && ch.Status == ChargeStatus.Captured && ch.PricePending),
+            Live = db.BillingCharges.Any(ch =>
+                ch.OrganizationId == org && ch.AccountId == x.Id && ch.Status != ChargeStatus.Reversed),
+            Invoiced = db.Invoices.Any(i =>
+                i.OrganizationId == org && i.AccountId == x.Id
+                && i.Status != InvoiceStatus.Draft && i.Status != InvoiceStatus.Voided),
+            Balance = db.Invoices
+                .Where(i => i.OrganizationId == org && i.AccountId == x.Id
+                            && i.Status != InvoiceStatus.Draft && i.Status != InvoiceStatus.Voided
+                            && i.Balance > 0)
+                .Sum(i => (decimal?)i.Balance) ?? 0m,
+            OpenInvoices = db.Invoices.Count(i =>
+                i.OrganizationId == org && i.AccountId == x.Id
+                && i.Status != InvoiceStatus.Draft && i.Status != InvoiceStatus.Voided
+                && i.Balance > 0),
+        });
+
+        filas = c.Situation switch
+        {
+            AccountBillingSituation.ToInvoice =>
+                filas.Where(f => f.Account.Status != BillingAccountStatus.Voided && f.Uninvoiced),
+            AccountBillingSituation.ToCollect =>
+                filas.Where(f => f.OpenInvoices > 0),
+            AccountBillingSituation.Pending =>
+                filas.Where(f => (f.Account.Status != BillingAccountStatus.Voided && f.Uninvoiced) || f.OpenInvoices > 0),
+            AccountBillingSituation.Settled =>
+                filas.Where(f => f.Account.Status != BillingAccountStatus.Voided
+                                 && !f.Uninvoiced && f.OpenInvoices == 0 && f.Invoiced),
+            AccountBillingSituation.Empty =>
+                filas.Where(f => f.Account.Status != BillingAccountStatus.Voided && !f.Live && !f.Invoiced),
+            AccountBillingSituation.Voided =>
+                filas.Where(f => f.Account.Status == BillingAccountStatus.Voided),
+            _ => filas,
+        };
+
+        var lista = await filas
+            .OrderByDescending(f => f.Account.OpenedAt)
+            .Take(Math.Clamp(c.Limit, 1, 200))
+            .ToListAsync(ct);
+
+        return lista
+            .Select(f => new AccountSearchRow(
+                f.Account, f.Uninvoiced, f.PricePending, f.Live, f.Invoiced, f.Balance, f.OpenInvoices))
+            .ToList();
     }
+
+    public async Task<IReadOnlyList<BillingCharge>> ListCapturedChargesAsync(
+        Guid organizationId, IReadOnlyCollection<Guid> accountIds, CancellationToken ct = default)
+    {
+        if (accountIds.Count == 0)
+        {
+            return [];
+        }
+        return await db.BillingCharges.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId
+                        && accountIds.Contains(x.AccountId)
+                        && x.Status == ChargeStatus.Captured)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Lo que el usuario escribe se busca literal: <c>%</c> y <c>_</c> no son comodines.</summary>
+    private static string EscapeLike(string texto) =>
+        texto.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     public async Task AddAccountAsync(BillingAccount account, CancellationToken ct = default)
     {

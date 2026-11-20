@@ -10,8 +10,17 @@ public interface IBillingAccountRepository
     Task<BillingAccount?> FindByEncounterAsync(
         Guid organizationId, string encounterFhirId, CancellationToken ct = default);
 
-    Task<IReadOnlyList<BillingAccount>> SearchAccountsAsync(
-        Guid organizationId, string? patientFhirId, string? status, int limit, CancellationToken ct = default);
+    /// <summary>
+    /// Busca cuentas con su situación de cobro calculada en la misma consulta. El filtro de
+    /// situación se aplica antes del límite: si se aplicara después, "por cobrar" devolvería las
+    /// que tuvieron la suerte de caer entre las primeras N.
+    /// </summary>
+    Task<IReadOnlyList<AccountSearchRow>> SearchAccountsAsync(
+        AccountSearchCriteria criteria, CancellationToken ct = default);
+
+    /// <summary>Cargos capturados (sin facturar) de varias cuentas, en un solo viaje.</summary>
+    Task<IReadOnlyList<BillingCharge>> ListCapturedChargesAsync(
+        Guid organizationId, IReadOnlyCollection<Guid> accountIds, CancellationToken ct = default);
 
     Task AddAccountAsync(BillingAccount account, CancellationToken ct = default);
 
@@ -97,3 +106,54 @@ public interface IBillingAccountRepository
     Task<IReadOnlyList<BillingCharge>> ListPricePendingChargesForUpdateAsync(
         Guid organizationId, Guid billableItemId, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Situación de cobro de una cuenta. <b>Se calcula</b> de sus cargos y facturas, no se guarda: el
+/// estado guardado (<see cref="BillingAccountStatus"/>) dice si la cuenta acepta cargos, no si hay
+/// algo que cobrar, y una cuenta abierta puede tener a la vez cargos sin facturar y una factura con
+/// saldo.
+/// </summary>
+public enum AccountBillingSituation
+{
+    /// <summary>Tiene cargos capturados que todavía no salieron en una factura.</summary>
+    ToInvoice,
+
+    /// <summary>Tiene facturas emitidas con saldo.</summary>
+    ToCollect,
+
+    /// <summary>Filtro: por facturar o por cobrar. Es la bandeja de trabajo.</summary>
+    Pending,
+
+    /// <summary>Todo facturado y pagado.</summary>
+    Settled,
+
+    /// <summary>Sin cargos vivos ni facturas.</summary>
+    Empty,
+
+    /// <summary>Cuenta anulada.</summary>
+    Voided,
+}
+
+/// <param name="Text">Nombre o RTN del cliente, número de orden (ORD-…) o id del paciente.</param>
+/// <param name="LocationId">Cuentas con algún cargo o factura en esa sede.</param>
+public sealed record AccountSearchCriteria(
+    Guid OrganizationId,
+    string? PatientFhirId = null,
+    BillingAccountStatus? Status = null,
+    AccountBillingSituation? Situation = null,
+    BillingAccountOrigin? Origin = null,
+    string? Text = null,
+    Guid? LocationId = null,
+    DateTimeOffset? OpenedFrom = null,
+    DateTimeOffset? OpenedBefore = null,
+    int Limit = 50);
+
+/// <summary>Una cuenta con lo necesario para saber qué falta hacer con ella.</summary>
+public sealed record AccountSearchRow(
+    BillingAccount Account,
+    bool HasUninvoicedCharges,
+    bool HasPricePendingCharges,
+    bool HasLiveCharges,
+    bool HasInvoices,
+    decimal BalanceDue,
+    int OpenInvoiceCount);

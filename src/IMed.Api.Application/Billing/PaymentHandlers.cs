@@ -238,12 +238,38 @@ public sealed class ReceivePaymentHandler(
             p.Allocations.Select(a => new PaymentAllocationDto(a.InvoiceId, a.Amount)).ToList());
 }
 
+/// <summary>Cobros de un turno, o por qué no se pueden ver.</summary>
+public sealed record SessionPaymentsResult(IReadOnlyList<PaymentDto>? Payments, bool NotFound, bool Forbidden)
+{
+    public static SessionPaymentsResult Ok(IReadOnlyList<PaymentDto> pagos) => new(pagos, false, false);
+    public static readonly SessionPaymentsResult Missing = new(null, true, false);
+    public static readonly SessionPaymentsResult Denied = new(null, false, true);
+}
+
+/// <summary>
+/// Cobros de un turno, uno por uno.
+///
+/// <para><b>Con el turno abierto solo los ve quien supervisa la facturación.</b> La lista incluye
+/// el efectivo: sumarla da el esperado, y el arqueo es a ciegas. El cajero ve lo que necesita para
+/// cerrar en <see cref="GetSessionTenderSummaryHandler"/>, que oculta el efectivo hasta el cierre.
+/// Con el turno cerrado ya no hay nada que proteger.</para>
+/// </summary>
 public sealed class ListSessionPaymentsHandler(ICashRepository cash)
 {
-    public async Task<IReadOnlyList<PaymentDto>> HandleAsync(
-        Guid orgId, Guid sessionId, CancellationToken ct = default)
+    /// <param name="canSeeOpenSession">Tiene <c>billing.supervise</c>.</param>
+    public async Task<SessionPaymentsResult> HandleAsync(
+        Guid orgId, Guid sessionId, bool canSeeOpenSession, CancellationToken ct = default)
     {
+        var turno = await cash.GetSessionAsync(orgId, sessionId, ct);
+        if (turno is null)
+        {
+            return SessionPaymentsResult.Missing;
+        }
+        if (turno.IsOpen && !canSeeOpenSession)
+        {
+            return SessionPaymentsResult.Denied;
+        }
         var pagos = await cash.ListPaymentsAsync(orgId, sessionId, ct);
-        return pagos.Select(ReceivePaymentHandler.ToDto).ToList();
+        return SessionPaymentsResult.Ok(pagos.Select(ReceivePaymentHandler.ToDto).ToList());
     }
 }

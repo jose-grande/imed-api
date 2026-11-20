@@ -250,7 +250,7 @@ public sealed class BillingHardeningTests(ImedApiFixture fixture) : IAsyncLifeti
         (await sp.GetRequiredService<ListCashPointsHandler>()
             .HandleAsync(otra, null, allLocations: true)).Should().BeEmpty("cajas");
         (await sp.GetRequiredService<SearchAccountsHandler>()
-            .HandleAsync(otra, null, null, 50)).Should().BeEmpty("cuentas");
+            .HandleAsync(new SearchAccountsQuery(otra))).Should().BeEmpty("cuentas");
     }
 
     [Fact]

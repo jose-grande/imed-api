@@ -66,13 +66,8 @@ public sealed class LabOrderCheckoutHandler(
     IHapiFhirClient hapi,
     IBillingAccountRepository accounts,
     IInvoiceRepository invoices,
-    IFiscalRepository fiscal,
-    ICashRepository cash,
     GetAccountStatementHandler statement,
-    IssueInvoiceHandler issueInvoice,
-    ReceivePaymentHandler receivePayment,
-    ResolveActiveLocationHandler activeLocation,
-    ILogger<LabOrderCheckoutHandler> logger)
+    AccountCheckoutHandler checkout)
 {
     public async Task<LabCheckoutDto?> GetAsync(
         Guid organizationId, Guid userId, string requisition, CancellationToken ct = default)
@@ -120,7 +115,7 @@ public sealed class LabOrderCheckoutHandler(
             bloqueoFactura = "La orden ya está facturada y pagada.";
         }
 
-        var (cajaNombre, bloqueoCobro) = await CajaAsync(organizationId, userId, ct);
+        var (cajaNombre, bloqueoCobro) = await checkout.CashStateAsync(organizationId, userId, ct);
         return new LabCheckoutDto(
             req, false, estado, facturas,
             PendingToInvoice: porFacturar.Sum(c => c.Total),
@@ -128,6 +123,11 @@ public sealed class LabOrderCheckoutHandler(
             bloqueoFactura, bloqueoCobro, cajaNombre);
     }
 
+    /// <summary>
+    /// Factura y cobra la orden con el mismo cobro de cuentas que la Caja
+    /// (<see cref="AccountCheckoutHandler"/>). Lo propio de la recepción es solo ubicar la cuenta
+    /// por el número de orden y rechazar las órdenes de consulta.
+    /// </summary>
     public async Task<LabCheckoutResult?> CheckoutAsync(
         Guid organizationId, Guid userId, string requisition, LabCheckoutInput input, CancellationToken ct = default)
     {
@@ -141,98 +141,20 @@ public sealed class LabOrderCheckoutHandler(
             throw new InvalidOperationException(antes.InvoiceBlocker);
         }
         // "Ya facturada y pagada" no es un error: es lo que pasa al apretar dos veces.
-        if (antes.InvoiceBlocker is { } bloqueo && !(antes.PendingToInvoice == 0 && antes.BalanceDue <= 0 && antes.Invoices.Count > 0))
+        if (antes.PendingToInvoice == 0 && antes.BalanceDue <= 0 && antes.Invoices.Count > 0)
+        {
+            return new LabCheckoutResult(antes, null, null, null);
+        }
+        if (antes.InvoiceBlocker is { } bloqueo)
         {
             throw new InvalidOperationException(bloqueo);
         }
-        var cobrar = input.Tenders is { Count: > 0 };
-        if (cobrar && antes.CollectBlocker is { } sinCaja)
-        {
-            throw new InvalidOperationException(sinCaja);
-        }
 
-        var cuentaId = antes.Statement!.Account.Id;
-        InvoiceDto? factura = null;
-        IssueRejection? rechazo = null;
-        if (antes.Statement.Charges.Any(c => c.Status == nameof(ChargeStatus.Captured)))
-        {
-            (factura, rechazo) = await FacturarAsync(organizationId, userId, cuentaId, input, ct);
-        }
-
-        ReceivePaymentResult? pago = null;
-        if (cobrar && rechazo is null)
-        {
-            var porCobrar = (await invoices.ListByAccountAsync(organizationId, cuentaId, ct))
-                .Where(f => f.Status != InvoiceStatus.Voided && f.Status != InvoiceStatus.Draft && f.Balance > 0)
-                .ToList();
-            if (porCobrar.Count > 0)
-            {
-                var turno = await cash.FindOpenSessionByCashierAsync(organizationId, userId, ct)
-                    ?? throw new InvalidOperationException("No hay turno de caja abierto.");
-                pago = await receivePayment.HandleAsync(new ReceivePaymentCommand(
-                    organizationId, turno.Id, porCobrar[0].BillToPartyId, userId,
-                    porCobrar.Select(f => f.Id).ToList(), input.Tenders!), ct);
-                if (!pago.Succeeded)
-                {
-                    logger.LogInformation(
-                        "Orden {Requisition}: facturada, cobro rechazado ({Code}).", antes.Requisition, pago.Code);
-                }
-            }
-        }
+        var r = await checkout.CheckoutAsync(
+            organizationId, userId, antes.Statement!.Account.Id,
+            new AccountCheckoutInput(input.BuyerName, input.BuyerTaxId, input.Tenders), ct);
 
         var despues = (await GetAsync(organizationId, userId, requisition, ct))!;
-        return new LabCheckoutResult(despues, factura, rechazo, pago);
-    }
-
-    private async Task<(InvoiceDto?, IssueRejection?)> FacturarAsync(
-        Guid organizationId, Guid userId, Guid accountId, LabCheckoutInput input, CancellationToken ct)
-    {
-        var tipo = (await fiscal.ListDocumentTypesAsync(organizationId, ct)).FirstOrDefault(t => t.Code == "factura");
-        if (tipo is null)
-        {
-            return (null, new IssueRejection("sin_regimen", "La organización no tiene régimen fiscal configurado."));
-        }
-        // La sede de emisión es la activa del usuario (FAC-9, D4); la emisión exige además que sea
-        // la de su caja si tiene turno.
-        var sede = await activeLocation.HandleAsync(organizationId, userId, null, ct);
-        var r = await issueInvoice.HandleAsync(new IssueInvoiceCommand(
-            organizationId, accountId, sede, tipo.Id,
-            BuyerTaxId: string.IsNullOrWhiteSpace(input.BuyerTaxId) ? null : input.BuyerTaxId.Trim(),
-            BuyerName: string.IsNullOrWhiteSpace(input.BuyerName) ? null : input.BuyerName.Trim(),
-            UserId: userId), ct);
-        // Otro clic ganó la emisión: no es un error, la factura ya existe y se cobra esa.
-        if (r.Rejected is { Code: "sin_cargos" })
-        {
-            return (null, null);
-        }
-        return r.Succeeded ? (r.Invoice, null) : (null, r.Rejected);
-    }
-
-    /// <summary>
-    /// ¿Puede cobrar acá? Un turno abierto en una caja de servicios o mixta de la sede activa. La
-    /// farmacia cobra en las de farmacia; un examen es un servicio.
-    /// </summary>
-    private async Task<(string? Caja, string? Bloqueo)> CajaAsync(Guid organizationId, Guid userId, CancellationToken ct)
-    {
-        var turno = await cash.FindOpenSessionByCashierAsync(organizationId, userId, ct);
-        if (turno is null)
-        {
-            return (null, "Para cobrar abrí un turno en una caja de servicios o mixta (Facturación → Caja).");
-        }
-        var caja = await fiscal.GetCashPointAsync(organizationId, turno.CashPointId, ct);
-        if (caja is null)
-        {
-            return (null, "La caja del turno abierto no existe.");
-        }
-        var sede = await activeLocation.HandleAsync(organizationId, userId, null, ct);
-        if (caja.LocationId != sede)
-        {
-            return (caja.Name, $"Tu turno está abierto en la caja {caja.Name}, de otra sede. Cambiá la sede activa a esa sede o cerrá el turno.");
-        }
-        if (caja.Profile is not (CashPointProfile.Services or CashPointProfile.Mixed))
-        {
-            return (caja.Name, $"La caja {caja.Name} es de farmacia: los exámenes se cobran en una caja de servicios o mixta.");
-        }
-        return (caja.Name, null);
+        return new LabCheckoutResult(despues, r?.Invoice, r?.InvoiceRejected, r?.Payment);
     }
 }

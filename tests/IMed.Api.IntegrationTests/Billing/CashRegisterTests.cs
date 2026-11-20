@@ -94,6 +94,72 @@ public sealed class CashRegisterTests(ImedApiFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ElResumenDelTurno_muestraTarjetaYReferencias_peroNoElEfectivo_hastaCerrar()
+    {
+        // Efectivo a ciegas, lo demás a la vista: la tarjeta se cuadra contra el cierre de lote del
+        // POS, y para eso el cajero necesita ver el total y cada voucher.
+        var e = await ArrangeAsync();
+        using var scope = fixture.Factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+        var cajero = Guid.NewGuid();
+        var turnoId = await AbrirTurnoAsync(sp, e, cajero, inicial: 100m);
+
+        var f1 = await FacturarAsync(sp, e, "sr-1");
+        await sp.GetRequiredService<ReceivePaymentHandler>().HandleAsync(new ReceivePaymentCommand(
+            e.OrgId, turnoId, e.PartyId, cajero, [f1.Id], [new TenderLine("Card", f1.Total, "V-48211")]));
+        var f2 = await FacturarAsync(sp, e, "sr-2");
+        await sp.GetRequiredService<ReceivePaymentHandler>().HandleAsync(new ReceivePaymentCommand(
+            e.OrgId, turnoId, e.PartyId, cajero, [f2.Id], [new TenderLine("Cash", f2.Total + 100m, null)]));
+
+        var resumen = sp.GetRequiredService<GetSessionTenderSummaryHandler>();
+        var abierto = await resumen.HandleAsync(e.OrgId, turnoId);
+
+        abierto!.IsClosed.Should().BeFalse();
+        abierto.Cash.Should().BeNull("el arqueo del efectivo es a ciegas");
+        abierto.Groups.Should().ContainSingle().Which.Method.Should().Be("Card");
+        abierto.Groups[0].Total.Should().Be(f1.Total);
+        abierto.Groups[0].Lines.Should().ContainSingle().Which.Reference.Should().Be("V-48211");
+
+        await sp.GetRequiredService<CloseCashSessionHandler>().HandleAsync(
+            new CloseCashSessionCommand(e.OrgId, turnoId, cajero, 100m + f2.Total, null, null));
+
+        var cerrado = await resumen.HandleAsync(e.OrgId, turnoId);
+        cerrado!.IsClosed.Should().BeTrue();
+        cerrado.Groups.Select(g => g.Method).Should().BeEquivalentTo(["Cash", "Card"]);
+        cerrado.Groups.Single(g => g.Method == "Cash").Total.Should().Be(f2.Total, "neto de vuelto");
+        cerrado.Cash!.Expected.Should().Be(100m + f2.Total);
+        cerrado.Cash.Difference.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task LosCobrosUnoPorUno_conElTurnoAbierto_soloLosVeElSupervisor()
+    {
+        // La lista incluye el efectivo: sumarla da el esperado y el arqueo dejaría de ser a ciegas.
+        var e = await ArrangeAsync();
+        using var scope = fixture.Factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+        var cajero = Guid.NewGuid();
+        var turnoId = await AbrirTurnoAsync(sp, e, cajero, inicial: 0m);
+        var f = await FacturarAsync(sp, e, "sr-1");
+        await sp.GetRequiredService<ReceivePaymentHandler>().HandleAsync(new ReceivePaymentCommand(
+            e.OrgId, turnoId, e.PartyId, cajero, [f.Id], [new TenderLine("Cash", f.Total, null)]));
+        var listar = sp.GetRequiredService<ListSessionPaymentsHandler>();
+
+        (await listar.HandleAsync(e.OrgId, turnoId, canSeeOpenSession: false)).Forbidden
+            .Should().BeTrue("el cajero no puede sumar su esperado antes de contar");
+        (await listar.HandleAsync(e.OrgId, turnoId, canSeeOpenSession: true)).Payments
+            .Should().ContainSingle("el jefe administrativo sí, para supervisar en vivo");
+
+        await sp.GetRequiredService<CloseCashSessionHandler>().HandleAsync(
+            new CloseCashSessionCommand(e.OrgId, turnoId, cajero, f.Total, null, null));
+        (await listar.HandleAsync(e.OrgId, turnoId, canSeeOpenSession: false)).Payments
+            .Should().ContainSingle("cerrado el turno ya no hay nada que proteger");
+
+        (await listar.HandleAsync(Guid.NewGuid(), turnoId, canSeeOpenSession: true)).NotFound
+            .Should().BeTrue("otra organización no ve el turno");
+    }
+
+    [Fact]
     public async Task ElArqueo_noRevelaElEsperadoAntesDelConteo()
     {
         // 🔴 Criterio de aceptación 4, y la decisión que hay que defender cuando alguien pida

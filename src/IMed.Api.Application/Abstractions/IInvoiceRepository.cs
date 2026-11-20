@@ -22,6 +22,13 @@ public interface IInvoiceRepository
         Guid organizationId, Guid accountId, CancellationToken ct = default);
 
     /// <summary>Busca por el número que el paciente trae escrito en el papel.</summary>
+    /// <summary>
+    /// Facturas emitidas que coinciden: número fiscal, nombre o RTN del comprador; por fecha de
+    /// emisión, estado y sede. Las más recientes primero.
+    /// </summary>
+    Task<IReadOnlyList<(Invoice Invoice, FiscalDocument Document)>> SearchAsync(
+        InvoiceSearchCriteria criteria, CancellationToken ct = default);
+
     Task<FiscalDocument?> FindByFullNumberAsync(
         Guid organizationId, string fullNumber, CancellationToken ct = default);
 
@@ -46,3 +53,15 @@ public interface IInvoiceRepository
 
     Task SaveVoidAsync(Invoice invoice, FiscalDocument document, CancellationToken ct = default);
 }
+
+/// <param name="Text">Número fiscal (completo o en parte), nombre o RTN del comprador.</param>
+/// <param name="OnlyWithBalance">Solo las que tienen saldo pendiente.</param>
+public sealed record InvoiceSearchCriteria(
+    Guid OrganizationId,
+    string? Text = null,
+    DateTimeOffset? IssuedFrom = null,
+    DateTimeOffset? IssuedBefore = null,
+    InvoiceStatus? Status = null,
+    bool OnlyWithBalance = false,
+    Guid? LocationId = null,
+    int Limit = 50);

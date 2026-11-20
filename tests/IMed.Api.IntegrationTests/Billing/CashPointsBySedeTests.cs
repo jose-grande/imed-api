@@ -92,4 +92,37 @@ public sealed class CashPointsBySedeTests(ImedApiFixture fixture) : IAsyncLifeti
         (await abrir.HandleAsync(red.OrgId, red.CajaCeiba, supervisor, 100m, anyLocation: true))
             .Succeeded.Should().BeTrue("quien administra la facturación opera cualquier caja");
     }
+
+    [Fact]
+    public async Task ConTurnoAbierto_laListaDiceQuienLaOpera_yNoSePuedeDeshabilitar()
+    {
+        // Observación: "habilitada" y "operando" se mostraban igual ("Abierta"). Ahora la lista
+        // trae el turno, y deshabilitar una caja con turno abierto dejaría efectivo sin arqueo.
+        var red = await DosSedesConCajaAsync();
+        var cajero = Guid.NewGuid();
+        using var scope = fixture.Factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+
+        var recienCreada = (await sp.GetRequiredService<ListCashPointsHandler>()
+            .HandleAsync(red.OrgId, null, allLocations: true)).Single(c => c.Id == red.CajaCeiba);
+        recienCreada.Active.Should().BeTrue();
+        recienCreada.OpenShift.Should().BeNull("crear una caja no abre un turno");
+
+        (await sp.GetRequiredService<OpenCashSessionHandler>()
+            .HandleAsync(red.OrgId, red.CajaCeiba, cajero, 100m, anyLocation: true))
+            .Succeeded.Should().BeTrue();
+
+        var operando = (await sp.GetRequiredService<ListCashPointsHandler>()
+            .HandleAsync(red.OrgId, null, allLocations: true)).Single(c => c.Id == red.CajaCeiba);
+        operando.OpenShift.Should().NotBeNull();
+        operando.OpenShift!.CashierUserId.Should().Be(cajero);
+
+        var deshabilitar = () => sp.GetRequiredService<SetCashPointActiveHandler>()
+            .HandleAsync(red.OrgId, red.CajaCeiba, active: false);
+        await deshabilitar.Should().ThrowAsync<InvalidOperationException>().WithMessage("*turno abierto*");
+
+        (await sp.GetRequiredService<SetCashPointActiveHandler>()
+            .HandleAsync(red.OrgId, red.CajaTegucigalpa, active: false))!
+            .Active.Should().BeFalse("sin turno abierto sí se deshabilita");
+    }
 }

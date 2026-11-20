@@ -84,7 +84,7 @@ public sealed class OpenCashSessionHandler(
         }
         if (!caja.Active)
         {
-            return CashResult.Reject("caja_cerrada", $"La caja '{caja.Name}' está cerrada.");
+            return CashResult.Reject("caja_cerrada", $"La caja '{caja.Name}' está deshabilitada.");
         }
 
         if (!anyLocation)
@@ -305,6 +305,93 @@ public sealed class RegisterCashMovementHandler(ICashRepository cash)
 }
 
 /// <summary>Estado del turno abierto de un cajero, sin revelar el esperado.</summary>
+/// <summary>Un cobro que no es efectivo, con lo que hace falta para buscarlo en el comprobante.</summary>
+public sealed record TenderLineDto(Guid PaymentId, string? Reference, decimal Amount, DateTimeOffset ReceivedAt);
+
+/// <summary>Los cobros de un método en el turno.</summary>
+public sealed record TenderGroupDto(string Method, int Count, decimal Total, IReadOnlyList<TenderLineDto> Lines);
+
+/// <summary>El arqueo del efectivo. Solo existe con el turno cerrado.</summary>
+public sealed record CashCountDto(
+    decimal OpeningAmount,
+    decimal CashCollected,
+    decimal Movements,
+    decimal Expected,
+    decimal? Counted,
+    decimal? Difference);
+
+/// <summary>
+/// Lo cobrado en el turno, por método.
+/// </summary>
+/// <param name="Groups">
+/// Tarjeta, transferencia, cheque y crédito siempre; el efectivo solo con el turno cerrado.
+/// </param>
+/// <param name="Cash">El arqueo del efectivo; null mientras el turno esté abierto.</param>
+public sealed record SessionTenderSummaryDto(
+    Guid SessionId,
+    bool IsClosed,
+    IReadOnlyList<TenderGroupDto> Groups,
+    CashCountDto? Cash);
+
+/// <summary>
+/// Resumen del turno por método de pago, para el cierre.
+///
+/// <para><b>El efectivo, a ciegas; lo demás, a la vista.</b> El efectivo se cuenta en la gaveta: si
+/// el cajero viera cuánto debería haber, registraría ese número y no lo que hay. Tarjeta,
+/// transferencia y cheque no se cuentan: se cuadran contra otro papel —el cierre de lote del POS,
+/// el estado de cuenta, los cheques físicos— y para eso el cajero necesita ver el total y cada
+/// referencia. Un voucher mal digitado se detecta en el turno y no a fin de mes.</para>
+///
+/// <para>Con el turno cerrado se agrega el efectivo, con su arqueo completo.</para>
+/// </summary>
+public sealed class GetSessionTenderSummaryHandler(ICashRepository cash, CashExpectationCalculator calculator)
+{
+    public async Task<SessionTenderSummaryDto?> HandleAsync(
+        Guid orgId, Guid sessionId, CancellationToken ct = default)
+    {
+        var turno = await cash.GetSessionAsync(orgId, sessionId, ct);
+        if (turno is null)
+        {
+            return null;
+        }
+
+        var pagos = (await cash.ListPaymentsAsync(orgId, sessionId, ct))
+            .Where(p => p.Status == PaymentStatus.Applied)
+            .ToList();
+        var cerrado = !turno.IsOpen;
+
+        var grupos = pagos
+            .Where(p => cerrado || p.Method != PaymentMethod.Cash)
+            .GroupBy(p => p.Method)
+            .OrderBy(g => g.Key)
+            .Select(g => new TenderGroupDto(
+                g.Key.ToString(),
+                g.Count(),
+                // En efectivo, neto de vuelto: es lo que quedó en la gaveta.
+                Math.Round(g.Sum(p => g.Key == PaymentMethod.Cash ? p.CashImpact : p.Amount), 2, MidpointRounding.AwayFromZero),
+                g.OrderBy(p => p.ReceivedAt)
+                    .Select(p => new TenderLineDto(
+                        p.Id, p.Reference, g.Key == PaymentMethod.Cash ? p.CashImpact : p.Amount, p.ReceivedAt))
+                    .ToList()))
+            .ToList();
+
+        CashCountDto? arqueo = null;
+        if (cerrado)
+        {
+            var movimientos = await cash.ListMovementsAsync(orgId, sessionId, ct);
+            arqueo = new CashCountDto(
+                turno.OpeningAmount,
+                pagos.Sum(p => p.CashImpact),
+                movimientos.Sum(m => m.SignedAmount),
+                turno.ExpectedAmount ?? await calculator.ExpectedCashAsync(orgId, turno, ct),
+                turno.CountedAmount,
+                turno.Difference);
+        }
+
+        return new SessionTenderSummaryDto(turno.Id, cerrado, grupos, arqueo);
+    }
+}
+
 public sealed class GetOpenSessionHandler(ICashRepository cash)
 {
     public async Task<OpenSessionSummaryDto?> HandleAsync(

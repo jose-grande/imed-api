@@ -49,6 +49,11 @@ public static class PermissionCatalog
     public const string BillingRead = "billing.read";
     public const string BillingCharge = "billing.charge";
     public const string BillingCollect = "billing.collect";
+    /// <summary>
+    /// Emitir facturas sin cobrarlas: a crédito, a una aseguradora, o para que el paciente pague
+    /// después. Quien cobra (<see cref="BillingCollect"/>) emite al cobrar sin necesitarlo.
+    /// </summary>
+    public const string BillingInvoice = "billing.invoice";
     public const string BillingSupervise = "billing.supervise";
 
     // --- Inventario y farmacia (plan de salida a producción, F0.7) -----------
@@ -141,6 +146,7 @@ public static class PermissionCatalog
         (BillingRead, "billing", "Ver el módulo de facturación: cuentas, cargos, documentos"),
         (BillingCharge, "billing", "Abrir cuentas y capturar cargos"),
         (BillingCollect, "billing", "Cobrar, emitir documentos y arquear el propio turno"),
+        (BillingInvoice, "billing", "Emitir facturas sin cobrarlas (crédito, aseguradoras, pago posterior)"),
         (BillingSupervise, "billing", "Autorizar descuentos y anulaciones, gestionar CAI y arqueos ajenos"),
 
         (InventoryRead, "inventory", "Ver existencias, lotes, kardex, artículos y proveedores"),
@@ -166,6 +172,7 @@ public static class PermissionCatalog
         ("org_admin", RecordSearchDemographics), ("org_admin", RecordReadAny), ("org_admin", LabResultReadAny),
         ("org_admin", RecordWrite), ("org_admin", RecordPreclinic),
         ("org_admin", BillingRead), ("org_admin", BillingCharge), ("org_admin", BillingCollect), ("org_admin", BillingSupervise),
+        ("org_admin", BillingInvoice),
         ("org_admin", OrgManage), ("org_admin", OrgTeamManage), ("org_admin", OrgLocationsManage), ("org_admin", OrgPolicyManage),
         ("org_admin", InventoryRead), ("org_admin", InventoryOperate), ("org_admin", InventoryManage),
         ("org_admin", PharmacyDispense), ("org_admin", PharmacySell),
@@ -201,11 +208,13 @@ public static class PermissionCatalog
         ("cashier", BillingRead), ("cashier", BillingCollect),
         ("cashier", RecordSearchDemographics),
 
-        ("billing_clerk", BillingRead), ("billing_clerk", BillingCharge),
+        // El facturador emite facturas sin cobrarlas (D1): es lo que dice su nombre y el manual.
+        ("billing_clerk", BillingRead), ("billing_clerk", BillingCharge), ("billing_clerk", BillingInvoice),
         ("billing_clerk", RecordSearchDemographics),
 
         ("billing_supervisor", BillingRead), ("billing_supervisor", BillingCharge),
         ("billing_supervisor", BillingCollect), ("billing_supervisor", BillingSupervise),
+        ("billing_supervisor", BillingInvoice),
         ("billing_supervisor", RecordSearchDemographics),
 
         // Inventario y farmacia (F0.7). Farmacia identifica al paciente para despachar o vender,

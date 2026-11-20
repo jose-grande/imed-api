@@ -41,9 +41,13 @@ public static class BillingCashEndpoints
             .WithName("RegisterCashMovement")
             .WithSummary("Retiro, depósito o ajuste de efectivo, siempre con motivo.");
 
+        group.MapGet("/session/{sessionId:guid}/summary", SummaryAsync)
+            .WithName("GetCashSessionSummary")
+            .WithSummary("Cobros del turno por método. El efectivo solo aparece con el turno cerrado: el arqueo es a ciegas.");
+
         group.MapGet("/session/{sessionId:guid}/payments", PaymentsAsync)
             .WithName("ListSessionPayments")
-            .WithSummary("Cobros del turno.");
+            .WithSummary("Cobros del turno, uno por uno. Con el turno abierto pide billing.supervise: incluye el efectivo y el arqueo es a ciegas.");
 
         group.MapPost("/payments", ReceiveAsync)
             .WithName("ReceivePayment")
@@ -136,14 +140,37 @@ public static class BillingCashEndpoints
         }
     }
 
-    private static async Task<IResult> PaymentsAsync(
+    private static async Task<IResult> SummaryAsync(
         Guid sessionId, ClaimsPrincipal principal,
-        ListSessionPaymentsHandler handler, CancellationToken ct)
+        GetSessionTenderSummaryHandler handler, CancellationToken ct)
     {
         var (orgId, _) = Identity(principal);
-        return orgId is null
-            ? Forbidden()
-            : Results.Ok(await handler.HandleAsync(orgId.Value, sessionId, ct));
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        return await handler.HandleAsync(orgId.Value, sessionId, ct) is { } r ? Results.Ok(r) : Results.NotFound();
+    }
+
+    private static async Task<IResult> PaymentsAsync(
+        Guid sessionId, ClaimsPrincipal principal,
+        ListSessionPaymentsHandler handler, IPermissionResolver permisos, CancellationToken ct)
+    {
+        var (orgId, _) = Identity(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        var supervisa = await EndpointRun.HasAsync(principal, permisos, orgId.Value, PermissionCatalog.BillingSupervise, ct);
+        var r = await handler.HandleAsync(orgId.Value, sessionId, supervisa, ct);
+        if (r.NotFound)
+        {
+            return Results.NotFound();
+        }
+        return r.Forbidden
+            ? EndpointRun.Forbidden(
+                "Con el turno abierto los cobros uno por uno los ve solo el jefe administrativo: incluyen el efectivo, y el arqueo es a ciegas.")
+            : Results.Ok(r.Payments);
     }
 
     private static async Task<IResult> ReceiveAsync(

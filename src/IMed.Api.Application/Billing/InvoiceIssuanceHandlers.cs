@@ -383,6 +383,57 @@ public sealed class GetInvoiceHandler(IInvoiceRepository invoices)
     }
 }
 
+/// <summary>Una factura en un listado: lo que hace falta para reconocerla y decidir qué hacer.</summary>
+public sealed record InvoiceListItemDto(
+    Guid Id,
+    Guid AccountId,
+    string FullNumber,
+    DateTimeOffset IssuedAt,
+    string BuyerName,
+    string? BuyerTaxId,
+    decimal GrandTotal,
+    decimal Balance,
+    string Status,
+    Guid LocationId);
+
+/// <summary>Filtros de la búsqueda de facturas. Los días son de la clínica, inclusive.</summary>
+public sealed record SearchInvoicesQuery(
+    Guid OrganizationId,
+    string? Text = null,
+    DateOnly? From = null,
+    DateOnly? To = null,
+    string? Status = null,
+    bool OnlyWithBalance = false,
+    Guid? LocationId = null,
+    int Limit = 50);
+
+/// <summary>
+/// Buscar facturas emitidas: para reimprimir, anular o emitir una nota de crédito sin tener que
+/// llegar por la cuenta del paciente.
+/// </summary>
+public sealed class SearchInvoicesHandler(IInvoiceRepository invoices, IClinicClock clock)
+{
+    public async Task<IReadOnlyList<InvoiceListItemDto>> HandleAsync(
+        SearchInvoicesQuery query, CancellationToken ct = default)
+    {
+        var filas = await invoices.SearchAsync(new InvoiceSearchCriteria(
+            query.OrganizationId,
+            string.IsNullOrWhiteSpace(query.Text) ? null : query.Text.Trim(),
+            query.From is { } desde ? clock.StartOf(desde) : null,
+            query.To is { } hasta ? clock.StartOf(hasta.AddDays(1)) : null,
+            Enum.TryParse<InvoiceStatus>(query.Status, ignoreCase: true, out var st) && Enum.IsDefined(st) ? st : null,
+            query.OnlyWithBalance,
+            query.LocationId,
+            query.Limit), ct);
+        return filas
+            .Select(x => new InvoiceListItemDto(
+                x.Invoice.Id, x.Invoice.AccountId, x.Document.FullNumber, x.Document.IssuedAt,
+                x.Document.BuyerName, x.Document.BuyerTaxId, x.Invoice.GrandTotal, x.Invoice.Balance,
+                x.Invoice.Status.ToString(), x.Document.LocationId))
+            .ToList();
+    }
+}
+
 public sealed class ListAccountInvoicesHandler(IInvoiceRepository invoices)
 {
     public async Task<IReadOnlyList<InvoiceDto>> HandleAsync(

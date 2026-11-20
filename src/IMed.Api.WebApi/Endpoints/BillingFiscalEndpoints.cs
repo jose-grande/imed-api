@@ -110,7 +110,8 @@ public static class BillingFiscalEndpoints
         {
             var creada = await handler.HandleAsync(new RegisterFiscalAuthorizationCommand(
                 orgId.Value, request.LocationId, request.DocumentTypeId, request.Cai,
-                request.EmissionPointCode, request.RangeFrom, request.RangeTo, request.LimitDate), ct);
+                request.EmissionPointCode, request.RangeFrom, request.RangeTo, request.LimitDate,
+                request.EstablishmentCode), ct);
             return Results.Ok(creada);
         }
         catch (ArgumentException ex)
@@ -183,8 +184,16 @@ public static class BillingFiscalEndpoints
         {
             return Forbidden();
         }
-        var result = await handler.HandleAsync(orgId.Value, cashPointId, request.Active, ct);
-        return result is null ? Results.NotFound() : Results.Ok(result);
+        try
+        {
+            var result = await handler.HandleAsync(orgId.Value, cashPointId, request.Active, ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(
+                title: "No se puede deshabilitar", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
     }
 
     private static IResult Forbidden() =>
@@ -209,7 +218,8 @@ public sealed record RegisterAuthorizationRequest(
     string EmissionPointCode,
     long RangeFrom,
     long RangeTo,
-    DateOnly LimitDate);
+    DateOnly LimitDate,
+    string? EstablishmentCode = null);
 
 public sealed record CreateCashPointRequest(
     Guid LocationId,

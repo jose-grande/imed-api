@@ -27,6 +27,12 @@ public sealed class CashRepository(AppDbContext db, IClinicClock clock) : ICashR
                      && x.Status == CashSessionStatus.Open,
                 ct);
 
+    public async Task<IReadOnlyList<CashSession>> ListOpenSessionsAsync(
+        Guid organizationId, CancellationToken ct = default) =>
+        await db.CashSessions.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.Status == CashSessionStatus.Open)
+            .ToListAsync(ct);
+
     public Task<CashSession?> FindOpenSessionByCashierAsync(
         Guid organizationId, Guid cashierUserId, CancellationToken ct = default) =>
         db.CashSessions.AsNoTracking()

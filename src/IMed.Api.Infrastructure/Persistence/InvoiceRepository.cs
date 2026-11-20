@@ -37,6 +37,55 @@ public sealed class InvoiceRepository(AppDbContext db) : IInvoiceRepository
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<(Invoice Invoice, FiscalDocument Document)>> SearchAsync(
+        InvoiceSearchCriteria criteria, CancellationToken ct = default)
+    {
+        var c = criteria;
+        var org = c.OrganizationId;
+        // El documento de la factura, no el de una nota de crédito que la referencie.
+        var q = from i in db.Invoices.AsNoTracking()
+                join d in db.FiscalDocuments.AsNoTracking() on i.FiscalDocumentId equals (Guid?)d.Id
+                where i.OrganizationId == org && d.OrganizationId == org
+                select new { i, d };
+
+        if (!string.IsNullOrWhiteSpace(c.Text))
+        {
+            var patron = $"%{EscapeLike(c.Text.Trim())}%";
+            q = q.Where(x => EF.Functions.ILike(x.d.FullNumber, patron)
+                             || EF.Functions.ILike(x.d.BuyerName, patron)
+                             || (x.d.BuyerTaxId != null && EF.Functions.ILike(x.d.BuyerTaxId, patron)));
+        }
+        if (c.IssuedFrom is { } desde)
+        {
+            q = q.Where(x => x.d.IssuedAt >= desde);
+        }
+        if (c.IssuedBefore is { } hasta)
+        {
+            q = q.Where(x => x.d.IssuedAt < hasta);
+        }
+        if (c.Status is { } st)
+        {
+            q = q.Where(x => x.i.Status == st);
+        }
+        if (c.OnlyWithBalance)
+        {
+            q = q.Where(x => x.i.Balance > 0 && x.i.Status != InvoiceStatus.Voided);
+        }
+        if (c.LocationId is { } sede)
+        {
+            q = q.Where(x => x.d.LocationId == sede);
+        }
+
+        var filas = await q.OrderByDescending(x => x.d.IssuedAt)
+            .Take(Math.Clamp(c.Limit, 1, 200))
+            .ToListAsync(ct);
+        return filas.Select(x => (x.i, x.d)).ToList();
+    }
+
+    /// <summary>Lo que el usuario escribe se busca literal: <c>%</c> y <c>_</c> no son comodines.</summary>
+    private static string EscapeLike(string texto) =>
+        texto.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
     public Task<FiscalDocument?> FindByFullNumberAsync(
         Guid organizationId, string fullNumber, CancellationToken ct = default)
     {

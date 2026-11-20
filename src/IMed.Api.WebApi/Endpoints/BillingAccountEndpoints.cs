@@ -1,3 +1,4 @@
+using IMed.Api.Application.Abstractions;
 using System.Security.Claims;
 using IMed.Api.Application.Billing;
 using IMed.Api.Domain.Authorization;
@@ -19,12 +20,20 @@ public static class BillingAccountEndpoints
 
         group.MapGet("/", SearchAsync)
             .WithName("SearchBillingAccounts")
-            .WithSummary("Busca cuentas por paciente o estado.");
+            .WithSummary("Busca cuentas con su situación de cobro: por facturar, por cobrar, al día.");
 
         group.MapPost("/", OpenAsync)
             .WithName("OpenBillingAccount")
             .WithSummary("Abre una cuenta, o devuelve la del encuentro si ya existe.")
             .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingCharge));
+
+        group.MapGet("/{accountId:guid}/checkout", GetCheckoutAsync)
+            .WithName("GetAccountCheckout")
+            .WithSummary("Lo que el paciente debe: por facturar y facturas con saldo, y si se puede cobrar acá.");
+
+        group.MapPost("/{accountId:guid}/checkout", CheckoutAsync)
+            .WithName("AccountCheckout")
+            .WithSummary("Factura lo pendiente y cobra. Con pagos pide billing.collect; sin pagos (facturar sin cobrar), billing.invoice.");
 
         group.MapGet("/{accountId:guid}", StatementAsync)
             .WithName("GetAccountStatement")
@@ -49,14 +58,49 @@ public static class BillingAccountEndpoints
     }
 
     private static async Task<IResult> SearchAsync(
-        string? patientFhirId, string? status, int? limit, ClaimsPrincipal principal,
+        string? patientFhirId, string? status, string? situation, string? origin, string? q,
+        Guid? locationId, DateOnly? from, DateOnly? to, int? limit, bool? consultation, ClaimsPrincipal principal,
         SearchAccountsHandler handler, CancellationToken ct)
     {
         var orgId = ParseOrganizationId(principal);
         return orgId is null
             ? Forbidden()
-            : Results.Ok(await handler.HandleAsync(orgId.Value, patientFhirId, status, limit ?? 50, ct));
+            : Results.Ok(await handler.HandleAsync(new SearchAccountsQuery(
+                orgId.Value, patientFhirId, status, situation, origin, q, locationId, from, to, limit ?? 50,
+                WithConsultationStatus: consultation == true), ct));
     }
+
+    private static Task<IResult> GetCheckoutAsync(
+        Guid accountId, ClaimsPrincipal principal, AccountCheckoutHandler handler, CancellationToken ct) =>
+        EndpointRun.Org(principal, async org => EndpointRun.User(principal) is not { } user
+            ? EndpointRun.Forbidden("El token no trae usuario.")
+            : await handler.GetAsync(org, user, accountId, ct) is { } dto ? Results.Ok(dto) : Results.NotFound());
+
+    /// <summary>
+    /// Con pagos es cobrar (<c>billing.collect</c>); sin pagos es facturar sin cobrar
+    /// (<c>billing.invoice</c>, D2). Quien cobra emite al cobrar sin necesitar el segundo.
+    /// </summary>
+    private static Task<IResult> CheckoutAsync(
+        Guid accountId, AccountCheckoutInput body, ClaimsPrincipal principal,
+        AccountCheckoutHandler handler, IPermissionResolver permisos, CancellationToken ct) =>
+        EndpointRun.Org(principal, async org =>
+        {
+            if (EndpointRun.User(principal) is not { } user)
+            {
+                return EndpointRun.Forbidden("El token no trae usuario.");
+            }
+            var cobra = body.Tenders is { Count: > 0 };
+            var permiso = cobra ? PermissionCatalog.BillingCollect : PermissionCatalog.BillingInvoice;
+            if (!await EndpointRun.HasAsync(principal, permisos, org, permiso, ct))
+            {
+                return EndpointRun.Forbidden(cobra
+                    ? "Cobrar pide el permiso de cobro (cajero)."
+                    : "Facturar sin cobrar pide el permiso de facturar.");
+            }
+            return await handler.CheckoutAsync(org, user, accountId, body, ct) is { } r
+                ? Results.Ok(r)
+                : Results.NotFound();
+        });
 
     private static async Task<IResult> OpenAsync(
         OpenAccountRequest request, ClaimsPrincipal principal,

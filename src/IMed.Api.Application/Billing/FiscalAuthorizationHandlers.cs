@@ -90,6 +90,11 @@ public sealed class ListFiscalAuthorizationsHandler(
     }
 }
 
+/// <param name="EstablishmentCode">
+/// Código de establecimiento de la sede, tal como viene en el papel del SAR junto al rango. Es dato
+/// de la sede (lo comparten todos sus CAI), pero se captura acá porque es donde la persona lo tiene
+/// a la vista. Null = no tocar el de la sede.
+/// </param>
 public sealed record RegisterFiscalAuthorizationCommand(
     Guid OrganizationId,
     Guid LocationId,
@@ -98,10 +103,15 @@ public sealed record RegisterFiscalAuthorizationCommand(
     string EmissionPointCode,
     long RangeFrom,
     long RangeTo,
-    DateOnly LimitDate);
+    DateOnly LimitDate,
+    string? EstablishmentCode = null);
 
 public sealed class RegisterFiscalAuthorizationHandler(
-    IFiscalRepository repo, IClinicClock clock, FiscalAlertOptions options)
+    IFiscalRepository repo,
+    ILocationRepository locations,
+    IClinicClock clock,
+    FiscalAlertOptions options,
+    TimeProvider timeProvider)
 {
     public async Task<FiscalAuthorizationDto> HandleAsync(
         RegisterFiscalAuthorizationCommand cmd, CancellationToken ct = default)
@@ -123,6 +133,20 @@ public sealed class RegisterFiscalAuthorizationHandler(
         var auth = FiscalAuthorization.Create(
             cmd.OrganizationId, cmd.LocationId, tipo.Id, cmd.Cai, cmd.EmissionPointCode,
             cmd.RangeFrom, cmd.RangeTo, cmd.LimitDate);
+
+        // El establecimiento se valida antes de guardar nada: un código mal escrito no puede dejar
+        // el CAI registrado a medias.
+        if (!string.IsNullOrWhiteSpace(cmd.EstablishmentCode))
+        {
+            var sede = await locations.GetAsync(cmd.OrganizationId, cmd.LocationId, ct)
+                ?? throw new ArgumentException("La sede no existe en esta organización.", nameof(cmd));
+            var codigo = cmd.EstablishmentCode.Trim();
+            if (sede.FiscalEstablishmentCode != codigo)
+            {
+                sede.SetFiscalEstablishmentCode(codigo, timeProvider);
+                await locations.UpdateAsync(sede, ct);
+            }
+        }
 
         await repo.AddAuthorizationAsync(auth, ct);
         return FiscalAuthorizationMapper.ToDto(auth, today, options);

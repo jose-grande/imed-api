@@ -12,6 +12,12 @@ namespace IMed.Api.Application.Billing;
 /// significa compartir la secuencia, y quien da de alta una caja tiene que saberlo antes de
 /// guardar, no cuando el correlativo salte.
 /// </param>
+/// <param name="Active">
+/// Habilitada: se puede abrir turno en ella. <b>No</b> quiere decir que esté operando — eso lo dice
+/// <paramref name="OpenShift"/>. Mezclar las dos cosas bajo "abierta/cerrada" hacía creer que dar
+/// de alta una caja la dejaba cobrando, y que deshabilitarla era hacer el corte del día.
+/// </param>
+/// <param name="OpenShift">El turno abierto en esta caja ahora mismo, si hay uno.</param>
 public sealed record CashPointDto(
     Guid Id,
     Guid LocationId,
@@ -22,11 +28,20 @@ public sealed record CashPointDto(
     bool IsTemporary,
     string? PrinterProfile,
     bool Active,
-    IReadOnlyList<string> EmissionPointSharedWith);
+    IReadOnlyList<string> EmissionPointSharedWith,
+    CashPointShiftDto? OpenShift = null);
+
+/// <summary>Quién tiene la caja abierta y desde cuándo.</summary>
+public sealed record CashPointShiftDto(
+    Guid SessionId,
+    Guid CashierUserId,
+    string? CashierName,
+    DateTimeOffset OpenedAt);
 
 public static class CashPointMapper
 {
-    public static CashPointDto ToDto(CashPoint c, IReadOnlyList<CashPoint> todas) =>
+    public static CashPointDto ToDto(
+        CashPoint c, IReadOnlyList<CashPoint> todas, CashPointShiftDto? turno = null) =>
         new(c.Id, c.LocationId, c.Code, c.Name, c.Profile.ToString(), c.EmissionPointCode,
             c.IsTemporary, c.PrinterProfile, c.Active,
             todas
@@ -36,7 +51,36 @@ public static class CashPointMapper
                             && o.EmissionPointCode == c.EmissionPointCode)
                 .Select(o => o.Name)
                 .Order()
-                .ToList());
+                .ToList(),
+            turno);
+
+    /// <summary>
+    /// Turnos abiertos por caja, con el nombre del cajero. El nombre sale de la membresía (se
+    /// registra al iniciar sesión); si no está, la pantalla muestra el turno sin nombre antes que
+    /// esconderlo.
+    /// </summary>
+    internal static async Task<IReadOnlyDictionary<Guid, CashPointShiftDto>> OpenShiftsAsync(
+        ICashRepository cash, IOrganizationMemberRepository members, Guid orgId, CancellationToken ct)
+    {
+        var turnos = await cash.ListOpenSessionsAsync(orgId, ct);
+        if (turnos.Count == 0)
+        {
+            return new Dictionary<Guid, CashPointShiftDto>();
+        }
+        var nombres = (await members.ListByOrganizationAsync(orgId, ct))
+            .GroupBy(m => m.KeycloakUserId)
+            .ToDictionary(g => g.Key, g => g.First().DisplayName ?? g.First().Email);
+        return turnos
+            .GroupBy(t => t.CashPointId)
+            .ToDictionary(
+                g => g.Key,
+                g =>
+                {
+                    var t = g.OrderByDescending(x => x.OpenedAt).First();
+                    return new CashPointShiftDto(
+                        t.Id, t.CashierUserId, nombres.GetValueOrDefault(t.CashierUserId), t.OpenedAt);
+                });
+    }
 }
 
 /// <summary>
@@ -45,7 +89,11 @@ public static class CashPointMapper
 /// asunto suyo, y abrir turno en ella dejaba cobrar a nombre de otra razón social.
 /// </summary>
 public sealed class ListCashPointsHandler(
-    IFiscalRepository repo, ILocationRepository locations, ILocationProvisioning provisioning)
+    IFiscalRepository repo,
+    ILocationRepository locations,
+    ILocationProvisioning provisioning,
+    ICashRepository cash,
+    IOrganizationMemberRepository members)
 {
     public async Task<IReadOnlyList<CashPointDto>> HandleAsync(
         Guid orgId, Guid? userId, bool allLocations, CancellationToken ct = default)
@@ -60,7 +108,10 @@ public sealed class ListCashPointsHandler(
             visibles = todas.Where(c => sedes.Contains(c.LocationId));
         }
         // Con quién comparte punto de emisión se calcula sobre todas: es un dato fiscal de la caja.
-        return visibles.Select(c => CashPointMapper.ToDto(c, todas)).ToList();
+        var turnos = await CashPointMapper.OpenShiftsAsync(cash, members, orgId, ct);
+        return visibles
+            .Select(c => CashPointMapper.ToDto(c, todas, turnos.GetValueOrDefault(c.Id)))
+            .ToList();
     }
 
     /// <summary>Sedes asignadas al usuario. Todo usuario tiene al menos una (FAC-9).</summary>
@@ -117,8 +168,15 @@ public sealed class CreateCashPointHandler(IFiscalRepository repo)
             : CashPointProfile.Services;
 }
 
-public sealed class SetCashPointActiveHandler(IFiscalRepository repo)
+/// <summary>
+/// Habilita o deshabilita una caja. Deshabilitar no es el corte del día: es dar la caja de baja.
+/// Por eso no se permite con un turno abierto — el turno quedaría sin arqueo, con efectivo que nadie
+/// contó, en una caja que ya no aparece en ninguna lista.
+/// </summary>
+public sealed class SetCashPointActiveHandler(
+    IFiscalRepository repo, ICashRepository cash, IOrganizationMemberRepository members)
 {
+    /// <exception cref="InvalidOperationException">La caja tiene un turno abierto.</exception>
     public async Task<CashPointDto?> HandleAsync(
         Guid orgId, Guid cashPointId, bool active, CancellationToken ct = default)
     {
@@ -126,6 +184,12 @@ public sealed class SetCashPointActiveHandler(IFiscalRepository repo)
         if (caja is null)
         {
             return null;
+        }
+
+        if (!active && await cash.FindOpenSessionByPointAsync(orgId, cashPointId, ct) is not null)
+        {
+            throw new InvalidOperationException(
+                $"La caja '{caja.Name}' tiene un turno abierto. Cerralo con su arqueo en Caja antes de deshabilitarla.");
         }
 
         if (active)
@@ -139,6 +203,7 @@ public sealed class SetCashPointActiveHandler(IFiscalRepository repo)
         await repo.UpdateCashPointAsync(caja, ct);
 
         var todas = await repo.ListCashPointsAsync(orgId, ct);
-        return CashPointMapper.ToDto(caja, todas);
+        var turnos = await CashPointMapper.OpenShiftsAsync(cash, members, orgId, ct);
+        return CashPointMapper.ToDto(caja, todas, turnos.GetValueOrDefault(caja.Id));
     }
 }

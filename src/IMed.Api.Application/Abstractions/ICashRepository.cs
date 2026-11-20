@@ -12,6 +12,13 @@ public interface ICashRepository
         Guid organizationId, Guid cashPointId, CancellationToken ct = default);
 
     /// <summary>Turno abierto de un cajero, sin importar en qué caja.</summary>
+    /// <summary>
+    /// Turnos abiertos de la organización, uno por caja como máximo. Lo usa la lista de cajas para
+    /// mostrar cuál está operando: "habilitada" dice que se puede usar, no que alguien la esté usando.
+    /// </summary>
+    Task<IReadOnlyList<CashSession>> ListOpenSessionsAsync(
+        Guid organizationId, CancellationToken ct = default);
+
     Task<CashSession?> FindOpenSessionByCashierAsync(
         Guid organizationId, Guid cashierUserId, CancellationToken ct = default);
 

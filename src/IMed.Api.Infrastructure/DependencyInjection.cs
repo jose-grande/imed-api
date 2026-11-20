@@ -533,6 +533,8 @@ public static class DependencyInjection
 
         // Factura y timbrado (FAC-5).
         services.AddScoped<IssueInvoiceHandler>();
+        services.AddScoped<AccountCheckoutHandler>();
+        services.AddScoped<SearchInvoicesHandler>();
         services.AddScoped<LabOrderCheckoutHandler>();
         services.AddScoped<GetInvoiceHandler>();
         services.AddScoped<ListAccountInvoicesHandler>();
@@ -546,6 +548,7 @@ public static class DependencyInjection
         services.AddScoped<HandoverCashSessionHandler>();
         services.AddScoped<RegisterCashMovementHandler>();
         services.AddScoped<GetOpenSessionHandler>();
+        services.AddScoped<GetSessionTenderSummaryHandler>();
         services.AddScoped<ReceivePaymentHandler>();
         services.AddScoped<ListSessionPaymentsHandler>();
 
