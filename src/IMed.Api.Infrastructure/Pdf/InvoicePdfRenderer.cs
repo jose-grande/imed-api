@@ -17,10 +17,27 @@ namespace IMed.Api.Infrastructure.Pdf;
 public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 {
     private static readonly CultureInfo Hn = CultureInfo.GetCultureInfo("es-HN");
-    private static readonly Color Ink = new(30, 30, 30);
-    private static readonly Color Soft = new(110, 110, 110);
-    private static readonly Color Rule = new(210, 210, 210);
-    private static readonly Color Stop = new(160, 40, 40);
+
+    /// <summary>Carta: impresora láser o de tinta, los grises salen como grises.</summary>
+    private static readonly Palette LetterPalette = new(
+        Ink: new Color(30, 30, 30),
+        Soft: new Color(110, 110, 110),
+        Rule: new Color(210, 210, 210),
+        Stop: new Color(160, 40, 40),
+        StopFill: new Color(250, 235, 235));
+
+    /// <summary>
+    /// Ticket: la impresora térmica es de un bit — cada punto quema o no quema. Un gris se
+    /// rasteriza como trama de puntos sueltos: el texto secundario sale granulado y casi ilegible,
+    /// y las líneas claras directamente desaparecen. Todo va en negro puro; la jerarquía la dan el
+    /// tamaño y la negrita, no el color.
+    /// </summary>
+    private static readonly Palette ThermalPalette = new(
+        Ink: Colors.Black,
+        Soft: Colors.Black,
+        Rule: Colors.Black,
+        Stop: Colors.Black,
+        StopFill: null);
 
     public InvoicePdfRenderer()
     {
@@ -47,7 +64,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 
     private static Document BuildLetter(InvoicePdfModel m)
     {
-        var doc = NewDocument(m);
+        var doc = NewDocument(m, LetterPalette);
         var section = doc.AddSection();
         section.PageSetup.PageFormat = PageFormat.Letter;
         section.PageSetup.TopMargin = Unit.FromCentimeter(1.6);
@@ -55,7 +72,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         section.PageSetup.LeftMargin = Unit.FromCentimeter(2.0);
         section.PageSetup.RightMargin = Unit.FromCentimeter(2.0);
 
-        RenderVoidBanner(section, m);
+        RenderVoidBanner(section, m, LetterPalette);
 
         // Emisor
         PdfLogoRenderer.TryDraw(section, m.Issuer.Logo);
@@ -73,7 +90,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             section.AddParagraph($"Tel. {m.Issuer.Phone}").Style = "Subtle";
         }
 
-        Divider(section);
+        Divider(section, LetterPalette);
 
         // Documento
         var titulo = section.AddParagraph(m.Fiscal.DocumentTypeName.ToUpperInvariant());
@@ -106,7 +123,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 
         // Detalle
         section.AddParagraph("Detalle").Style = "SectionTitle";
-        RenderLinesTable(section, m, compact: false);
+        RenderLinesTable(section, m, LetterPalette, compact: false);
 
         // Totales
         RenderTotals(section, m, compact: false);
@@ -119,7 +136,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         }
 
         // Pie legal
-        Divider(section);
+        Divider(section, LetterPalette);
         RenderFiscalFooter(section, m);
 
         return doc;
@@ -129,7 +146,8 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 
     private static Document BuildThermal(InvoicePdfModel m)
     {
-        var doc = NewDocument(m);
+        var p = ThermalPalette;
+        var doc = NewDocument(m, p);
         var section = doc.AddSection();
 
         // 80 mm de ancho, alto libre: la impresora térmica corta donde termina el contenido.
@@ -142,7 +160,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 
         doc.Styles["Normal"]!.Font.Size = 8;
 
-        RenderVoidBanner(section, m);
+        RenderVoidBanner(section, m, p);
 
         // En el ticket el logo va centrado y mucho más chico: el ancho imprimible son 72 mm, y
         // la impresora térmica rasteriza — un logo grande alarga la impresión sin aportar nada.
@@ -162,7 +180,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             Centered(section, $"RTN {m.Issuer.TaxId}", "Subtle");
         }
 
-        Divider(section);
+        Divider(section, p);
 
         Centered(section, m.Fiscal.DocumentTypeName.ToUpperInvariant(), bold: true);
         Centered(section, m.Fiscal.FullNumber, bold: true);
@@ -177,16 +195,16 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             Centered(section, "REIMPRESIÓN", bold: true);
         }
 
-        Divider(section);
+        Divider(section, p);
 
         section.AddParagraph(m.Buyer.Name);
         section.AddParagraph(
             string.IsNullOrWhiteSpace(m.Buyer.TaxId) ? "Consumidor final" : $"RTN {m.Buyer.TaxId}")
             .Style = "Subtle";
 
-        Divider(section);
-        RenderLinesTable(section, m, compact: true);
-        Divider(section);
+        Divider(section, p);
+        RenderLinesTable(section, m, p, compact: true);
+        Divider(section, p);
         RenderTotals(section, m, compact: true);
 
         if (!string.IsNullOrWhiteSpace(m.Totals.AmountInWords))
@@ -196,7 +214,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             letras.Format.SpaceBefore = Unit.FromPoint(4);
         }
 
-        Divider(section);
+        Divider(section, p);
         RenderFiscalFooter(section, m);
 
         return doc;
@@ -204,7 +222,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 
     // ── Piezas compartidas ──────────────────────────────────────────────────
 
-    private static Document NewDocument(InvoicePdfModel m)
+    private static Document NewDocument(InvoicePdfModel m, Palette palette)
     {
         var doc = new Document
         {
@@ -215,16 +233,16 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
                 Subject = $"{m.Fiscal.DocumentTypeName} para {m.Buyer.Name}",
             },
         };
-        DefineStyles(doc);
+        DefineStyles(doc, palette);
         return doc;
     }
 
-    private static void DefineStyles(Document doc)
+    private static void DefineStyles(Document doc, Palette palette)
     {
         var normal = doc.Styles["Normal"]!;
         normal.Font.Name = "Arial";
         normal.Font.Size = 10;
-        normal.Font.Color = Ink;
+        normal.Font.Color = palette.Ink;
         normal.ParagraphFormat.SpaceAfter = Unit.FromPoint(2);
 
         var org = doc.Styles.AddStyle("OrgTitle", "Normal");
@@ -234,7 +252,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 
         var subtle = doc.Styles.AddStyle("Subtle", "Normal");
         subtle.Font.Size = 8;
-        subtle.Font.Color = Soft;
+        subtle.Font.Color = palette.Soft;
 
         var section = doc.Styles.AddStyle("SectionTitle", "Normal");
         section.Font.Size = 10;
@@ -258,7 +276,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
     /// Lo anulado se marca de forma imposible de pasar por alto. Un documento anulado que se ve
     /// igual que uno vigente circula como si valiera.
     /// </summary>
-    private static void RenderVoidBanner(Section section, InvoicePdfModel m)
+    private static void RenderVoidBanner(Section section, InvoicePdfModel m, Palette palette)
     {
         if (!m.Fiscal.IsVoided)
         {
@@ -268,11 +286,14 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         var banner = section.AddParagraph("DOCUMENTO ANULADO");
         banner.Format.Font.Bold = true;
         banner.Format.Font.Size = 14;
-        banner.Format.Font.Color = Stop;
+        banner.Format.Font.Color = palette.Stop;
         banner.Format.Alignment = ParagraphAlignment.Center;
         banner.Format.Borders.Width = 1;
-        banner.Format.Borders.Color = Stop;
-        banner.Format.Shading.Color = new Color(250, 235, 235);
+        banner.Format.Borders.Color = palette.Stop;
+        if (palette.StopFill is { } fill)
+        {
+            banner.Format.Shading.Color = fill;
+        }
         banner.Format.SpaceAfter = Unit.FromPoint(8);
 
         if (!string.IsNullOrWhiteSpace(m.VoidReason))
@@ -284,7 +305,8 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         }
     }
 
-    private static void RenderLinesTable(Section section, InvoicePdfModel m, bool compact)
+    private static void RenderLinesTable(
+        Section section, InvoicePdfModel m, Palette palette, bool compact)
     {
         var table = section.AddTable();
         table.Borders.Width = 0;
@@ -311,7 +333,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             head.Format.Font.Bold = true;
             head.Format.Font.Size = 8;
             head.Borders.Bottom.Width = 0.75;
-            head.Borders.Bottom.Color = Rule;
+            head.Borders.Bottom.Color = palette.Rule;
             head.Cells[0].AddParagraph("Concepto");
             head.Cells[1].AddParagraph("Cant.");
             head.Cells[2].AddParagraph("P. unit.");
@@ -386,11 +408,11 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         section.AddParagraph("Original: cliente · Copia: obligado tributario").Style = "Subtle";
     }
 
-    private static void Divider(Section section)
+    private static void Divider(Section section, Palette palette)
     {
         var p = section.AddParagraph();
         p.Format.Borders.Bottom.Width = 0.75;
-        p.Format.Borders.Bottom.Color = Rule;
+        p.Format.Borders.Bottom.Color = palette.Rule;
         p.Format.SpaceBefore = Unit.FromPoint(4);
         p.Format.SpaceAfter = Unit.FromPoint(4);
     }
@@ -405,6 +427,8 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         p.Format.Alignment = ParagraphAlignment.Center;
         p.Format.Font.Bold = bold;
     }
+
+    private sealed record Palette(Color Ink, Color Soft, Color Rule, Color Stop, Color? StopFill);
 
     private static string Money(decimal value) => value.ToString("N2", Hn);
     private static string Num(decimal value, int decimals) =>
