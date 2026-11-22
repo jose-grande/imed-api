@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Organizations;
 using IMed.Api.Domain.Billing.Fiscal;
@@ -28,7 +29,8 @@ public sealed class GetInvoicePdfHandler(
     IOrganizationBrandingRepository branding,
     ILocationRepository locations,
     ILegalEntityRepository legalEntities,
-    ICreditNoteRepository creditNotes)
+    ICreditNoteRepository creditNotes,
+    IFiscalAdapterResolver adapters)
 {
     public async Task<GetInvoicePdfResult?> HandleAsync(
         Guid orgId,
@@ -65,21 +67,40 @@ public sealed class GetInvoicePdfHandler(
         var sede = await locations.GetAsync(orgId, documento.LocationId, ct);
         var razon = sede is null ? null : await legalEntities.GetAsync(orgId, sede.LegalEntityId, ct);
 
+        var establecimiento = documento.EstablishmentAddress ?? sede?.Address;
+        var casaMatriz = documento.IssuerFiscalAddress ?? razon?.FiscalAddress;
+
+        // ISV por tarifa (art. 11.1.i), de las líneas congeladas: son las que sumaron el total.
+        var tributos = factura is not null
+            ? factura.Lines.Where(l => l.TaxTreatment == TaxTreatment.Taxed).Select(l => (l.TaxRate, l.TaxAmount))
+            : nota!.Lines.Where(l => l.TaxTreatment == TaxTreatment.Taxed).Select(l => (l.TaxRate, l.TaxAmount));
+        var isv = tributos.ToList();
+        var isv15 = Math.Round(isv.Where(t => t.TaxRate == 15m).Sum(t => t.TaxAmount), 2, MidpointRounding.AwayFromZero);
+        var isv18 = Math.Round(isv.Where(t => t.TaxRate == 18m).Sum(t => t.TaxAmount), 2, MidpointRounding.AwayFromZero);
+
+        FiscalDocument? original = nota is null ? null : await invoices.GetFiscalDocumentAsync(orgId, nota.InvoiceId, ct);
+
         var modelo = new InvoicePdfModel(
             Issuer: new PdfIssuerInfo(
                 documento.IssuerLegalName ?? razon?.LegalName ?? regimen?.IssuerLegalName ?? "—",
                 documento.IssuerTaxId ?? razon?.TaxId ?? regimen?.IssuerTaxId,
-                Address: documento.EstablishmentAddress ?? documento.IssuerFiscalAddress
-                    ?? sede?.Address ?? razon?.FiscalAddress,
+                Address: establecimiento ?? casaMatriz,
                 Phone: sede?.Phone ?? razon?.Phone,
-                Logo: logo?.ToPdfLogo(orgId)),
-            Buyer: new PdfBuyerInfo(documento.BuyerName, documento.BuyerTaxId),
+                Logo: logo?.ToPdfLogo(orgId),
+                TradeName: documento.IssuerTradeName ?? razon?.TradeName,
+                HeadOfficeAddress: establecimiento is not null
+                    && !string.Equals(casaMatriz?.Trim(), establecimiento.Trim(), StringComparison.OrdinalIgnoreCase)
+                    ? casaMatriz : null,
+                Email: razon?.Email),
+            Buyer: new PdfBuyerInfo(documento.BuyerName, documento.BuyerTaxId,
+                BuyerExemption.Normalize(new BuyerExemption(
+                    documento.BuyerExemptPurchaseOrder, documento.BuyerExemptRegistry, documento.BuyerSagRegistry))),
             Fiscal: new PdfFiscalInfo(
                 documento.FullNumber,
                 tipo?.Name ?? "Factura",
                 documento.IssuedAt,
                 documento.CaiSnapshot,
-                documento.RangeSnapshot,
+                RangoCompleto(documento, regimen?.RegimeCode),
                 documento.LimitDateSnapshot,
                 documento.Status == FiscalDocumentStatus.Voided),
             Lines: factura is not null
@@ -99,15 +120,51 @@ public sealed class GetInvoicePdfHandler(
                 documento.SubtotalExempt, documento.SubtotalExonerated,
                 documento.SubtotalTaxed15, documento.SubtotalTaxed18,
                 documento.DiscountTotal, documento.TaxTotal, documento.GrandTotal,
-                documento.AmountInWords),
+                documento.AmountInWords,
+                Tax15: isv15,
+                Tax18: isv18),
             IsReprint: isReprint,
             VoidReason: documento.VoidReason,
-            Reference: nota is null ? null
-                : $"Modifica la factura {(await invoices.GetFiscalDocumentAsync(orgId, nota.InvoiceId, ct))?.FullNumber ?? "—"} — {nota.Reason}");
+            Reference: nota is null ? null : $"Motivo: {nota.Reason}",
+            Modifies: nota is null ? null
+                : new PdfModifiedDocument(original?.FullNumber ?? "—", original?.CaiSnapshot ?? "—",
+                    original?.IssuedAt ?? DateTimeOffset.MinValue));
 
         var bytes = renderer.Render(modelo, format);
         return new GetInvoicePdfResult(bytes, $"{documento.FullNumber}.pdf");
     }
+
+    /// <summary>
+    /// El rango como lo emite el SAR (art. 10.5). Los documentos emitidos antes de guardarlo así
+    /// congelaron solo <c>desde-hasta</c>; se recompone con los segmentos del propio documento,
+    /// que son los de su autorización.
+    /// </summary>
+    private string RangoCompleto(FiscalDocument d, string? regimeCode)
+    {
+        var m = Regex.Match(d.RangeSnapshot, @"^\s*(\d+)\s*-\s*(\d+)\s*$");
+        if (!m.Success)
+        {
+            return d.RangeSnapshot;
+        }
+        var adapter = adapters.Find(regimeCode ?? HondurasRegime);
+        if (adapter is null)
+        {
+            return d.RangeSnapshot;
+        }
+        try
+        {
+            return adapter.ComposeRange(
+                d.EstablishmentCode, d.EmissionPointCode, d.DocumentTypeCode,
+                long.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+                long.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (Exception ex) when (ex is ArgumentException)
+        {
+            return d.RangeSnapshot;
+        }
+    }
+
+    private const string HondurasRegime = "HN_SAR_CAI";
 
     /// <summary>
     /// La marca corta que va junto a cada línea. Sale impresa porque una factura mixta tiene que

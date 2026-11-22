@@ -145,7 +145,7 @@ public sealed class InvoiceIssuanceTests(ImedApiFixture fixture) : IAsyncLifetim
         doc.FullNumber.Should().Be("001-002-01-00000001");
         doc.AmountInWords.Should().Be("QUINIENTOS LEMPIRAS CON 00/100");
         doc.CaiSnapshot.Should().Be("A1B2C3-D4E5F6-A7B8C9");
-        doc.RangeSnapshot.Should().Be("1-500");
+        doc.RangeSnapshot.Should().Be("001-002-01-00000001 al 001-002-01-00000500", "el rango completo, como lo emite el SAR (art. 10.5)");
         r.Invoice.Status.Should().Be("Issued");
     }
 

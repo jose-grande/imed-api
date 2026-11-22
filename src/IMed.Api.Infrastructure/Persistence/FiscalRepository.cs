@@ -55,8 +55,9 @@ public sealed class FiscalRepository(AppDbContext db) : IFiscalRepository
 
     public async Task<IReadOnlyList<FiscalDocumentType>> ListDocumentTypesAsync(
         Guid organizationId, CancellationToken ct = default) =>
+        // Solo los activos: un tipo desactivado (la proforma) no se ofrece para registrar un CAI.
         await db.FiscalDocumentTypes.AsNoTracking()
-            .Where(x => x.OrganizationId == organizationId)
+            .Where(x => x.OrganizationId == organizationId && x.Active)
             .OrderBy(x => x.DocumentCode)
             .ToListAsync(ct);
 

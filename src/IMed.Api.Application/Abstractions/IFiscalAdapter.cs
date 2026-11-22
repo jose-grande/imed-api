@@ -59,6 +59,12 @@ public interface IFiscalAdapter
         long sequence);
 
     /// <summary>
+    /// El rango autorizado tal como lo emite la autoridad, para imprimirlo en el documento. En
+    /// Honduras: <c>001-420-01-00000001 al 001-420-01-00000500</c> (art. 10.5).
+    /// </summary>
+    string ComposeRange(string establishmentCode, string emissionPointCode, string documentTypeCode, long rangeFrom, long rangeTo);
+
+    /// <summary>
     /// Reglas del régimen sobre el comprador. Devuelve el motivo del rechazo, o <c>null</c> si la
     /// venta puede emitirse.
     ///

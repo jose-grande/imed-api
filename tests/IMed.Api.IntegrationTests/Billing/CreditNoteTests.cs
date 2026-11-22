@@ -97,7 +97,7 @@ public sealed class CreditNoteTests(ImedApiFixture fixture) : IAsyncLifetime
 
         r.Succeeded.Should().BeTrue(r.Rejected?.Message);
         r.CreditNote!.GrandTotal.Should().Be(2800m);
-        r.CreditNote.FullNumber.Should().Be("001-002-03-00000001", "tipo 03 = nota de crédito, su propio correlativo");
+        r.CreditNote.FullNumber.Should().Be("001-002-07-00000001", "tipo 07 = nota de crédito (SAR, art. 25), su propio correlativo");
         r.CreditNote.AppliedToBalance.Should().Be(2800m);
         r.CreditNote.RefundDue.Should().Be(0m, "no se había cobrado nada");
 
@@ -119,7 +119,7 @@ public sealed class CreditNoteTests(ImedApiFixture fixture) : IAsyncLifetime
         // Se imprime con el mismo PDF que la factura, con su número de nota.
         var pdf = await sp.GetRequiredService<GetInvoicePdfHandler>().HandleAsync(e.OrgId, r.CreditNote.Id);
         pdf.Should().NotBeNull();
-        pdf!.FileName.Should().Be("001-002-03-00000001.pdf");
+        pdf!.FileName.Should().Be("001-002-07-00000001.pdf");
         pdf.Bytes.Length.Should().BeGreaterThan(1000);
     }
 
@@ -165,7 +165,7 @@ public sealed class CreditNoteTests(ImedApiFixture fixture) : IAsyncLifetime
 
         var turnoAbierto = await sp2.GetRequiredService<ICashRepository>().FindOpenSessionByCashierAsync(e.OrgId, cajero);
         var movimientos = await sp2.GetRequiredService<ICashRepository>().ListMovementsAsync(e.OrgId, turnoAbierto!.Id);
-        movimientos.Should().ContainSingle(m => m.Amount == 1150m && m.Reason.Contains("001-002-03"));
+        movimientos.Should().ContainSingle(m => m.Amount == 1150m && m.Reason.Contains("001-002-07"));
     }
 
     [Fact]

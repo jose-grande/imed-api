@@ -136,4 +136,36 @@ public sealed class InvoicePdfRendererTests
 
         render.Should().NotThrow();
     }
+
+    [Theory]
+    [InlineData(InvoicePrintFormat.Letter)]
+    [InlineData(InvoicePrintFormat.Thermal80)]
+    public void ElEmisorCompleto_yElIsvPorTarifa_seRenderizan(InvoicePrintFormat formato)
+    {
+        // Art. 10.1 (emisor completo) y 11.1.i (ISV por tarifa). Con IMED_PDF_DUMP se guarda para
+        // revisarlo con pdftotext: el texto va codificado por glifo.
+        var modelo = new InvoicePdfModel(
+            new PdfIssuerInfo("Clínica de Prueba S. de R.L.", "08019999123456", "Col. Palmira, Tegucigalpa", "2200-0000",
+                TradeName: "Clínica Palmira", HeadOfficeAddress: "Blvd. Morazán, Tegucigalpa", Email: "facturas@clinica.hn"),
+            new PdfBuyerInfo("Juan Pérez", null),
+            new PdfFiscalInfo("001-002-01-00000009", "Factura", new DateTimeOffset(2026, 11, 22, 10, 0, 0, TimeSpan.FromHours(-6)),
+                "A1B2C3-D4E5F6", "001-002-01-00000001 al 001-002-01-00000500", new DateOnly(2027, 12, 31), false),
+            [
+                new PdfInvoiceLine(1, "Consulta general", 1m, 500m, 0m, 500m, "E"),
+                new PdfInvoiceLine(2, "Protector solar", 2m, 100m, 20m, 207m, "G15"),
+                new PdfInvoiceLine(3, "Producto al 18 %", 1m, 100m, 0m, 118m, "G18"),
+            ],
+            new PdfInvoiceTotals(500m, 0m, 180m, 100m, 20m, 45m, 825m, "OCHOCIENTOS VEINTICINCO LEMPIRAS CON 00/100",
+                Tax15: 27m, Tax18: 18m));
+
+        var pdf = _renderer.Render(modelo, formato);
+
+        pdf.Should().NotBeEmpty();
+        var dump = Environment.GetEnvironmentVariable("IMED_PDF_DUMP");
+        if (!string.IsNullOrWhiteSpace(dump))
+        {
+            Directory.CreateDirectory(dump);
+            File.WriteAllBytes(Path.Combine(dump, $"emisor-{formato}.pdf"), pdf);
+        }
+    }
 }

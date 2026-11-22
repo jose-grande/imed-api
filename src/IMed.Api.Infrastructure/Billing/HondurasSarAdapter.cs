@@ -46,6 +46,16 @@ public sealed class HondurasSarAdapter : IFiscalAdapter
         return new FiscalNumber(est, pto, tipo, sequence, $"{est}-{pto}-{tipo}-{corr}");
     }
 
+    public string ComposeRange(
+        string establishmentCode, string emissionPointCode, string documentTypeCode, long rangeFrom, long rangeTo) =>
+        $"{ComposeNumber(establishmentCode, emissionPointCode, documentTypeCode, rangeFrom).FullNumber} al "
+        + ComposeNumber(establishmentCode, emissionPointCode, documentTypeCode, rangeTo).FullNumber;
+
+    /// <summary>
+    /// Art. 11 del Reglamento: sobre L 10,000 a consumidor final van los datos del cliente, y el
+    /// número de identificación se escribe en el espacio del RTN. Por eso basta con cualquiera de
+    /// los dos: RTN o identidad.
+    /// </summary>
     public string? ValidateBuyer(decimal grandTotal, string? buyerTaxId)
     {
         if (grandTotal <= BuyerTaxIdThreshold)
@@ -53,7 +63,7 @@ public sealed class HondurasSarAdapter : IFiscalAdapter
             return null;
         }
         return string.IsNullOrWhiteSpace(buyerTaxId)
-            ? $"Una venta sobre L {BuyerTaxIdThreshold:N2} exige el RTN del comprador."
+            ? $"Una venta sobre L {BuyerTaxIdThreshold:N2} exige identificar al comprador: su RTN o, si es consumidor final, su número de identidad."
             : null;
     }
 

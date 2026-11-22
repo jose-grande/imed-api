@@ -1,3 +1,5 @@
+using IMed.Api.Domain.Billing.Invoicing;
+
 namespace IMed.Api.Application.Abstractions;
 
 /// <summary>
@@ -38,20 +40,34 @@ public sealed record InvoicePdfModel(
     /// </summary>
     bool IsReprint = false,
     string? VoidReason = null,
+    /// <summary>Motivo de la nota de crédito (art. 26.4).</summary>
+    string? Reference = null,
     /// <summary>
-    /// Documento que modifica (nota de crédito, A9): "Modifica la factura 001-002-01-00000007 —
-    /// motivo". El SAR exige que la nota identifique la factura que revierte.
+    /// Comprobante que modifica la nota de crédito (art. 26.3): CAI, número y fecha de emisión.
+    /// Con él, además, se imprime el espacio de quien recibe la nota (art. 26.7).
     /// </summary>
-    string? Reference = null);
+    PdfModifiedDocument? Modifies = null);
 
+/// <summary>La factura que una nota de crédito modifica, como exige el art. 26.3.</summary>
+public sealed record PdfModifiedDocument(string FullNumber, string Cai, DateTimeOffset IssuedAt);
+
+/// <summary>
+/// El emisor como lo pide el art. 10.1: RTN, razón social, nombre comercial, dirección de la casa
+/// matriz y del establecimiento, teléfono y correo.
+/// </summary>
+/// <param name="Address">Dirección del establecimiento donde está el punto de emisión.</param>
+/// <param name="HeadOfficeAddress">Domicilio fiscal de la casa matriz; no se repite si es el mismo.</param>
 public sealed record PdfIssuerInfo(
     string LegalName,
     string? TaxId,
     string? Address,
     string? Phone,
-    PdfLogo? Logo = null);
+    PdfLogo? Logo = null,
+    string? TradeName = null,
+    string? HeadOfficeAddress = null,
+    string? Email = null);
 
-public sealed record PdfBuyerInfo(string Name, string? TaxId);
+public sealed record PdfBuyerInfo(string Name, string? TaxId, BuyerExemption? Exemption = null);
 
 /// <summary>Los datos legales del documento, todos congelados al emitir.</summary>
 public sealed record PdfFiscalInfo(
@@ -85,4 +101,7 @@ public sealed record PdfInvoiceTotals(
     decimal DiscountTotal,
     decimal TaxTotal,
     decimal GrandTotal,
-    string? AmountInWords);
+    string? AmountInWords,
+    /// <summary>ISV por tarifa (art. 11.1.i): se imprimen separados.</summary>
+    decimal Tax15 = 0m,
+    decimal Tax18 = 0m);

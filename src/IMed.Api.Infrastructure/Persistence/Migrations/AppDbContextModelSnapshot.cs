@@ -1607,6 +1607,16 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("amount_in_words");
 
+                    b.Property<string>("BuyerExemptPurchaseOrder")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("buyer_exempt_purchase_order");
+
+                    b.Property<string>("BuyerExemptRegistry")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("buyer_exempt_registry");
+
                     b.Property<string>("BuyerName")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -1616,6 +1626,11 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("BuyerPartyId")
                         .HasColumnType("uuid")
                         .HasColumnName("buyer_party_id");
+
+                    b.Property<string>("BuyerSagRegistry")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("buyer_sag_registry");
 
                     b.Property<string>("BuyerTaxId")
                         .HasMaxLength(32)

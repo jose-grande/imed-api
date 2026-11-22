@@ -94,7 +94,8 @@ public sealed record IssueInvoiceCommand(
     Guid? BillToPartyId = null,
     string? BuyerTaxId = null,
     string? BuyerName = null,
-    Guid? UserId = null);
+    Guid? UserId = null,
+    BuyerExemption? Exemption = null);
 
 /// <summary>
 /// Emite una factura a partir de los cargos sin facturar de una cuenta (FAC-5).
@@ -232,16 +233,35 @@ public sealed class IssueInvoiceHandler(
         var parte = await parties.GetAsync(cmd.OrganizationId, partyId, ct);
         var factura = Invoice.Draft(cmd.OrganizationId, cuenta.Id, partyId, today);
 
+        // Adquirente exonerado (art. 11.4): lo gravado se factura exonerado, sin ISV. Lo exento
+        // sigue exento: la exoneración libera del impuesto, no cambia lo que ya no lo pagaba.
+        BuyerExemption? exonerado;
+        try
+        {
+            exonerado = BuyerExemption.Normalize(cmd.Exemption);
+        }
+        catch (ArgumentException ex)
+        {
+            return IssueInvoiceResult.Reject("exoneracion_invalida", ex.Message);
+        }
+
         var linea = 1;
         foreach (var c in propios)
         {
             var tributo = await fiscal.GetTaxCodeAsync(cmd.OrganizationId, c.TaxCodeId, ct);
+            var tratamiento = tributo?.Treatment ?? TaxTreatment.Exempt;
+            var tasa = c.TaxRate;
+            if (exonerado is not null && tratamiento == TaxTreatment.Taxed)
+            {
+                tratamiento = TaxTreatment.Exonerated;
+                tasa = 0m;
+            }
             factura.AddLine(InvoiceLine.FromCharge(
                 cmd.OrganizationId, factura.Id, c.Id, linea++,
                 c.DescriptionSnapshot,
                 tributo?.Code ?? "?",
-                tributo?.Treatment ?? TaxTreatment.Exempt,
-                c.TaxRate, c.Quantity, c.UnitPrice, c.DiscountAmount));
+                tratamiento,
+                tasa, c.Quantity, c.UnitPrice, c.DiscountAmount));
         }
 
         // ── Reglas del régimen, antes de tocar el correlativo ──
@@ -326,7 +346,9 @@ public sealed class IssueInvoiceHandler(
             numero.Sequence, numero.FullNumber,
             buyerName: comprador,
             caiSnapshot: autorizacion.Cai,
-            rangeSnapshot: $"{autorizacion.RangeFrom}-{autorizacion.RangeTo}",
+            rangeSnapshot: adapter.ComposeRange(
+                numero.EstablishmentCode, numero.EmissionPointCode, numero.DocumentTypeCode,
+                autorizacion.RangeFrom, autorizacion.RangeTo),
             limitDateSnapshot: autorizacion.LimitDate,
             subtotalExempt: factura.SubtotalFor(TaxTreatment.Exempt),
             subtotalExonerated: factura.SubtotalFor(TaxTreatment.Exonerated),
@@ -344,7 +366,8 @@ public sealed class IssueInvoiceHandler(
                 razon.LegalName,
                 razon.TradeName,
                 razon.FiscalAddress,
-                sedeEmisora.Address));
+                sedeEmisora.Address),
+            exemption: exonerado);
 
         factura.AssignIssuer(sedeEmisora.Id, razon.Id);
         factura.MarkIssued(documento.Id);

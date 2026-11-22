@@ -698,6 +698,9 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.BuyerPartyId);
             e.Property(x => x.BuyerTaxId).HasMaxLength(32);
             e.Property(x => x.BuyerName).HasMaxLength(300).IsRequired();
+            e.Property(x => x.BuyerExemptPurchaseOrder).HasMaxLength(BuyerExemption.MaxLength);
+            e.Property(x => x.BuyerExemptRegistry).HasMaxLength(BuyerExemption.MaxLength);
+            e.Property(x => x.BuyerSagRegistry).HasMaxLength(BuyerExemption.MaxLength);
 
             e.Property(x => x.SubtotalExempt).HasPrecision(19, 4).IsRequired();
             e.Property(x => x.SubtotalExonerated).HasPrecision(19, 4).IsRequired();

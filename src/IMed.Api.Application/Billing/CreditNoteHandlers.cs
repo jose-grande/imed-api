@@ -184,7 +184,9 @@ public sealed class IssueCreditNoteHandler(
             numero.Sequence, numero.FullNumber,
             buyerName: original.BuyerName,
             caiSnapshot: autorizacion.Cai,
-            rangeSnapshot: $"{autorizacion.RangeFrom}-{autorizacion.RangeTo}",
+            rangeSnapshot: adapter.ComposeRange(
+                numero.EstablishmentCode, numero.EmissionPointCode, numero.DocumentTypeCode,
+                autorizacion.RangeFrom, autorizacion.RangeTo),
             limitDateSnapshot: autorizacion.LimitDate,
             subtotalExempt: nota.SubtotalFor(TaxTreatment.Exempt),
             subtotalExonerated: nota.SubtotalFor(TaxTreatment.Exonerated),
@@ -203,7 +205,10 @@ public sealed class IssueCreditNoteHandler(
                 original.IssuerLegalName ?? razon?.LegalName ?? string.Empty,
                 original.IssuerTradeName ?? razon?.TradeName,
                 original.IssuerFiscalAddress ?? razon?.FiscalAddress,
-                sede?.Address));
+                sede?.Address),
+            // La nota hereda la exoneración de la factura que modifica: revierte lo mismo.
+            exemption: BuyerExemption.Normalize(new BuyerExemption(
+                original.BuyerExemptPurchaseOrder, original.BuyerExemptRegistry, original.BuyerSagRegistry)));
 
         var aplicado = factura.ApplyCredit(nota.GrandTotal);
         nota.MarkIssued(documento.Id, aplicado);

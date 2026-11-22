@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Billing;
+using IMed.Api.Domain.Billing.Invoicing;
 using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Authorization;
 using IMed.Api.WebApi.Http;
@@ -145,7 +146,7 @@ public static class BillingInvoiceEndpoints
         var resultado = await handler.HandleAsync(new IssueInvoiceCommand(
             orgId.Value, request.AccountId, sede, request.DocumentTypeId,
             request.FiscalAuthorizationId, request.BillToPartyId,
-            request.BuyerTaxId, request.BuyerName, userId), ct);
+            request.BuyerTaxId, request.BuyerName, userId, request.Exemption), ct);
 
         if (resultado.Rejected is { } r)
         {
@@ -256,7 +257,8 @@ public sealed record IssueInvoiceRequest(
     Guid? FiscalAuthorizationId,
     Guid? BillToPartyId,
     string? BuyerTaxId,
-    string? BuyerName);
+    string? BuyerName,
+    BuyerExemption? Exemption = null);
 
 public sealed record VoidInvoiceRequest(string Reason);
 

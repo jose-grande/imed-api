@@ -67,6 +67,11 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         var doc = NewDocument(m, LetterPalette);
         var section = doc.AddSection();
         section.PageSetup.PageFormat = PageFormat.Letter;
+        // El ancho se fija a mano: con solo PageFormat, PageWidth vale 0 hasta que MigraDoc lo
+        // resuelve al renderizar, y la tabla del detalle —que reparte ese ancho— salía con las
+        // columnas de cantidad, precio e importe en ancho cero: invisibles en el papel.
+        section.PageSetup.PageWidth = Unit.FromInch(8.5);
+        section.PageSetup.PageHeight = Unit.FromInch(11);
         section.PageSetup.TopMargin = Unit.FromCentimeter(1.6);
         section.PageSetup.BottomMargin = Unit.FromCentimeter(1.8);
         section.PageSetup.LeftMargin = Unit.FromCentimeter(2.0);
@@ -77,17 +82,9 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         // Emisor
         PdfLogoRenderer.TryDraw(section, m.Issuer.Logo);
         section.AddParagraph(m.Issuer.LegalName).Style = "OrgTitle";
-        if (!string.IsNullOrWhiteSpace(m.Issuer.TaxId))
+        foreach (var linea in IssuerLines(m.Issuer))
         {
-            section.AddParagraph($"RTN {m.Issuer.TaxId}").Style = "Subtle";
-        }
-        if (!string.IsNullOrWhiteSpace(m.Issuer.Address))
-        {
-            section.AddParagraph(m.Issuer.Address).Style = "Subtle";
-        }
-        if (!string.IsNullOrWhiteSpace(m.Issuer.Phone))
-        {
-            section.AddParagraph($"Tel. {m.Issuer.Phone}").Style = "Subtle";
+            section.AddParagraph(linea).Style = "Subtle";
         }
 
         Divider(section, LetterPalette);
@@ -99,10 +96,10 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         numero.Style = "Number";
 
         section.AddParagraph(
-            $"Emitida el {m.Fiscal.IssuedAt.ToLocalTime():dd/MM/yyyy HH:mm}").Style = "Subtle";
-        if (!string.IsNullOrWhiteSpace(m.Reference))
+            $"Fecha de emisión: {m.Fiscal.IssuedAt.ToLocalTime():dd/MM/yyyy HH:mm}").Style = "Subtle";
+        foreach (var linea in ModifiesLines(m))
         {
-            section.AddParagraph(m.Reference).Style = "Subtle";
+            section.AddParagraph(linea).Style = "Subtle";
         }
 
         if (m.IsReprint)
@@ -117,9 +114,11 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         // Comprador
         section.AddParagraph("Cliente").Style = "SectionTitle";
         section.AddParagraph(m.Buyer.Name);
-        section.AddParagraph(
-            string.IsNullOrWhiteSpace(m.Buyer.TaxId) ? "RTN: consumidor final" : $"RTN {m.Buyer.TaxId}")
-            .Style = "Subtle";
+        section.AddParagraph(BuyerIdLine(m.Buyer)).Style = "Subtle";
+        foreach (var linea in ExemptionLines(m.Buyer))
+        {
+            section.AddParagraph(linea).Style = "Subtle";
+        }
 
         // Detalle
         section.AddParagraph("Detalle").Style = "SectionTitle";
@@ -134,6 +133,8 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             letras.Style = "Subtle";
             letras.Format.SpaceBefore = Unit.FromPoint(6);
         }
+
+        RenderReceiverBlock(section, m, compact: false);
 
         // Pie legal
         Divider(section, LetterPalette);
@@ -175,19 +176,21 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         org.Format.Font.Bold = true;
         org.Format.Alignment = ParagraphAlignment.Center;
 
-        if (!string.IsNullOrWhiteSpace(m.Issuer.TaxId))
+        // El ticket de 80 mm es una Factura en papel térmico, no el Ticket de máquina registradora
+        // (art. 17): lleva todos los datos del emisor del art. 10.1, como la carta.
+        foreach (var linea in IssuerLines(m.Issuer))
         {
-            Centered(section, $"RTN {m.Issuer.TaxId}", "Subtle");
+            Centered(section, linea, "Subtle");
         }
 
         Divider(section, p);
 
         Centered(section, m.Fiscal.DocumentTypeName.ToUpperInvariant(), bold: true);
         Centered(section, m.Fiscal.FullNumber, bold: true);
-        Centered(section, m.Fiscal.IssuedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm", Hn), "Subtle");
-        if (!string.IsNullOrWhiteSpace(m.Reference))
+        Centered(section, $"Fecha de emisión: {m.Fiscal.IssuedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm", Hn)}", "Subtle");
+        foreach (var linea in ModifiesLines(m))
         {
-            Centered(section, m.Reference, "Subtle");
+            Centered(section, linea, "Subtle");
         }
 
         if (m.IsReprint)
@@ -198,9 +201,11 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         Divider(section, p);
 
         section.AddParagraph(m.Buyer.Name);
-        section.AddParagraph(
-            string.IsNullOrWhiteSpace(m.Buyer.TaxId) ? "Consumidor final" : $"RTN {m.Buyer.TaxId}")
-            .Style = "Subtle";
+        section.AddParagraph(BuyerIdLine(m.Buyer)).Style = "Subtle";
+        foreach (var linea in ExemptionLines(m.Buyer))
+        {
+            section.AddParagraph(linea).Style = "Subtle";
+        }
 
         Divider(section, p);
         RenderLinesTable(section, m, p, compact: true);
@@ -213,6 +218,8 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             letras.Style = "Subtle";
             letras.Format.SpaceBefore = Unit.FromPoint(4);
         }
+
+        RenderReceiverBlock(section, m, compact: true);
 
         Divider(section, p);
         RenderFiscalFooter(section, m);
@@ -336,9 +343,9 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             head.Borders.Bottom.Color = palette.Rule;
             head.Cells[0].AddParagraph("Concepto");
             head.Cells[1].AddParagraph("Cant.");
-            head.Cells[2].AddParagraph("P. unit.");
-            head.Cells[3].AddParagraph("Desc.");
-            head.Cells[4].AddParagraph("Importe");
+            head.Cells[2].AddParagraph("P. unit. (L)");
+            head.Cells[3].AddParagraph("Desc. (L)");
+            head.Cells[4].AddParagraph("Importe (L)");
         }
 
         foreach (var l in m.Lines)
@@ -349,8 +356,12 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
                 var desc = row.Cells[0].AddParagraph(l.Description);
                 desc.Format.Font.Size = 8;
                 row.Cells[0].AddParagraph(
-                    $"{Num(l.Quantity, 0)} × {Money(l.UnitPrice)}  {l.TaxMark}").Style = "Subtle";
-                row.Cells[1].AddParagraph(Money(l.Total)).Format.Font.Size = 8;
+                    $"{Num(l.Quantity, 0)} × L {Money(l.UnitPrice)}  {l.TaxMark}").Style = "Subtle";
+                if (l.DiscountAmount != 0m)
+                {
+                    row.Cells[0].AddParagraph($"Descuento L {Money(l.DiscountAmount)}").Style = "Subtle";
+                }
+                row.Cells[1].AddParagraph($"L {Money(l.Total)}").Format.Font.Size = 8;
             }
             else
             {
@@ -373,10 +384,18 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         AddTotalLine(section, "Importe exonerado", t.SubtotalExonerated, compact, siempre: false);
         AddTotalLine(section, "Importe gravado 15%", t.SubtotalTaxed15, compact, siempre: false);
         AddTotalLine(section, "Importe gravado 18%", t.SubtotalTaxed18, compact, siempre: false);
-        AddTotalLine(section, "Descuento", t.DiscountTotal, compact, siempre: false);
-        AddTotalLine(section, "ISV", t.TaxTotal, compact, siempre: false);
+        // Requisito del formato desde el Acuerdo 725-2018: va aunque sea cero.
+        AddTotalLine(section, "Descuentos y rebajas otorgados", t.DiscountTotal, compact, siempre: true);
+        // ISV discriminado por tarifa (art. 11.1.i). Si las líneas no lo separan (documentos sin
+        // líneas gravadas reconocibles), el total va como ISV sin tarifa: nunca se pierde.
+        AddTotalLine(section, "ISV 15%", t.Tax15, compact, siempre: false);
+        AddTotalLine(section, "ISV 18%", t.Tax18, compact, siempre: false);
+        var sinTarifa = t.TaxTotal - t.Tax15 - t.Tax18;
+        AddTotalLine(section, "ISV", sinTarifa, compact, siempre: false);
 
-        var total = section.AddParagraph($"TOTAL A PAGAR   {Money(t.GrandTotal)}");
+        // Una nota de crédito no se paga: es lo que se acredita (art. 26.5, importe total).
+        var etiqueta = m.Modifies is null ? "TOTAL A PAGAR" : "TOTAL DE LA NOTA";
+        var total = section.AddParagraph($"{etiqueta}   L {Money(t.GrandTotal)}");
         total.Format.Font.Bold = true;
         total.Format.Font.Size = compact ? 10 : 12;
         total.Format.Alignment = ParagraphAlignment.Right;
@@ -390,7 +409,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         {
             return;
         }
-        var p = section.AddParagraph($"{label}   {Money(value)}");
+        var p = section.AddParagraph($"{label}   L {Money(value)}");
         p.Format.Alignment = ParagraphAlignment.Right;
         p.Format.Font.Size = compact ? 8 : 9;
     }
@@ -405,7 +424,94 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         section.AddParagraph($"Rango autorizado: {m.Fiscal.Range}").Style = "Subtle";
         section.AddParagraph(
             $"Fecha límite de emisión: {m.Fiscal.LimitDate:dd/MM/yyyy}").Style = "Subtle";
-        section.AddParagraph("Original: cliente · Copia: obligado tributario").Style = "Subtle";
+        section.AddParagraph("Original: Cliente · Copia: Obligado tributario emisor").Style = "Subtle";
+    }
+
+    /// <summary>Datos del emisor del art. 10.1, en el orden en que se leen (sin la razón social, que va de título).</summary>
+    private static IEnumerable<string> IssuerLines(PdfIssuerInfo i)
+    {
+        if (!string.IsNullOrWhiteSpace(i.TradeName)
+            && !string.Equals(i.TradeName.Trim(), i.LegalName.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            yield return i.TradeName.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(i.TaxId))
+        {
+            yield return $"RTN {i.TaxId}";
+        }
+        if (!string.IsNullOrWhiteSpace(i.HeadOfficeAddress))
+        {
+            yield return $"Casa matriz: {i.HeadOfficeAddress}";
+            if (!string.IsNullOrWhiteSpace(i.Address))
+            {
+                yield return $"Establecimiento: {i.Address}";
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(i.Address))
+        {
+            yield return i.Address;
+        }
+        var contacto = string.Join(" · ", new[]
+        {
+            string.IsNullOrWhiteSpace(i.Phone) ? null : $"Tel. {i.Phone}",
+            string.IsNullOrWhiteSpace(i.Email) ? null : i.Email,
+        }.Where(x => x is not null));
+        if (contacto.Length > 0)
+        {
+            yield return contacto;
+        }
+    }
+
+    /// <summary>
+    /// Art. 11: RTN para crédito fiscal; si no, "CONSUMIDOR FINAL". Sobre L 10,000 el número de
+    /// identidad va en el espacio del RTN, y se imprime tal cual se capturó.
+    /// </summary>
+    private static string BuyerIdLine(PdfBuyerInfo b) =>
+        string.IsNullOrWhiteSpace(b.TaxId) ? "RTN: CONSUMIDOR FINAL" : $"RTN / identidad: {b.TaxId}";
+
+    /// <summary>
+    /// Datos del adquirente exonerado (art. 10.8). Es un requisito del formato: el espacio va
+    /// siempre, lleno o en blanco.
+    /// </summary>
+    private static IEnumerable<string> ExemptionLines(PdfBuyerInfo b)
+    {
+        var e = b.Exemption;
+        yield return $"N.º Orden de Compra Exenta: {e?.PurchaseOrderNumber ?? "—"}";
+        yield return $"N.º Constancia de Registro de Exonerados: {e?.ExemptRegistryNumber ?? "—"}";
+        yield return $"N.º Registro SAG: {e?.SagRegistryNumber ?? "—"}";
+    }
+
+    /// <summary>Nota de crédito: el comprobante que modifica (art. 26.3) y el motivo (art. 26.4).</summary>
+    private static IEnumerable<string> ModifiesLines(InvoicePdfModel m)
+    {
+        if (m.Modifies is { } o)
+        {
+            yield return $"Modifica la factura {o.FullNumber}";
+            yield return $"CAI de la factura: {o.Cai}";
+            if (o.IssuedAt != DateTimeOffset.MinValue)
+            {
+                yield return $"Fecha de emisión de la factura: {o.IssuedAt.ToLocalTime():dd/MM/yyyy}";
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(m.Reference))
+        {
+            yield return m.Reference;
+        }
+    }
+
+    /// <summary>Nota de crédito: quien la recibe deja nombre, identidad y firma (art. 26.7).</summary>
+    private static void RenderReceiverBlock(Section section, InvoicePdfModel m, bool compact)
+    {
+        if (m.Modifies is null)
+        {
+            return;
+        }
+        var titulo = section.AddParagraph("Recibe la nota de crédito");
+        titulo.Style = "SectionTitle";
+        var raya = compact ? "______________________" : "________________________________________";
+        section.AddParagraph($"Nombres y apellidos: {raya}");
+        section.AddParagraph($"Identidad: {raya}");
+        section.AddParagraph($"Firma: {raya}");
     }
 
     private static void Divider(Section section, Palette palette)

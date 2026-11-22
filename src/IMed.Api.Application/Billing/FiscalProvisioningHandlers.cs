@@ -64,13 +64,20 @@ public sealed class ProvisionFiscalRegimeHandler(
     OrganizationCatalogReconciler catalog,
     ILogger<ProvisionFiscalRegimeHandler> logger)
 {
-    /// <summary>Tipos de documento del SAR: (código, nombre, dígitos, mueve saldo, signo).</summary>
+    /// <summary>
+    /// Tipos de documento del SAR: (código, nombre, dígitos, mueve saldo, signo). Los dígitos son
+    /// los del Reglamento del Régimen de Facturación (Acuerdo 481-2017): 01 = Factura (art. 10.7),
+    /// 07 = Nota de Crédito (art. 25), 08 = Nota de Débito (art. 27). El SAR autoriza el rango con
+    /// ese código: un número con otro código queda fuera del rango autorizado.
+    ///
+    /// <para>No hay proforma: no es documento fiscal y el 04 que tenía es, en el SAR, el Recibo por
+    /// Honorarios Profesionales.</para>
+    /// </summary>
     private static readonly (string Code, string Name, string DocumentCode, bool Receivable, short Sign)[] HnDocumentTypes =
     [
         ("factura", "Factura", "01", true, 1),
-        ("nota_debito", "Nota de débito", "02", true, 1),
-        ("nota_credito", "Nota de crédito", "03", true, -1),
-        ("proforma", "Proforma", "04", false, 0),
+        ("nota_credito", "Nota de crédito", "07", true, -1),
+        ("nota_debito", "Nota de débito", "08", true, 1),
     ];
 
     /// <summary>

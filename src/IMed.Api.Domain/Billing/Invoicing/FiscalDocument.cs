@@ -44,6 +44,15 @@ public sealed class FiscalDocument
     public string? BuyerTaxId { get; private set; }
     public string BuyerName { get; private set; } = string.Empty;
 
+    /// <summary>Adquirente exonerado (art. 10.8): N.º de Orden de Compra Exenta.</summary>
+    public string? BuyerExemptPurchaseOrder { get; private set; }
+
+    /// <summary>Adquirente exonerado (art. 10.8): N.º de Constancia del Registro de Exonerados.</summary>
+    public string? BuyerExemptRegistry { get; private set; }
+
+    /// <summary>Adquirente exonerado (art. 10.8): N.º de Registro de la SAG.</summary>
+    public string? BuyerSagRegistry { get; private set; }
+
     // ── Subtotales por tratamiento tributario ──
     // Separados porque es lo que el contador necesita para declarar: exento, exonerado y cada
     // tasa gravada van en renglones distintos de la declaración.
@@ -104,7 +113,8 @@ public sealed class FiscalDocument
         string? buyerTaxId = null,
         Guid? replacesDocumentId = null,
         TimeProvider? timeProvider = null,
-        IssuerSnapshot? issuer = null)
+        IssuerSnapshot? issuer = null,
+        BuyerExemption? exemption = null)
     {
         if (string.IsNullOrWhiteSpace(fullNumber))
         {
@@ -140,6 +150,9 @@ public sealed class FiscalDocument
             BuyerPartyId = buyerPartyId,
             BuyerTaxId = buyerTaxId,
             BuyerName = buyerName.Trim(),
+            BuyerExemptPurchaseOrder = exemption?.PurchaseOrderNumber,
+            BuyerExemptRegistry = exemption?.ExemptRegistryNumber,
+            BuyerSagRegistry = exemption?.SagRegistryNumber,
             SubtotalExempt = subtotalExempt,
             SubtotalExonerated = subtotalExonerated,
             SubtotalTaxed15 = subtotalTaxed15,

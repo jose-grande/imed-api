@@ -17,6 +17,10 @@ namespace IMed.Api.Application.Billing;
 /// <param name="CashPointName">La caja del turno abierto del usuario, si tiene uno.</param>
 /// <param name="BuyerName">Nombre que lleva la factura si no se cambia.</param>
 /// <param name="BuyerTaxId">RTN registrado del cliente, si tiene.</param>
+/// <param name="IssuerWarning">
+/// Datos del emisor que el SAR exige en la factura (art. 10.1) y que faltan en la sede o su razón
+/// social. Avisa, no bloquea: la factura sale igual, pero incompleta.
+/// </param>
 public sealed record AccountCheckoutDto(
     AccountStatementDto Statement,
     IReadOnlyList<InvoiceDto> OpenInvoices,
@@ -26,7 +30,8 @@ public sealed record AccountCheckoutDto(
     string? CollectBlocker,
     string? CashPointName,
     string? BuyerName,
-    string? BuyerTaxId)
+    string? BuyerTaxId,
+    string? IssuerWarning = null)
 {
     /// <summary>Todo lo que se puede cobrar hoy: lo facturable más el saldo.</summary>
     public decimal TotalDue => InvoiceBlocker is null ? PendingToInvoice + BalanceDue : BalanceDue;
@@ -40,7 +45,8 @@ public sealed record AccountCheckoutInput(
     string? BuyerTaxId,
     IReadOnlyList<TenderLine>? Tenders,
     IReadOnlyList<Guid>? InvoiceIds = null,
-    bool InvoicePending = true);
+    bool InvoicePending = true,
+    BuyerExemption? Exemption = null);
 
 /// <summary>
 /// Lo que pasó. Si la factura salió y el cobro no, la factura queda emitida y pendiente: un número
@@ -75,6 +81,8 @@ public sealed class AccountCheckoutHandler(
     IssueInvoiceHandler issueInvoice,
     ReceivePaymentHandler receivePayment,
     ResolveActiveLocationHandler activeLocation,
+    ILocationRepository locations,
+    ILegalEntityRepository legalEntities,
     ILogger<AccountCheckoutHandler> logger)
 {
     public async Task<AccountCheckoutDto?> GetAsync(
@@ -110,7 +118,46 @@ public sealed class AccountCheckoutHandler(
             BalanceDue: abiertas.Sum(f => f.Balance),
             bloqueo, bloqueoCobro, cajaNombre,
             BuyerName: parte?.LegalName ?? estado.Account.PartyName,
-            BuyerTaxId: parte?.TaxId);
+            BuyerTaxId: parte?.TaxId,
+            IssuerWarning: porFacturar.Count > 0 ? await EmisorIncompletoAsync(organizationId, userId, ct) : null);
+    }
+
+    /// <summary>
+    /// Qué le falta al emisor de la sede activa para cumplir el art. 10.1 del Reglamento del SAR:
+    /// dirección, teléfono y correo. <c>null</c> si está completo o si no se puede saber.
+    /// </summary>
+    private async Task<string?> EmisorIncompletoAsync(Guid organizationId, Guid userId, CancellationToken ct)
+    {
+        try
+        {
+            var sedeId = await activeLocation.HandleAsync(organizationId, userId, null, ct);
+            var sede = await locations.GetAsync(organizationId, sedeId, ct);
+            if (sede is null)
+            {
+                return null;
+            }
+            var razon = await legalEntities.GetAsync(organizationId, sede.LegalEntityId, ct);
+            var faltan = new List<string>();
+            if (string.IsNullOrWhiteSpace(sede.Address) && string.IsNullOrWhiteSpace(razon?.FiscalAddress))
+            {
+                faltan.Add("dirección");
+            }
+            if (string.IsNullOrWhiteSpace(sede.Phone) && string.IsNullOrWhiteSpace(razon?.Phone))
+            {
+                faltan.Add("teléfono");
+            }
+            if (string.IsNullOrWhiteSpace(razon?.Email))
+            {
+                faltan.Add("correo electrónico");
+            }
+            return faltan.Count == 0 ? null
+                : $"La factura saldrá sin {string.Join(", ", faltan)} del emisor, que el SAR exige. "
+                  + "El administrador los completa en la sede y su razón social.";
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     /// <exception cref="InvalidOperationException">
@@ -201,7 +248,8 @@ public sealed class AccountCheckoutHandler(
             organizationId, accountId, sede, tipo.Id,
             BuyerTaxId: string.IsNullOrWhiteSpace(input.BuyerTaxId) ? null : input.BuyerTaxId.Trim(),
             BuyerName: string.IsNullOrWhiteSpace(input.BuyerName) ? null : input.BuyerName.Trim(),
-            UserId: userId), ct);
+            UserId: userId,
+            Exemption: input.Exemption), ct);
         // Otro clic ganó la emisión: no es un error, la factura ya existe y se cobra esa.
         if (r.Rejected is { Code: "sin_cargos" })
         {
