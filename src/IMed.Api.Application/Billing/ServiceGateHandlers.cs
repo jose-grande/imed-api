@@ -102,8 +102,11 @@ public sealed class EvaluateServiceGateHandler(
 /// Implementación del puerto que consumen los módulos clínicos. Traduce el veredicto completo a
 /// lo mínimo que el laboratorio necesita: qué mostrar y cuánto falta.
 /// </summary>
-public sealed class ServiceGateAdapter(EvaluateServiceGateHandler handler) : IServiceGate
+public sealed class ServiceGateAdapter(EvaluateServiceGateHandler handler, IBillingSettingsRepository settings) : IServiceGate
 {
+    public async Task<bool> RequiresPaymentBeforeServiceAsync(Guid organizationId, CancellationToken ct = default) =>
+        (await settings.GetAsync(organizationId, ct)).CollectionMode == Domain.Billing.BillingCollectionMode.BeforeService;
+
     public async Task<ServiceGateStatus> EvaluateAsync(
         Guid organizationId, string serviceRequestId, string? priority, CancellationToken ct = default)
     {

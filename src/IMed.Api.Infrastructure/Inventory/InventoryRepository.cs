@@ -382,6 +382,12 @@ public sealed class InventoryRepository(AppDbContext db) : IInventoryRepository
     public Task<PharmacyDispense?> FindDispenseByKeyAsync(Guid organizationId, string idempotencyKey, CancellationToken ct = default) =>
         db.PharmacyDispenses.FirstOrDefaultAsync(d => d.OrganizationId == organizationId && d.IdempotencyKey == idempotencyKey, ct);
 
+    public async Task<IReadOnlyList<PharmacyDispense>> ListDispensesByAccountAsync(
+        Guid organizationId, Guid accountId, CancellationToken ct = default) =>
+        await db.PharmacyDispenses
+            .Where(d => d.OrganizationId == organizationId && d.AccountId == accountId)
+            .ToListAsync(ct);
+
     public Task<PharmacyDispense?> FindDispenseByLineAsync(Guid organizationId, Guid lineId, CancellationToken ct = default) =>
         db.PharmacyDispenses.FirstOrDefaultAsync(
             d => d.OrganizationId == organizationId && d.Lines.Any(l => l.Id == lineId), ct);

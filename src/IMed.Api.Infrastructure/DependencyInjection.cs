@@ -303,6 +303,7 @@ public static class DependencyInjection
         services.AddScoped<IAuthorizationLimitRepository, AuthorizationLimitRepository>();
         services.AddScoped<IInvoiceRepository, InvoiceRepository>();
         services.AddScoped<ICashRepository, CashRepository>();
+        services.AddScoped<IPaymentTerminalRepository, PaymentTerminalRepository>();
         services.AddScoped<IServiceWaiverRepository, ServiceWaiverRepository>();
         services.AddScoped<IFiscalReportRepository, FiscalReportRepository>();
         services.AddSingleton<IFiscalAdapter, HondurasSarAdapter>();
@@ -549,7 +550,13 @@ public static class DependencyInjection
         services.AddScoped<RegisterCashMovementHandler>();
         services.AddScoped<GetOpenSessionHandler>();
         services.AddScoped<GetSessionTenderSummaryHandler>();
+        services.AddScoped<GetCashReportHandler>();
+        services.AddScoped<CounterSaleHandler>();
+        services.AddScoped<AppointmentConsultationResolver>();
+        services.AddScoped<IInvoiceIssuedObserver, IMed.Api.Application.Pharmacy.DispenseInvoiceSync>();
+        services.AddScoped<IMed.Api.Application.Patients.QuickRegisterPatientHandler>();
         services.AddScoped<ReceivePaymentHandler>();
+        services.AddScoped<PaymentTerminalHandlers>();
         services.AddScoped<ListSessionPaymentsHandler>();
 
         // Puerta de prepago y orden de servicio (FAC-7).

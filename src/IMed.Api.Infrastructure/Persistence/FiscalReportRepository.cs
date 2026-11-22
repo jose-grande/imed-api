@@ -55,6 +55,25 @@ public sealed class FiscalReportRepository(AppDbContext db, IClinicClock clock) 
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<BillingCharge>> ListLivePrepaidConsultationsAsync(
+        Guid organizationId, DateOnly since, DateOnly until, CancellationToken ct = default)
+    {
+        var (desde, hasta) = Rango(since, until);
+        // La cita se cancela antes de su fecha (o se marca "no se presentó" ese día): con 90 días
+        // hacia atrás alcanza, y evita leer de HAPI cada consulta precobrada de la historia.
+        var citasDesde = clock.StartOf(since.AddDays(-90));
+        return await db.BillingCharges.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId
+                        && x.SourceKind == ChargeSourceKind.Appointment
+                        && x.Status != ChargeStatus.Reversed
+                        && x.CreatedAt < hasta
+                        && x.PerformedAt >= citasDesde
+                        && !db.CreditNoteLines.Any(l => l.OrganizationId == organizationId && l.ChargeId == x.Id))
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(1000)
+            .ToListAsync(ct);
+    }
+
     /// <summary>
     /// Rango medio abierto <c>[desde, hasta)</c>, con el día final incluido: quien pide "del 1 al
     /// 25" espera que lo del 25 a las 18:00 aparezca.

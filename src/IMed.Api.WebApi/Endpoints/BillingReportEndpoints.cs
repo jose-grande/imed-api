@@ -27,6 +27,11 @@ public static class BillingReportEndpoints
             .WithName("GetDailyCashCut")
             .WithSummary("Corte de caja del día, por caja y por cajero.");
 
+        group.MapGet("/cash", CashReportAsync)
+            .WithName("GetCashReport")
+            .WithSummary("Cajas por sede y cajero en un rango de días, con totales por método. Incluye lo cobrado de turnos abiertos: solo para quien supervisa.")
+            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.BillingSupervise));
+
         group.MapGet("/tax", TaxAsync)
             .WithName("GetTaxReport")
             .WithSummary("ISV por tratamiento tributario, para declarar.");
@@ -59,6 +64,25 @@ public static class BillingReportEndpoints
         catch (ArgumentException ex)
         {
             return Results.Problem(title: "Falta la razón social", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static async Task<IResult> CashReportAsync(
+        DateOnly? from, DateOnly? to, Guid? locationId, Guid? cashierId, ClaimsPrincipal principal,
+        GetCashReportHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        if (orgId is null)
+        {
+            return Forbidden();
+        }
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(orgId.Value, from, to, locationId, cashierId, ct));
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Rango inválido", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 

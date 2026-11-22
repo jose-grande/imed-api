@@ -17,10 +17,13 @@ public sealed record PaymentDto(
     string Status,
     decimal AllocatedAmount,
     decimal ChangeDue,
-    IReadOnlyList<PaymentAllocationDto> Allocations);
+    IReadOnlyList<PaymentAllocationDto> Allocations,
+    Guid? TerminalId = null);
 
 /// <summary>Una porción del cobro: qué método y cuánto. Es lo que permite el pago mixto.</summary>
-public sealed record TenderLine(string Method, decimal Amount, string? Reference);
+/// <param name="TerminalId">POS (tarjeta) o cuenta bancaria (transferencia) que recibió el pago.
+/// Obligatorio si la sede de la caja tiene alguno activo de ese tipo: ver <see cref="PaymentTerminalRule"/>.</param>
+public sealed record TenderLine(string Method, decimal Amount, string? Reference, Guid? TerminalId = null);
 
 public sealed record ReceivePaymentCommand(
     Guid OrganizationId,
@@ -60,7 +63,8 @@ public sealed class ReceivePaymentHandler(
     IInvoiceRepository invoices,
     IFiscalRepository fiscal,
     ILocationRepository locations,
-    ILegalEntityRepository legalEntities)
+    ILegalEntityRepository legalEntities,
+    IPaymentTerminalRepository terminals)
 {
     /// <summary>
     /// Razón social de una factura anterior a FAC-9, que no la guarda: la de la sede de su
@@ -143,6 +147,18 @@ public sealed class ReceivePaymentHandler(
             }
         }
 
+        // ── POS o cuenta de cada pago que no es efectivo (cierre por banco) ──
+        var terminalesDeLaSede = caja is null
+            ? []
+            : (await terminals.ListAsync(cmd.OrganizationId, caja.LocationId, ct)).Where(t => t.Active).ToList();
+        foreach (var t in cmd.Tenders)
+        {
+            if (PaymentTerminalRule.Check(ParseMethod(t.Method), t.TerminalId, terminalesDeLaSede) is { } rechazo)
+            {
+                return ReceivePaymentResult.Reject(rechazo.Code, rechazo.Message);
+            }
+        }
+
         var porCobrar = facturas.Sum(f => f.Balance);
         var tendido = cmd.Tenders.Sum(t => t.Amount);
 
@@ -187,7 +203,7 @@ public sealed class ReceivePaymentHandler(
             {
                 pago = Payment.Receive(
                     cmd.OrganizationId, cmd.PartyId, cmd.SessionId, metodo,
-                    tender.Amount, cmd.ReceivedBy, tender.Reference);
+                    tender.Amount, cmd.ReceivedBy, tender.Reference, terminalId: tender.TerminalId);
             }
             catch (ArgumentException ex)
             {
@@ -235,7 +251,7 @@ public sealed class ReceivePaymentHandler(
     internal static PaymentDto ToDto(Payment p) =>
         new(p.Id, p.PartyId, p.Method.ToString(), p.Amount, p.Reference, p.CashSessionId,
             p.ReceivedAt, p.Status.ToString(), p.AllocatedAmount, p.ChangeDue,
-            p.Allocations.Select(a => new PaymentAllocationDto(a.InvoiceId, a.Amount)).ToList());
+            p.Allocations.Select(a => new PaymentAllocationDto(a.InvoiceId, a.Amount)).ToList(), p.TerminalId);
 }
 
 /// <summary>Cobros de un turno, o por qué no se pueden ver.</summary>

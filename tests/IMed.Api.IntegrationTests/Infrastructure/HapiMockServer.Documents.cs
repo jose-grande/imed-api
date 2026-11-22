@@ -148,6 +148,10 @@ public sealed partial class HapiMockServer
             .RespondWith(Response.Create().WithCallback(req => SearchDocuments("Encounter", req)));
 
         _server
+            .Given(Request.Create().WithPath("/fhir/Appointment").UsingGet())
+            .RespondWith(Response.Create().WithCallback(req => SearchDocuments("Appointment", req)));
+
+        _server
             .Given(Request.Create().WithPath("/fhir/AllergyIntolerance").UsingGet())
             .RespondWith(Response.Create().WithCallback(req => SearchDocuments("AllergyIntolerance", req)));
 
@@ -216,6 +220,8 @@ public sealed partial class HapiMockServer
                 "patient" => values.Contains((string?)r["patient"]?["reference"])
                     || values.Contains((string?)r["subject"]?["reference"]),
                 "encounter" => values.Contains((string?)r["encounter"]?["reference"]),
+                "identifier" => (r["identifier"] as JsonArray)?.Any(i =>
+                    values.Contains($"{(string?)i?["system"]}|{(string?)i?["value"]}")) == true,
                 "clinical-status" => values.Contains((string?)r["clinicalStatus"]?["coding"]?[0]?["code"]),
                 "category" => (r["category"] as JsonArray)?.Any(c =>
                     (c?["coding"] as JsonArray)?.Any(cd => values.Contains((string?)cd?["code"])) == true) == true,

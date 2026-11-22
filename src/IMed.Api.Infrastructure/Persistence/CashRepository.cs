@@ -33,6 +33,38 @@ public sealed class CashRepository(AppDbContext db, IClinicClock clock) : ICashR
             .Where(x => x.OrganizationId == organizationId && x.Status == CashSessionStatus.Open)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<CashSession>> ListSessionsOpenedBetweenAsync(
+        Guid organizationId, DateTimeOffset from, DateTimeOffset before, CancellationToken ct = default) =>
+        await db.CashSessions.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.OpenedAt >= from && x.OpenedAt < before)
+            .OrderBy(x => x.OpenedAt)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<Payment>> ListPaymentsForSessionsAsync(
+        Guid organizationId, IReadOnlyCollection<Guid> sessionIds, CancellationToken ct = default)
+    {
+        if (sessionIds.Count == 0)
+        {
+            return [];
+        }
+        return await db.Payments.AsNoTracking()
+            .Include(x => x.Allocations)
+            .Where(x => x.OrganizationId == organizationId && sessionIds.Contains(x.CashSessionId))
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<CashMovement>> ListMovementsForSessionsAsync(
+        Guid organizationId, IReadOnlyCollection<Guid> sessionIds, CancellationToken ct = default)
+    {
+        if (sessionIds.Count == 0)
+        {
+            return [];
+        }
+        return await db.CashMovements.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && sessionIds.Contains(x.CashSessionId))
+            .ToListAsync(ct);
+    }
+
     public Task<CashSession?> FindOpenSessionByCashierAsync(
         Guid organizationId, Guid cashierUserId, CancellationToken ct = default) =>
         db.CashSessions.AsNoTracking()

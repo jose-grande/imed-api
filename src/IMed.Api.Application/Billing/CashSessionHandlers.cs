@@ -306,10 +306,21 @@ public sealed class RegisterCashMovementHandler(ICashRepository cash)
 
 /// <summary>Estado del turno abierto de un cajero, sin revelar el esperado.</summary>
 /// <summary>Un cobro que no es efectivo, con lo que hace falta para buscarlo en el comprobante.</summary>
-public sealed record TenderLineDto(Guid PaymentId, string? Reference, decimal Amount, DateTimeOffset ReceivedAt);
+public sealed record TenderLineDto(
+    Guid PaymentId, string? Reference, decimal Amount, DateTimeOffset ReceivedAt,
+    Guid? TerminalId = null, string? TerminalName = null);
 
-/// <summary>Los cobros de un método en el turno.</summary>
-public sealed record TenderGroupDto(string Method, int Count, decimal Total, IReadOnlyList<TenderLineDto> Lines);
+/// <summary>
+/// Lo cobrado en un POS o una cuenta bancaria: es lo que se compara con el cierre de lote de ese
+/// banco. <c>TerminalId</c> nulo agrupa los pagos que no dijeron a dónde entraron (los anteriores
+/// al alta de los terminales, o de una sede sin terminales).
+/// </summary>
+public sealed record TerminalTotalDto(Guid? TerminalId, string Name, string Method, int Count, decimal Amount);
+
+/// <summary>Los cobros de un método en el turno, con su subtotal por POS o cuenta.</summary>
+public sealed record TenderGroupDto(
+    string Method, int Count, decimal Total, IReadOnlyList<TenderLineDto> Lines,
+    IReadOnlyList<TerminalTotalDto>? ByTerminal = null);
 
 /// <summary>El arqueo del efectivo. Solo existe con el turno cerrado.</summary>
 public sealed record CashCountDto(
@@ -344,7 +355,8 @@ public sealed record SessionTenderSummaryDto(
 ///
 /// <para>Con el turno cerrado se agrega el efectivo, con su arqueo completo.</para>
 /// </summary>
-public sealed class GetSessionTenderSummaryHandler(ICashRepository cash, CashExpectationCalculator calculator)
+public sealed class GetSessionTenderSummaryHandler(
+    ICashRepository cash, CashExpectationCalculator calculator, IPaymentTerminalRepository terminals)
 {
     public async Task<SessionTenderSummaryDto?> HandleAsync(
         Guid orgId, Guid sessionId, CancellationToken ct = default)
@@ -359,6 +371,7 @@ public sealed class GetSessionTenderSummaryHandler(ICashRepository cash, CashExp
             .Where(p => p.Status == PaymentStatus.Applied)
             .ToList();
         var cerrado = !turno.IsOpen;
+        var nombres = await TerminalNames.LoadAsync(terminals, orgId, ct);
 
         var grupos = pagos
             .Where(p => cerrado || p.Method != PaymentMethod.Cash)
@@ -371,8 +384,10 @@ public sealed class GetSessionTenderSummaryHandler(ICashRepository cash, CashExp
                 Math.Round(g.Sum(p => g.Key == PaymentMethod.Cash ? p.CashImpact : p.Amount), 2, MidpointRounding.AwayFromZero),
                 g.OrderBy(p => p.ReceivedAt)
                     .Select(p => new TenderLineDto(
-                        p.Id, p.Reference, g.Key == PaymentMethod.Cash ? p.CashImpact : p.Amount, p.ReceivedAt))
-                    .ToList()))
+                        p.Id, p.Reference, g.Key == PaymentMethod.Cash ? p.CashImpact : p.Amount, p.ReceivedAt,
+                        p.TerminalId, TerminalNames.Of(nombres, p.TerminalId)))
+                    .ToList(),
+                TerminalNames.Totals(g, nombres, p => p.Amount)))
             .ToList();
 
         CashCountDto? arqueo = null;
@@ -412,5 +427,41 @@ public sealed class GetOpenSessionHandler(ICashRepository cash)
         // `ElArqueo_noRevelaElEsperadoAntesDelConteo` lo detiene.
         return new OpenSessionSummaryDto(
             CashMapper.ToDto(turno), pagos.Count, movimientos.Count);
+    }
+}
+
+/// <summary>Nombres de los POS y cuentas para los cierres, y los subtotales por terminal.</summary>
+public static class TerminalNames
+{
+    public const string SinTerminal = "Sin POS o cuenta indicada";
+
+    public static async Task<IReadOnlyDictionary<Guid, string>> LoadAsync(
+        IPaymentTerminalRepository terminals, Guid orgId, CancellationToken ct) =>
+        (await terminals.ListAsync(orgId, null, ct)).ToDictionary(t => t.Id, PaymentTerminalMapper.Label);
+
+    public static string? Of(IReadOnlyDictionary<Guid, string> nombres, Guid? id) =>
+        id is { } t ? nombres.GetValueOrDefault(t, "(terminal eliminado)") : null;
+
+    /// <summary>
+    /// Subtotal por terminal de los pagos de tarjeta y transferencia. Vacío si ninguno indicó
+    /// terminal: una clínica que no los usa ve su cierre como siempre.
+    /// </summary>
+    public static IReadOnlyList<TerminalTotalDto> Totals(
+        IEnumerable<Payment> pagos, IReadOnlyDictionary<Guid, string> nombres, Func<Payment, decimal> monto)
+    {
+        var conTerminal = pagos
+            .Where(p => p.Method is PaymentMethod.Card or PaymentMethod.Transfer)
+            .ToList();
+        if (!conTerminal.Any(p => p.TerminalId is not null))
+        {
+            return [];
+        }
+        return conTerminal
+            .GroupBy(p => (p.Method, p.TerminalId))
+            .Select(g => new TerminalTotalDto(
+                g.Key.TerminalId, Of(nombres, g.Key.TerminalId) ?? SinTerminal, g.Key.Method.ToString(), g.Count(),
+                Math.Round(g.Sum(monto), 2, MidpointRounding.AwayFromZero)))
+            .OrderBy(t => t.Method).ThenBy(t => t.TerminalId is null).ThenBy(t => t.Name, StringComparer.CurrentCulture)
+            .ToList();
     }
 }

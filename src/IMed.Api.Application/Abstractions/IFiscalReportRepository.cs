@@ -25,4 +25,12 @@ public interface IFiscalReportRepository
     /// <summary>Cargos con descuento que alguien tuvo que autorizar.</summary>
     Task<IReadOnlyList<BillingCharge>> ListAuthorizedDiscountsAsync(
         Guid organizationId, DateOnly since, DateOnly until, CancellationToken ct = default);
+
+    /// <summary>
+    /// Consultas cobradas por adelantado (cargo con origen cita) que siguen vivas: ni reversadas ni
+    /// con nota de crédito. Pagadas antes del fin del rango y con la cita desde 90 días antes de su
+    /// inicio. Si la cita se canceló, ese dinero quedó en una cita que ya no se va a atender.
+    /// </summary>
+    Task<IReadOnlyList<BillingCharge>> ListLivePrepaidConsultationsAsync(
+        Guid organizationId, DateOnly since, DateOnly until, CancellationToken ct = default);
 }

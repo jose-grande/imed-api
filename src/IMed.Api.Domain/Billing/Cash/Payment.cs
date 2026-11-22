@@ -24,6 +24,12 @@ public sealed class Payment
     /// <summary>Número de voucher, de transferencia o de cheque. Es lo que permite conciliar.</summary>
     public string? Reference { get; private set; }
 
+    /// <summary>
+    /// POS o cuenta bancaria que recibió el pago (tarjeta o transferencia), si la sede los tiene
+    /// dados de alta. Es lo que separa el cierre por banco: ver <see cref="PaymentTerminal"/>.
+    /// </summary>
+    public Guid? TerminalId { get; private set; }
+
     /// <summary>Turno en el que se cobró. Es lo que hace que el pago cuente en ese arqueo.</summary>
     public Guid CashSessionId { get; private set; }
 
@@ -46,7 +52,8 @@ public sealed class Payment
         Guid receivedBy,
         string? reference = null,
         string currency = "HNL",
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Guid? terminalId = null)
     {
         if (amount <= 0)
         {
@@ -74,6 +81,7 @@ public sealed class Payment
             Amount = amount,
             Currency = string.IsNullOrWhiteSpace(currency) ? "HNL" : currency.Trim().ToUpperInvariant(),
             Reference = string.IsNullOrWhiteSpace(reference) ? null : reference.Trim(),
+            TerminalId = terminalId,
             ReceivedBy = receivedBy,
             ReceivedAt = now,
             Status = PaymentStatus.Applied,

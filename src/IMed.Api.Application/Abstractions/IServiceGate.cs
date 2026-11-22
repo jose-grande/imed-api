@@ -26,4 +26,11 @@ public interface IServiceGate
     /// <param name="priority">Prioridad FHIR. <c>stat</c> y <c>urgent</c> nunca se detienen.</param>
     Task<ServiceGateStatus> EvaluateAsync(
         Guid organizationId, string serviceRequestId, string? priority, CancellationToken ct = default);
+
+    /// <summary>
+    /// La organización cobra antes del servicio (modo "antes", UX-Cobro-Anticipado D1): ahí, y solo
+    /// ahí, lo pendiente de pago detiene la toma de muestra. Es una decisión de la institución, no
+    /// del laboratorio; en los demás modos la puerta solo informa, como siempre.
+    /// </summary>
+    Task<bool> RequiresPaymentBeforeServiceAsync(Guid organizationId, CancellationToken ct = default);
 }

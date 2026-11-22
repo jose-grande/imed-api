@@ -454,6 +454,11 @@ public static class LabReceptionEndpoints
         {
             return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
+        catch (InvalidOperationException ex)
+        {
+            // Prepago estricto (modo "antes"): la orden está pendiente de pago.
+            return Results.Problem(title: "Pendiente de pago", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
     }
 
     private static async Task<IResult> PrintContainerLabelAsync(

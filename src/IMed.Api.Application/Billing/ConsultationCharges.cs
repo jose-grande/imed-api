@@ -79,6 +79,9 @@ public enum ConsultationChargeOutcome
     Reversed,
     /// <summary>El cargo ya estaba facturado: no se toca (hace falta nota de crédito, P4).</summary>
     InvoicedUntouched,
+
+    /// <summary>La consulta ya se pagó en caja con su cita: no se genera otro cargo.</summary>
+    Prepaid,
     /// <summary>No se pudo cobrar (sin régimen fiscal, sin sede, cuenta cerrada…). Va al log.</summary>
     Skipped,
 }
@@ -102,6 +105,7 @@ public enum ConsultationChargeOutcome
 /// escritura; si no puede cobrar, deja constancia en el log y el reporte de consultas sin cargo.</para>
 /// </summary>
 public sealed class EncounterChargeReconciler(
+    IBillingSettingsRepository settings,
     IHapiFhirClient hapi,
     IBillableItemProvisioner provisioner,
     IEncounterAccountResolver accountResolver,
@@ -136,6 +140,16 @@ public sealed class EncounterChargeReconciler(
         if (!Cobrables.Contains(estado))
         {
             return ConsultationChargeOutcome.NotBillable;
+        }
+
+        // Consulta precobrada (UX-Cobro-Anticipado F3, §3.3). Es el único punto en que el cobro
+        // anticipado toca este flujo, y solo con modo "antes" o "mixto": con "después" —el valor
+        // por defecto— la pregunta ni se hace y el camino sigue exactamente igual que antes.
+        // Se respeta lo pagado aunque el tipo de consulta cambie (D3): ni se cobra ni se devuelve
+        // la diferencia.
+        if (vivos.Count == 0 && await PrecobradaAsync(orgId, encuentro, ct))
+        {
+            return ConsultationChargeOutcome.Prepaid;
         }
 
         var paciente = RefId(encuentro["subject"]?["reference"], "Patient");
@@ -214,6 +228,28 @@ public sealed class EncounterChargeReconciler(
         return r.AlreadyCharged ? ConsultationChargeOutcome.AlreadyCharged
             : reemplazo ? ConsultationChargeOutcome.Replaced
             : ConsultationChargeOutcome.Captured;
+    }
+
+    /// <summary>¿Alguna cita del encuentro tiene su consulta pagada en caja?</summary>
+    private async Task<bool> PrecobradaAsync(Guid orgId, JsonObject encuentro, CancellationToken ct)
+    {
+        if ((await settings.GetAsync(orgId, ct)).CollectionMode == Domain.Billing.BillingCollectionMode.AfterService)
+        {
+            return false;
+        }
+        var citas = encuentro["appointment"]?.AsArray()
+            .Select(a => RefId(a?["reference"], "Appointment"))
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .ToList() ?? [];
+        foreach (var cita in citas)
+        {
+            if (await accounts.FindAnyLiveChargeBySourceAsync(orgId, ChargeSourceKind.Appointment, cita, ct) is not null)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private async Task<ConsultationChargeOutcome> ReversarAsync(

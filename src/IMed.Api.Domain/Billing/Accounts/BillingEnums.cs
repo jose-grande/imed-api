@@ -56,6 +56,12 @@ public enum ChargeSourceKind
     /// <summary>De una dispensación de farmacia (U3).</summary>
     PharmacyDispense = 3,
 
+    /// <summary>
+    /// Consulta cobrada en caja antes de atenderse, atada a su cita (UX-Cobro-Anticipado F3). Al
+    /// iniciar la consulta no se genera otro cargo: el de la cita ya la cubre.
+    /// </summary>
+    Appointment = 4,
+
     /// <summary>Tecleado por alguien. La excepción, y queda marcada como tal.</summary>
     Manual = 9,
 }

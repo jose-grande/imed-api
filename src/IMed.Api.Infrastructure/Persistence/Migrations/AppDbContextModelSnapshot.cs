@@ -475,6 +475,14 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
 
+                    b.Property<string>("CollectionMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("AfterService")
+                        .HasColumnName("collection_mode");
+
                     b.Property<int>("FollowUpWindowDays")
                         .HasColumnType("integer")
                         .HasColumnName("follow_up_window_days");
@@ -683,6 +691,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("status");
 
+                    b.Property<Guid?>("TerminalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("terminal_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CashSessionId", "Status")
@@ -723,6 +735,59 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                     b.HasIndex("PaymentId");
 
                     b.ToTable("billing_payment_allocation", (string)null);
+                });
+
+            modelBuilder.Entity("IMed.Api.Domain.Billing.Cash.PaymentTerminal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Bank")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("bank");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "LocationId")
+                        .HasDatabaseName("ix_payment_terminal_org_location");
+
+                    b.ToTable("billing_payment_terminal", (string)null);
                 });
 
             modelBuilder.Entity("IMed.Api.Domain.Billing.Catalog.BillableItem", b =>

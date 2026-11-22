@@ -2,6 +2,7 @@ using System.Security.Claims;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Billing;
 using IMed.Api.Domain.Authorization;
+using IMed.Api.Domain.Billing;
 using IMed.Api.WebApi.Http;
 
 namespace IMed.Api.WebApi.Endpoints;
@@ -85,7 +86,7 @@ public static class ConsultationBillingEndpoints
             return Results.Forbid();
         }
         var s = await repo.GetAsync(org, ct);
-        return Results.Ok(new BillingSettingsDto(s.FollowUpWindowDays));
+        return Results.Ok(BillingSettingsDto.From(s));
     }
 
     private static async Task<IResult> PutSettingsAsync(
@@ -100,13 +101,23 @@ public static class ConsultationBillingEndpoints
         try
         {
             s.SetFollowUpWindow(request.FollowUpWindowDays, timeProvider);
+            // Opcional: quien no lo manda no lo cambia (clientes anteriores al modo de cobro).
+            if (request.CollectionMode is { } modo)
+            {
+                if (!Enum.TryParse<BillingCollectionMode>(modo, ignoreCase: true, out var m) || !Enum.IsDefined(m))
+                {
+                    return Results.Problem(title: "Solicitud inválida",
+                        detail: "El modo de cobro es AfterService, BeforeService o Mixed.", statusCode: 400);
+                }
+                s.SetCollectionMode(m, timeProvider);
+            }
         }
         catch (ArgumentOutOfRangeException ex)
         {
             return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: 400);
         }
         await repo.SaveAsync(s, ct);
-        return Results.Ok(new BillingSettingsDto(s.FollowUpWindowDays));
+        return Results.Ok(BillingSettingsDto.From(s));
     }
 
     private static async Task<IResult> ActivateSpecialtyAsync(
@@ -136,4 +147,9 @@ public static class ConsultationBillingEndpoints
         Guid.TryParse(principal.FindFirstValue("organization_id"), out var id) ? id : null;
 }
 
-public sealed record BillingSettingsDto(int FollowUpWindowDays);
+/// <param name="CollectionMode">AfterService (por defecto), BeforeService o Mixed. Opcional al guardar.</param>
+public sealed record BillingSettingsDto(int FollowUpWindowDays, string? CollectionMode = null)
+{
+    public static BillingSettingsDto From(BillingSettings s) =>
+        new(s.FollowUpWindowDays, s.CollectionMode.ToString());
+}

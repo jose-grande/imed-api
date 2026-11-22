@@ -62,6 +62,8 @@ public sealed partial class HapiMockServer : IDisposable
     /// <summary><c>requester.reference</c> guardado en una orden, o <c>null</c> si no trae médico.</summary>
     public string? ServiceRequestRequester(string id) =>
         _serviceRequests.TryGetValue(id, out var sr) ? sr.Requester : null;
+    /// <summary>Órdenes de laboratorio que existen en el simulador (sembradas o creadas).</summary>
+    public int ServiceRequestCount => _serviceRequests.Count;
     public IReadOnlyCollection<CreatedOrganization> Organizations => _organizations;
     public IReadOnlyCollection<CreatedProvenance> Provenances => _provenances;
 

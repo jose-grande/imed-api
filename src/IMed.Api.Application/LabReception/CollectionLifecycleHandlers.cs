@@ -58,8 +58,42 @@ public sealed class GenerateLabelsHandler(
 /// rechazar/almacenar) y registra el evento de timeline (cadena de custodia). La
 /// reimpresión y el rechazo exigen motivo (decisión §8 / D9).
 /// </summary>
-public sealed class AdvanceContainerHandler(ILabOperationsRepository ops, TimeProvider timeProvider)
+public sealed class AdvanceContainerHandler(
+    ILabOperationsRepository ops, TimeProvider timeProvider, IServiceGate gate, IHapiFhirClient hapi)
 {
+    /// <summary>
+    /// Prepago estricto (UX-Cobro-Anticipado D1): en una institución que cobra antes del servicio,
+    /// no se inicia ni se registra la toma de una orden pendiente de pago.
+    ///
+    /// <para>Es la excepción deliberada al principio de la puerta ("informa, no bloquea"), y por eso
+    /// queda acotada: solo en modo "antes", solo en la toma (admitir sigue libre), y con las dos
+    /// salidas de siempre — la urgencia nunca espera y el jefe puede liberar sin cobrar.</para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Hay una orden pendiente de pago.</exception>
+    private async Task ExigirPagoAsync(Guid orgId, Guid containerId, CancellationToken ct)
+    {
+        if (!await gate.RequiresPaymentBeforeServiceAsync(orgId, ct))
+        {
+            return;
+        }
+        var plan = await ops.GetCollectionPlanByContainerIdAsync(orgId, containerId, ct);
+        if (plan is null)
+        {
+            return;
+        }
+        var ordenes = await hapi.SearchLabOrdersByRequisitionAsync(plan.Requisition, LabRouting.PartitionOf(orgId), ct);
+        foreach (var o in ordenes)
+        {
+            var estado = await gate.EvaluateAsync(orgId, o.Id, o.Priority, ct);
+            if (estado.Verdict == "PendingPayment")
+            {
+                throw new InvalidOperationException(
+                    $"Pendiente de pago{(estado.AmountDue is { } f ? $": faltan L {f:N2}" : string.Empty)}. " +
+                    "Esta institución cobra antes del servicio: cobrá en Caja, o pedile al jefe administrativo que lo libere.");
+            }
+        }
+    }
+
     public async Task<CollectionPlanContainerDto?> HandleAsync(
         Guid orgId, Guid containerId, string action, string? detail, Guid? userId, CancellationToken ct = default)
     {
@@ -90,10 +124,12 @@ public sealed class AdvanceContainerHandler(ILabOperationsRepository ops, TimePr
                 }
                 break;
             case "start":
+                await ExigirPagoAsync(orgId, containerId, ct);
                 c.StartCollection();
                 eventType = CollectionEventType.CollectionStarted;
                 break;
             case "collect":
+                await ExigirPagoAsync(orgId, containerId, ct);
                 // R6-F6: la toma exige identificación positiva previa del paciente
                 // (decisión §8.6). El workbench la registra justo antes vía verify-identity;
                 // el gate también blinda llamadas directas al gateway.

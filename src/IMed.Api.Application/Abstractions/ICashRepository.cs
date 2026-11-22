@@ -19,6 +19,18 @@ public interface ICashRepository
     Task<IReadOnlyList<CashSession>> ListOpenSessionsAsync(
         Guid organizationId, CancellationToken ct = default);
 
+    /// <summary>Turnos abiertos dentro de un rango de instantes (para el reporte de cajas).</summary>
+    Task<IReadOnlyList<CashSession>> ListSessionsOpenedBetweenAsync(
+        Guid organizationId, DateTimeOffset from, DateTimeOffset before, CancellationToken ct = default);
+
+    /// <summary>Pagos de varios turnos en un solo viaje, con sus asignaciones.</summary>
+    Task<IReadOnlyList<Payment>> ListPaymentsForSessionsAsync(
+        Guid organizationId, IReadOnlyCollection<Guid> sessionIds, CancellationToken ct = default);
+
+    /// <summary>Movimientos de efectivo de varios turnos en un solo viaje.</summary>
+    Task<IReadOnlyList<CashMovement>> ListMovementsForSessionsAsync(
+        Guid organizationId, IReadOnlyCollection<Guid> sessionIds, CancellationToken ct = default);
+
     Task<CashSession?> FindOpenSessionByCashierAsync(
         Guid organizationId, Guid cashierUserId, CancellationToken ct = default);
 

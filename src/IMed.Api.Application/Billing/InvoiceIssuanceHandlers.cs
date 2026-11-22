@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Billing.Accounts;
 using IMed.Api.Domain.Billing.Fiscal;
@@ -117,7 +118,9 @@ public sealed class IssueInvoiceHandler(
     IClinicClock clock,
     ILocationRepository locations,
     ILegalEntityRepository legalEntities,
-    ICashRepository cash)
+    ICashRepository cash,
+    IEnumerable<IInvoiceIssuedObserver> observers,
+    ILogger<IssueInvoiceHandler> logger)
 {
     public async Task<IssueInvoiceResult> HandleAsync(
         IssueInvoiceCommand cmd, CancellationToken ct = default)
@@ -352,6 +355,22 @@ public sealed class IssueInvoiceHandler(
         }
 
         await invoices.SaveIssuedAsync(factura, documento, propios, ct);
+
+        // Después de guardar: la factura ya tiene número fiscal, y un observador que falla no la
+        // deshace (IInvoiceIssuedObserver).
+        var facturados = propios.Select(c => c.Id).ToList();
+        foreach (var o in observers)
+        {
+            try
+            {
+                await o.OnInvoiceIssuedAsync(cmd.OrganizationId, cuenta.Id, factura.Id, facturados, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Factura {Invoice}: el aviso a {Observer} falló.", factura.Id, o.GetType().Name);
+            }
+        }
+
         return IssueInvoiceResult.Ok(
             InvoiceMapper.ToDto(factura, documento) with { PendingOtherIssuers = pendientes });
     }

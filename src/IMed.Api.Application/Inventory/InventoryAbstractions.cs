@@ -179,6 +179,9 @@ public interface IInventoryRepository
     Task<PharmacyDispense?> FindDispenseByKeyAsync(Guid organizationId, string idempotencyKey, CancellationToken ct = default);
     Task<PharmacyDispense?> FindDispenseByLineAsync(Guid organizationId, Guid lineId, CancellationToken ct = default);
 
+    /// <summary>Despachos y ventas cargados a una cuenta, rastreados para modificarlos.</summary>
+    Task<IReadOnlyList<PharmacyDispense>> ListDispensesByAccountAsync(Guid organizationId, Guid accountId, CancellationToken ct = default);
+
     /// <summary>Lo ya despachado de cada receta: total entregado y si alguna entrega la dio por atendida.</summary>
     Task<IReadOnlyDictionary<string, (decimal Dispensed, bool Completed)>> GetPrescriptionFillAsync(
         Guid organizationId, IReadOnlyCollection<string> medicationRequestIds, CancellationToken ct = default);

@@ -105,6 +105,13 @@ public interface IBillingAccountRepository
     /// </summary>
     Task<IReadOnlyList<BillingCharge>> ListPricePendingChargesForUpdateAsync(
         Guid organizationId, Guid billableItemId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Para cada cita con consulta cobrada por adelantado (cargo vivo con origen cita): lo que falta
+    /// pagar de su factura, o <c>null</c> si todavía no se facturó. Las citas sin cargo no vienen.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, decimal?>> PrepaidAppointmentBalancesAsync(
+        Guid organizationId, IReadOnlyCollection<string> appointmentIds, CancellationToken ct = default);
 }
 
 /// <summary>

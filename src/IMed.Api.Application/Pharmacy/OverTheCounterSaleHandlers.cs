@@ -19,6 +19,14 @@ public sealed record SaleLineInput(Guid StockItemId, decimal Quantity, Guid? Sto
 /// <param name="BuyerName">Nombre para la factura. Sin él, "Consumidor final".</param>
 /// <param name="BuyerTaxId">RTN del comprador, si lo pide (obligatorio por encima del monto del SAR).</param>
 /// <param name="Tenders">Cobro en el acto. Exige un turno abierto en una caja de farmacia o mixta.</param>
+/// <param name="IntoAccountId">
+/// Cargar a esta cuenta en lugar de abrir la propia de la venta. Lo usa la venta en la Caja
+/// (UX-Cobro-Anticipado F4): productos y servicios en una sola cuenta y una sola factura.
+/// </param>
+/// <param name="DeferInvoice">
+/// No facturar ni cobrar acá: lo hace el cobro de la cuenta. La venta queda marcada como facturada
+/// cuando esa factura se emita (<see cref="DispenseInvoiceSync"/>).
+/// </param>
 public sealed record OverTheCounterSaleInput(
     string IdempotencyKey,
     Guid? WarehouseId,
@@ -28,7 +36,9 @@ public sealed record OverTheCounterSaleInput(
     string? BuyerTaxId,
     string? Notes,
     IReadOnlyList<SaleLineInput> Lines,
-    IReadOnlyList<TenderLine>? Tenders);
+    IReadOnlyList<TenderLine>? Tenders,
+    Guid? IntoAccountId = null,
+    bool DeferInvoice = false);
 
 /// <summary>
 /// Lo que pasó con una venta: siempre la venta; la factura y el cobro si salieron. Que la factura
@@ -113,23 +123,7 @@ public sealed class OverTheCounterSaleHandler(
             {
                 continue;
             }
-            var item = await repo.GetItemAsync(organizationId, l.StockItemId, ct)
-                ?? throw new ArgumentException("Uno de los artículos no existe.");
-            if (!item.Active || !item.Sellable || !item.OverTheCounter)
-            {
-                throw new InvalidOperationException(
-                    $"{item.Name} no es de venta libre: solo se despacha contra receta.");
-            }
-            var cobrableId = await items.AsegurarCobrableAsync(organizationId, item, ct)
-                ?? throw new InvalidOperationException(
-                    $"{item.Name} todavía no tiene su cobrable: la organización necesita su régimen fiscal configurado.");
-            var cobrable = await catalog.GetItemAsync(organizationId, cobrableId, ct);
-            if (cobrable is null || cobrable.PricePending)
-            {
-                throw new InvalidOperationException(
-                    $"{item.Name} todavía no tiene precio. El jefe administrativo lo fija en Catálogo de cobrables → Sin precio.");
-            }
-            articulos[item.Id] = (item, cobrableId);
+            articulos[l.StockItemId] = await ArticuloVendibleAsync(organizationId, l.StockItemId, ct);
         }
 
         Guid id;
@@ -144,7 +138,7 @@ public sealed class OverTheCounterSaleHandler(
                 await repo.AddDispenseAsync(venta, t);
                 await uow.SaveChangesAsync(t);
 
-                venta.AssignAccount(await CuentaAsync(organizationId, venta, t));
+                venta.AssignAccount(input.IntoAccountId ?? await CuentaAsync(organizationId, venta, t));
 
                 var patas = new List<StockPosting>();
                 foreach (var l in input.Lines)
@@ -192,6 +186,11 @@ public sealed class OverTheCounterSaleHandler(
         }
 
         var hecha = (await repo.GetDispenseAsync(organizationId, id, ct))!;
+        if (input.DeferInvoice)
+        {
+            // La factura la emite el cobro de la cuenta; la venta se marca entonces (DispenseInvoiceSync).
+            return await ResultadoAsync(hecha, alreadyProcessed: false, null, null, ct);
+        }
         var (factura, rechazo) = await FacturarAsync(organizationId, userId, hecha, ct);
         ReceivePaymentResult? pago = null;
         if (factura is not null && cobrar)
@@ -199,6 +198,34 @@ public sealed class OverTheCounterSaleHandler(
             pago = await CobrarAsync(organizationId, userId, factura, input.Tenders!, ct);
         }
         return await ResultadoAsync(hecha, alreadyProcessed: false, rechazo, pago, ct, factura);
+    }
+
+    /// <summary>
+    /// ¿Se puede vender este artículo en mostrador? De venta libre, activo, con cobrable y con precio.
+    /// La venta en la Caja lo pregunta antes de crear nada; la venta lo vuelve a exigir al registrar.
+    /// </summary>
+    /// <exception cref="ArgumentException">El artículo no existe.</exception>
+    /// <exception cref="InvalidOperationException">No es de venta libre, o no tiene cobrable o precio.</exception>
+    public async Task<(StockItem Item, Guid Cobrable)> ArticuloVendibleAsync(
+        Guid organizationId, Guid stockItemId, CancellationToken ct = default)
+    {
+        var item = await repo.GetItemAsync(organizationId, stockItemId, ct)
+            ?? throw new ArgumentException("Uno de los artículos no existe.");
+        if (!item.Active || !item.Sellable || !item.OverTheCounter)
+        {
+            throw new InvalidOperationException(
+                $"{item.Name} no es de venta libre: solo se despacha contra receta.");
+        }
+        var cobrableId = await items.AsegurarCobrableAsync(organizationId, item, ct)
+            ?? throw new InvalidOperationException(
+                $"{item.Name} todavía no tiene su cobrable: la organización necesita su régimen fiscal configurado.");
+        var cobrable = await catalog.GetItemAsync(organizationId, cobrableId, ct);
+        if (cobrable is null || cobrable.PricePending)
+        {
+            throw new InvalidOperationException(
+                $"{item.Name} todavía no tiene precio. El jefe administrativo lo fija en Catálogo de cobrables → Sin precio.");
+        }
+        return (item, cobrableId);
     }
 
     /// <summary>Reintenta la factura de una venta que quedó sin facturar.</summary>

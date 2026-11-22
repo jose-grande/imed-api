@@ -304,4 +304,29 @@ public sealed class BillingAccountRepository(AppDbContext db) : IBillingAccountR
                && i.SpecialtyCode == specialtyCode
                && (excludeEncounterFhirId == null || c.SourceId != excludeEncounterFhirId)
          select c.Id).AnyAsync(ct);
+
+    public async Task<IReadOnlyDictionary<string, decimal?>> PrepaidAppointmentBalancesAsync(
+        Guid organizationId, IReadOnlyCollection<string> appointmentIds, CancellationToken ct = default)
+    {
+        if (appointmentIds.Count == 0)
+        {
+            return new Dictionary<string, decimal?>();
+        }
+        var ids = appointmentIds.Select(a => a.Trim()).Distinct().ToList();
+        var filas = await (
+            from c in db.BillingCharges.AsNoTracking()
+            where c.OrganizationId == organizationId
+                  && c.SourceKind == ChargeSourceKind.Appointment
+                  && c.Status != ChargeStatus.Reversed
+                  && ids.Contains(c.SourceId)
+            join l in db.InvoiceLines.AsNoTracking().Where(l => !l.Voided) on c.Id equals l.ChargeId into ls
+            from l in ls.DefaultIfEmpty()
+            join f in db.Invoices.AsNoTracking() on l.InvoiceId equals f.Id into fs
+            from f in fs.DefaultIfEmpty()
+            select new { c.SourceId, Balance = f == null ? (decimal?)null : f.Balance })
+            .ToListAsync(ct);
+        // Si por algún motivo hubiera dos filas para la misma cita, manda la que más debe.
+        return filas.GroupBy(x => x.SourceId)
+            .ToDictionary(g => g.Key, g => g.Any(x => x.Balance is null) ? null : g.Max(x => x.Balance));
+    }
 }

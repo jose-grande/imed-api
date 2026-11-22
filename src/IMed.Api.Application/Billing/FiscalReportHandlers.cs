@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Domain.Billing.Cash;
 using IMed.Api.Domain.Billing.Invoicing;
@@ -25,7 +26,8 @@ public sealed record ShiftCutDto(
     string? DifferenceNote,
     IReadOnlyList<MethodTotalDto> ByMethod,
     decimal Withdrawals,
-    decimal Deposits);
+    decimal Deposits,
+    IReadOnlyList<TerminalTotalDto>? ByTerminal = null);
 
 /// <summary>
 /// Corte de caja del día (FAC-8).
@@ -43,10 +45,12 @@ public sealed record DailyCashCutDto(
     int OpenShifts,
     Guid? LegalEntityId = null,
     string? LegalName = null,
-    string? TaxId = null);
+    string? TaxId = null,
+    IReadOnlyList<TerminalTotalDto>? TotalsByTerminal = null);
 
 public sealed class GetDailyCashCutHandler(
-    ICashRepository cash, IFiscalRepository fiscal, IClinicClock clock, LegalEntityScopeResolver scopes)
+    ICashRepository cash, IFiscalRepository fiscal, IClinicClock clock, LegalEntityScopeResolver scopes,
+    IPaymentTerminalRepository terminals)
 {
     /// <param name="legalEntityId">Razón social (FAC-9): solo sus cajas. Obligatoria si hay varias.</param>
     public async Task<DailyCashCutDto> HandleAsync(
@@ -64,6 +68,8 @@ public sealed class GetDailyCashCutHandler(
             .ToList();
         var cajas = todasLasCajas.ToDictionary(c => c.Id, c => c.Name);
 
+        var nombresTerminal = await TerminalNames.LoadAsync(terminals, orgId, ct);
+        var todosLosPagos = new List<Payment>();
         var cortes = new List<ShiftCutDto>(turnos.Count);
         var globalPorMetodo = new Dictionary<PaymentMethod, (int Count, decimal Amount)>();
 
@@ -73,6 +79,7 @@ public sealed class GetDailyCashCutHandler(
                 .Where(p => p.Status == PaymentStatus.Applied)
                 .ToList();
             var movimientos = await cash.ListMovementsAsync(orgId, t.Id, ct);
+            todosLosPagos.AddRange(pagos);
 
             var porMetodo = pagos
                 .GroupBy(p => p.Method)
@@ -95,7 +102,8 @@ public sealed class GetDailyCashCutHandler(
                 t.OpeningAmount, t.CountedAmount, t.ExpectedAmount, t.Difference, t.DifferenceNote,
                 porMetodo,
                 Withdrawals: Sum(movimientos, CashMovementKind.Withdrawal),
-                Deposits: Sum(movimientos, CashMovementKind.Deposit)));
+                Deposits: Sum(movimientos, CashMovementKind.Deposit),
+                ByTerminal: TerminalNames.Totals(pagos, nombresTerminal, p => p.AllocatedAmount)));
         }
 
         var totales = globalPorMetodo
@@ -114,12 +122,183 @@ public sealed class GetDailyCashCutHandler(
             OpenShifts: cortes.Count(c => c.Status == nameof(CashSessionStatus.Open)),
             LegalEntityId: alcance.LegalEntity?.Id,
             LegalName: alcance.LegalEntity?.LegalName,
-            TaxId: alcance.LegalEntity?.TaxId);
+            TaxId: alcance.LegalEntity?.TaxId,
+            TotalsByTerminal: TerminalNames.Totals(todosLosPagos, nombresTerminal, p => p.AllocatedAmount));
     }
 
     private static decimal Sum(IEnumerable<CashMovement> movements, CashMovementKind kind) =>
         Math.Round(
             movements.Where(m => m.Kind == kind).Sum(m => m.Amount), 2, MidpointRounding.AwayFromZero);
+}
+
+// ── Reporte de cajas por sede ───────────────────────────────────────────────
+
+/// <summary>Un turno en el reporte de cajas, con su sede y el nombre de quien lo trabajó.</summary>
+public sealed record CashReportShiftDto(
+    Guid SessionId,
+    DateOnly Day,
+    Guid LocationId,
+    string LocationName,
+    Guid CashPointId,
+    string CashPointName,
+    Guid CashierUserId,
+    string? CashierName,
+    DateTimeOffset OpenedAt,
+    DateTimeOffset? ClosedAt,
+    string Status,
+    decimal OpeningAmount,
+    decimal? CountedAmount,
+    decimal? ExpectedAmount,
+    decimal? Difference,
+    string? DifferenceNote,
+    IReadOnlyList<MethodTotalDto> ByMethod,
+    decimal TotalCollected,
+    decimal Withdrawals,
+    decimal Deposits,
+    IReadOnlyList<TerminalTotalDto>? ByTerminal = null);
+
+/// <summary>Totales de un grupo (una sede o un cajero).</summary>
+public sealed record CashReportGroupDto(
+    Guid Id,
+    string Name,
+    int Shifts,
+    int OpenShifts,
+    IReadOnlyList<MethodTotalDto> ByMethod,
+    decimal TotalCollected,
+    decimal TotalDifference);
+
+/// <summary>Lo cobrado por día en el rango.</summary>
+public sealed record CashReportDayDto(DateOnly Day, decimal TotalCollected, decimal TotalDifference, int Shifts);
+
+public sealed record CashReportDto(
+    DateOnly From,
+    DateOnly To,
+    Guid? LocationId,
+    Guid? CashierUserId,
+    IReadOnlyList<CashReportGroupDto> ByLocation,
+    IReadOnlyList<CashReportGroupDto> ByCashier,
+    IReadOnlyList<CashReportDayDto> ByDay,
+    IReadOnlyList<CashReportShiftDto> Shifts,
+    IReadOnlyList<MethodTotalDto> TotalsByMethod,
+    decimal TotalCollected,
+    decimal TotalDifference,
+    int OpenShifts,
+    IReadOnlyList<TerminalTotalDto>? TotalsByTerminal = null);
+
+/// <summary>
+/// Reporte de cajas por sede (UX-Cobro-Anticipado F1): turnos de un rango de días, con totales
+/// por sede, por cajero, por día y por método.
+///
+/// <para><b>Es del jefe administrativo</b> (<c>billing.supervise</c>): muestra lo cobrado de los
+/// turnos abiertos, efectivo incluido. El cajero no lo ve: para él el arqueo es a ciegas.</para>
+///
+/// <para>El día de un turno es el día de la clínica en que se abrió. El esperado, lo contado y la
+/// diferencia solo existen en los turnos cerrados.</para>
+/// </summary>
+public sealed class GetCashReportHandler(
+    ICashRepository cash,
+    IFiscalRepository fiscal,
+    ILocationRepository locations,
+    IOrganizationMemberRepository members,
+    IClinicClock clock,
+    IPaymentTerminalRepository terminals)
+{
+    /// <summary>Tope del rango: un reporte de más de un trimestre se vuelve una exportación, no una pantalla.</summary>
+    public const int MaxDays = 93;
+
+    /// <exception cref="ArgumentException">Rango invertido o de más de <see cref="MaxDays"/> días.</exception>
+    public async Task<CashReportDto> HandleAsync(
+        Guid orgId, DateOnly? from, DateOnly? to, Guid? locationId, Guid? cashierUserId, CancellationToken ct = default)
+    {
+        var hasta = to ?? clock.Today();
+        var desde = from ?? hasta;
+        if (desde > hasta)
+        {
+            throw new ArgumentException("La fecha inicial es posterior a la final.", nameof(from));
+        }
+        if (hasta.DayNumber - desde.DayNumber + 1 > MaxDays)
+        {
+            throw new ArgumentException($"El rango máximo es de {MaxDays} días.", nameof(to));
+        }
+
+        var cajas = (await fiscal.ListCashPointsAsync(orgId, ct)).ToDictionary(c => c.Id);
+        var sedes = (await locations.ListAsync(orgId, activeOnly: false, ct)).ToDictionary(l => l.Id, l => l.Name);
+        var nombres = (await members.ListByOrganizationAsync(orgId, ct))
+            .GroupBy(m => m.KeycloakUserId)
+            .ToDictionary(g => g.Key, g => g.First().DisplayName ?? g.First().Email);
+
+        var turnos = (await cash.ListSessionsOpenedBetweenAsync(
+                orgId, clock.StartOf(desde), clock.StartOf(hasta.AddDays(1)), ct))
+            .Where(t => cajas.ContainsKey(t.CashPointId))
+            .Where(t => locationId is not { } sede || cajas[t.CashPointId].LocationId == sede)
+            .Where(t => cashierUserId is not { } cajero || t.CashierUserId == cajero)
+            .ToList();
+        var ids = turnos.Select(t => t.Id).ToList();
+        var pagos = (await cash.ListPaymentsForSessionsAsync(orgId, ids, ct))
+            .Where(p => p.Status == PaymentStatus.Applied)
+            .ToLookup(p => p.CashSessionId);
+        var movimientos = (await cash.ListMovementsForSessionsAsync(orgId, ids, ct)).ToLookup(m => m.CashSessionId);
+        var nombresTerminal = await TerminalNames.LoadAsync(terminals, orgId, ct);
+
+        var filas = turnos.Select(t =>
+        {
+            var caja = cajas[t.CashPointId];
+            var porMetodo = PorMetodo(pagos[t.Id]);
+            return new CashReportShiftDto(
+                t.Id, clock.DateOf(t.OpenedAt), caja.LocationId, sedes.GetValueOrDefault(caja.LocationId, "(sede eliminada)"),
+                caja.Id, caja.Name, t.CashierUserId, nombres.GetValueOrDefault(t.CashierUserId),
+                t.OpenedAt, t.ClosedAt, t.Status.ToString(),
+                t.OpeningAmount, t.CountedAmount, t.ExpectedAmount, t.Difference, t.DifferenceNote,
+                porMetodo, Redondear(porMetodo.Sum(m => m.Amount)),
+                Withdrawals: Redondear(movimientos[t.Id].Where(m => m.Kind == CashMovementKind.Withdrawal).Sum(m => m.Amount)),
+                Deposits: Redondear(movimientos[t.Id].Where(m => m.Kind == CashMovementKind.Deposit).Sum(m => m.Amount)),
+                ByTerminal: TerminalNames.Totals(pagos[t.Id], nombresTerminal, p => p.AllocatedAmount));
+        }).ToList();
+
+        var totales = PorMetodo(turnos.SelectMany(t => pagos[t.Id]));
+        return new CashReportDto(
+            desde, hasta, locationId, cashierUserId,
+            ByLocation: Agrupar(filas, f => f.LocationId, f => f.LocationName, pagos),
+            ByCashier: Agrupar(filas, f => f.CashierUserId, f => f.CashierName ?? "Cajero sin nombre registrado", pagos),
+            ByDay: filas.GroupBy(f => f.Day).OrderBy(g => g.Key)
+                .Select(g => new CashReportDayDto(
+                    g.Key, Redondear(g.Sum(f => f.TotalCollected)), Redondear(g.Sum(f => f.Difference ?? 0m)), g.Count()))
+                .ToList(),
+            Shifts: filas.OrderByDescending(f => f.OpenedAt).ToList(),
+            TotalsByMethod: totales,
+            TotalCollected: Redondear(totales.Sum(m => m.Amount)),
+            // Solo los turnos cerrados tienen diferencia; los abiertos suman cero al descuadre.
+            TotalDifference: Redondear(filas.Sum(f => f.Difference ?? 0m)),
+            OpenShifts: filas.Count(f => f.Status == nameof(CashSessionStatus.Open)),
+            TotalsByTerminal: TerminalNames.Totals(turnos.SelectMany(t => pagos[t.Id]), nombresTerminal, p => p.AllocatedAmount));
+    }
+
+    private static List<CashReportGroupDto> Agrupar(
+        IReadOnlyList<CashReportShiftDto> filas,
+        Func<CashReportShiftDto, Guid> clave,
+        Func<CashReportShiftDto, string> nombre,
+        ILookup<Guid, Payment> pagos) =>
+        filas.GroupBy(clave)
+            .Select(g =>
+            {
+                var porMetodo = PorMetodo(g.SelectMany(f => pagos[f.SessionId]));
+                return new CashReportGroupDto(
+                    g.Key, nombre(g.First()), g.Count(),
+                    g.Count(f => f.Status == nameof(CashSessionStatus.Open)),
+                    porMetodo, Redondear(porMetodo.Sum(m => m.Amount)),
+                    Redondear(g.Sum(f => f.Difference ?? 0m)));
+            })
+            .OrderByDescending(g => g.TotalCollected)
+            .ToList();
+
+    /// <summary>Lo aplicado a facturas, por método: en efectivo, neto de vuelto.</summary>
+    private static List<MethodTotalDto> PorMetodo(IEnumerable<Payment> pagos) =>
+        pagos.GroupBy(p => p.Method)
+            .Select(g => new MethodTotalDto(g.Key.ToString(), g.Count(), Redondear(g.Sum(p => p.AllocatedAmount))))
+            .OrderBy(m => m.Method)
+            .ToList();
+
+    private static decimal Redondear(decimal v) => Math.Round(v, 2, MidpointRounding.AwayFromZero);
 }
 
 // ── Reporte de ISV ──────────────────────────────────────────────────────────
@@ -320,7 +499,8 @@ public sealed record ExceptionRowDto(
 
 /// <summary>
 /// Todo lo que salió del camino normal (FAC-8): cargos tecleados a mano, descuentos que alguien
-/// tuvo que autorizar, servicios dados sin cobrar y arqueos que no cuadraron.
+/// tuvo que autorizar, servicios dados sin cobrar, arqueos que no cuadraron y consultas cobradas
+/// por adelantado cuya cita se canceló.
 ///
 /// <para>Van juntos y no en cuatro reportes porque la pregunta del dueño es una sola: <i>"¿qué
 /// pasó fuera de lo normal y quién lo autorizó?"</i>. Repartirlo en cuatro pantallas obliga a
@@ -333,12 +513,21 @@ public sealed record ExceptionReportDto(
     int ManualCharges,
     int AuthorizedDiscounts,
     int WaivedServices,
-    int CashDifferences);
+    int CashDifferences,
+    int CancelledPrepaidAppointments);
 
 public sealed class GetExceptionReportHandler(
     IFiscalReportRepository repo, IServiceWaiverRepository waivers,
-    ICashRepository cash, IClinicClock clock)
+    ICashRepository cash, IClinicClock clock, IHapiFhirClient hapi)
 {
+    /// <summary>Estados de una cita que ya no se va a atender.</summary>
+    private static readonly Dictionary<string, string> CitaMuerta = new(StringComparer.Ordinal)
+    {
+        ["cancelled"] = "se canceló",
+        ["noshow"] = "el paciente no se presentó",
+        ["entered-in-error"] = "se anuló por error",
+    };
+
     public async Task<ExceptionReportDto> HandleAsync(
         Guid orgId, DateOnly? since, DateOnly? until, CancellationToken ct = default)
     {
@@ -390,9 +579,60 @@ public sealed class GetExceptionReportHandler(
                 t.CashierUserId, t.DifferenceAuthorizedBy, t.DifferenceNote));
         }
 
+        var citasMuertas = await CitasPagadasCanceladasAsync(orgId, desde, hasta, ct);
+        filas.AddRange(citasMuertas);
+
         return new ExceptionReportDto(
             desde, hasta,
             filas.OrderByDescending(f => f.OccurredAt).ToList(),
-            manuales.Count, descuentos.Count, exonerados.Count, descuadres.Count);
+            manuales.Count, descuentos.Count, exonerados.Count, descuadres.Count, citasMuertas.Count);
+    }
+
+    /// <summary>
+    /// Consultas pagadas en caja cuya cita ya no se va a atender. Es dinero cobrado por un servicio
+    /// que no se va a dar: hay que reprogramar la cita (el pago la sigue) o devolverlo con nota de
+    /// crédito. Mientras nadie lo resuelva, aparece en todos los reportes que cubran su fecha: es un
+    /// pendiente, no un hecho del pasado.
+    ///
+    /// <para>Cancelar y agendar otra cita no mueve el pago: la cita nueva se cobraría de nuevo. Por
+    /// eso esta fila existe.</para>
+    /// </summary>
+    private async Task<List<ExceptionRowDto>> CitasPagadasCanceladasAsync(
+        Guid orgId, DateOnly desde, DateOnly hasta, CancellationToken ct)
+    {
+        var filas = new List<ExceptionRowDto>();
+        var cargos = await repo.ListLivePrepaidConsultationsAsync(orgId, desde, hasta, ct);
+        var particion = $"org-{orgId}";
+        foreach (var cargo in cargos)
+        {
+            JsonObject? cita;
+            try
+            {
+                cita = await hapi.ReadResourceAsync("Appointment", cargo.SourceId, particion, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Un HAPI caído no puede tumbar el reporte entero: las otras excepciones son de la base.
+                continue;
+            }
+            string motivo;
+            if (cita is null)
+            {
+                motivo = "la cita ya no existe";
+            }
+            else if (!CitaMuerta.TryGetValue(cita["status"]?.GetValue<string>() ?? string.Empty, out motivo!))
+            {
+                continue;
+            }
+            var cuando = DateTimeOffset.TryParse(cita?["meta"]?["lastUpdated"]?.GetValue<string>(), out var t)
+                ? t
+                : cargo.PerformedAt;
+            filas.Add(new ExceptionRowDto(
+                "CancelledPrepaidAppointment", cuando,
+                $"«{cargo.DescriptionSnapshot}» pagada en caja, pero la cita del {clock.DateOf(cargo.PerformedAt):dd/MM/yyyy} {motivo}",
+                cargo.Total, RequestedBy: null, AuthorizedBy: null,
+                "Reprogramar la cita (el pago la sigue) o devolver con nota de crédito."));
+        }
+        return filas;
     }
 }

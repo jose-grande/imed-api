@@ -109,6 +109,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<CashSession> CashSessions => Set<CashSession>();
     public DbSet<CashMovement> CashMovements => Set<CashMovement>();
     public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<PaymentTerminal> PaymentTerminals => Set<PaymentTerminal>();
     public DbSet<PaymentAllocation> PaymentAllocations => Set<PaymentAllocation>();
     public DbSet<ServiceWaiver> ServiceWaivers => Set<ServiceWaiver>();
 
@@ -488,6 +489,23 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => x.CashSessionId).HasDatabaseName("ix_cash_movement_session");
         });
 
+        b.Entity<PaymentTerminal>(e =>
+        {
+            e.ToTable("billing_payment_terminal");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.OrganizationId).IsRequired();
+            e.Property(x => x.LocationId).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Bank).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(x => x.Active).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Ignore(x => x.Receives);
+            e.HasIndex(x => new { x.OrganizationId, x.LocationId })
+                .HasDatabaseName("ix_payment_terminal_org_location");
+        });
+
         b.Entity<Payment>(e =>
         {
             e.ToTable("billing_payment");
@@ -503,6 +521,9 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.ReceivedAt).IsRequired();
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(x => x.ReversalReason).HasMaxLength(500);
+            // Sin FK a propósito: el terminal se desactiva, nunca se borra, y el pago es un
+            // registro contable que no puede depender de que la fila del catálogo exista.
+            e.Property(x => x.TerminalId);
 
             e.HasMany(x => x.Allocations)
                 .WithOne()
@@ -822,6 +843,9 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.ToTable("billing_settings");
             e.HasKey(x => x.OrganizationId);
             e.Property(x => x.FollowUpWindowDays).IsRequired();
+            // Columna nueva con valor por defecto: las organizaciones existentes quedan en "después".
+            e.Property(x => x.CollectionMode).HasConversion<string>().HasMaxLength(16).IsRequired()
+                .HasDefaultValue(BillingCollectionMode.AfterService);
             e.Property(x => x.UpdatedAt).IsRequired();
         });
 

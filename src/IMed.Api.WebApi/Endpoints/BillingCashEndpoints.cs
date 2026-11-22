@@ -186,7 +186,7 @@ public static class BillingCashEndpoints
         var r = await handler.HandleAsync(new ReceivePaymentCommand(
             orgId.Value, request.SessionId, request.PartyId, userId.Value,
             request.InvoiceIds ?? [],
-            (request.Tenders ?? []).Select(t => new TenderLine(t.Method, t.Amount, t.Reference)).ToList()),
+            (request.Tenders ?? []).Select(t => new TenderLine(t.Method, t.Amount, t.Reference, t.TerminalId)).ToList()),
             ct);
 
         return r.Succeeded ? Results.Ok(r) : Conflict(r.Code, r.Message);
@@ -224,7 +224,7 @@ public sealed record HandoverRequest(
 public sealed record MovementRequest(
     string Kind, decimal Amount, string Reason, Guid? AuthorizedBy);
 
-public sealed record TenderRequest(string Method, decimal Amount, string? Reference);
+public sealed record TenderRequest(string Method, decimal Amount, string? Reference, Guid? TerminalId = null);
 
 public sealed record ReceivePaymentRequest(
     Guid SessionId,
