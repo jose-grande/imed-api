@@ -75,10 +75,13 @@ public sealed class GetDailyCashCutHandler(
 
         foreach (var t in turnos)
         {
+            // Un turno puede durar varios días: el corte de hoy cuenta solo lo de hoy.
             var pagos = (await cash.ListPaymentsAsync(orgId, t.Id, ct))
-                .Where(p => p.Status == PaymentStatus.Applied)
+                .Where(p => p.Status == PaymentStatus.Applied && clock.DateOf(p.ReceivedAt) == dia)
                 .ToList();
-            var movimientos = await cash.ListMovementsAsync(orgId, t.Id, ct);
+            var movimientos = (await cash.ListMovementsAsync(orgId, t.Id, ct))
+                .Where(m => clock.DateOf(m.OccurredAt) == dia)
+                .ToList();
             todosLosPagos.AddRange(pagos);
 
             var porMetodo = pagos
@@ -116,9 +119,10 @@ public sealed class GetDailyCashCutHandler(
         return new DailyCashCutDto(
             dia, cortes, totales,
             TotalCollected: Math.Round(totales.Sum(t => t.Amount), 2, MidpointRounding.AwayFromZero),
-            // Solo los turnos cerrados tienen diferencia; los abiertos suman cero al descuadre.
+            // El descuadre es del día en que se cerró el turno; los abiertos suman cero.
             TotalDifference: Math.Round(
-                cortes.Sum(c => c.Difference ?? 0m), 2, MidpointRounding.AwayFromZero),
+                cortes.Where(c => c.ClosedAt is { } cerrado && clock.DateOf(cerrado) == dia)
+                    .Sum(c => c.Difference ?? 0m), 2, MidpointRounding.AwayFromZero),
             OpenShifts: cortes.Count(c => c.Status == nameof(CashSessionStatus.Open)),
             LegalEntityId: alcance.LegalEntity?.Id,
             LegalName: alcance.LegalEntity?.LegalName,
@@ -227,25 +231,33 @@ public sealed class GetCashReportHandler(
             .GroupBy(m => m.KeycloakUserId)
             .ToDictionary(g => g.Key, g => g.First().DisplayName ?? g.First().Email);
 
-        var turnos = (await cash.ListSessionsOpenedBetweenAsync(
-                orgId, clock.StartOf(desde), clock.StartOf(hasta.AddDays(1)), ct))
+        var inicio = clock.StartOf(desde);
+        var fin = clock.StartOf(hasta.AddDays(1));
+        var turnos = (await cash.ListSessionsActiveBetweenAsync(orgId, inicio, fin, ct))
             .Where(t => cajas.ContainsKey(t.CashPointId))
             .Where(t => locationId is not { } sede || cajas[t.CashPointId].LocationId == sede)
             .Where(t => cashierUserId is not { } cajero || t.CashierUserId == cajero)
             .ToList();
         var ids = turnos.Select(t => t.Id).ToList();
+        // Solo lo ocurrido en el rango: un turno que viene de antes aporta lo que cobró en el rango.
         var pagos = (await cash.ListPaymentsForSessionsAsync(orgId, ids, ct))
-            .Where(p => p.Status == PaymentStatus.Applied)
+            .Where(p => p.Status == PaymentStatus.Applied && p.ReceivedAt >= inicio && p.ReceivedAt < fin)
             .ToLookup(p => p.CashSessionId);
-        var movimientos = (await cash.ListMovementsForSessionsAsync(orgId, ids, ct)).ToLookup(m => m.CashSessionId);
+        var movimientos = (await cash.ListMovementsForSessionsAsync(orgId, ids, ct))
+            .Where(m => m.OccurredAt >= inicio && m.OccurredAt < fin)
+            .ToLookup(m => m.CashSessionId);
+        // El descuadre cuenta en el rango donde se cerró el turno.
+        bool CerradoEnRango(CashReportShiftDto f) => f.ClosedAt is { } c && c >= inicio && c < fin;
         var nombresTerminal = await TerminalNames.LoadAsync(terminals, orgId, ct);
 
         var filas = turnos.Select(t =>
         {
             var caja = cajas[t.CashPointId];
             var porMetodo = PorMetodo(pagos[t.Id]);
+            // Un turno que viene de antes del rango se ubica en su primer día dentro del rango.
+            var dia = clock.DateOf(t.OpenedAt) < desde ? desde : clock.DateOf(t.OpenedAt);
             return new CashReportShiftDto(
-                t.Id, clock.DateOf(t.OpenedAt), caja.LocationId, sedes.GetValueOrDefault(caja.LocationId, "(sede eliminada)"),
+                t.Id, dia, caja.LocationId, sedes.GetValueOrDefault(caja.LocationId, "(sede eliminada)"),
                 caja.Id, caja.Name, t.CashierUserId, nombres.GetValueOrDefault(t.CashierUserId),
                 t.OpenedAt, t.ClosedAt, t.Status.ToString(),
                 t.OpeningAmount, t.CountedAmount, t.ExpectedAmount, t.Difference, t.DifferenceNote,
@@ -258,17 +270,18 @@ public sealed class GetCashReportHandler(
         var totales = PorMetodo(turnos.SelectMany(t => pagos[t.Id]));
         return new CashReportDto(
             desde, hasta, locationId, cashierUserId,
-            ByLocation: Agrupar(filas, f => f.LocationId, f => f.LocationName, pagos),
-            ByCashier: Agrupar(filas, f => f.CashierUserId, f => f.CashierName ?? "Cajero sin nombre registrado", pagos),
+            ByLocation: Agrupar(filas, f => f.LocationId, f => f.LocationName, pagos, CerradoEnRango),
+            ByCashier: Agrupar(filas, f => f.CashierUserId, f => f.CashierName ?? "Cajero sin nombre registrado", pagos, CerradoEnRango),
             ByDay: filas.GroupBy(f => f.Day).OrderBy(g => g.Key)
                 .Select(g => new CashReportDayDto(
-                    g.Key, Redondear(g.Sum(f => f.TotalCollected)), Redondear(g.Sum(f => f.Difference ?? 0m)), g.Count()))
+                    g.Key, Redondear(g.Sum(f => f.TotalCollected)),
+                    Redondear(g.Where(CerradoEnRango).Sum(f => f.Difference ?? 0m)), g.Count()))
                 .ToList(),
             Shifts: filas.OrderByDescending(f => f.OpenedAt).ToList(),
             TotalsByMethod: totales,
             TotalCollected: Redondear(totales.Sum(m => m.Amount)),
-            // Solo los turnos cerrados tienen diferencia; los abiertos suman cero al descuadre.
-            TotalDifference: Redondear(filas.Sum(f => f.Difference ?? 0m)),
+            // Solo los turnos cerrados en el rango tienen diferencia; los abiertos suman cero.
+            TotalDifference: Redondear(filas.Where(CerradoEnRango).Sum(f => f.Difference ?? 0m)),
             OpenShifts: filas.Count(f => f.Status == nameof(CashSessionStatus.Open)),
             TotalsByTerminal: TerminalNames.Totals(turnos.SelectMany(t => pagos[t.Id]), nombresTerminal, p => p.AllocatedAmount));
     }
@@ -277,7 +290,8 @@ public sealed class GetCashReportHandler(
         IReadOnlyList<CashReportShiftDto> filas,
         Func<CashReportShiftDto, Guid> clave,
         Func<CashReportShiftDto, string> nombre,
-        ILookup<Guid, Payment> pagos) =>
+        ILookup<Guid, Payment> pagos,
+        Func<CashReportShiftDto, bool> cuentaDescuadre) =>
         filas.GroupBy(clave)
             .Select(g =>
             {
@@ -286,7 +300,7 @@ public sealed class GetCashReportHandler(
                     g.Key, nombre(g.First()), g.Count(),
                     g.Count(f => f.Status == nameof(CashSessionStatus.Open)),
                     porMetodo, Redondear(porMetodo.Sum(m => m.Amount)),
-                    Redondear(g.Sum(f => f.Difference ?? 0m)));
+                    Redondear(g.Where(cuentaDescuadre).Sum(f => f.Difference ?? 0m)));
             })
             .OrderByDescending(g => g.TotalCollected)
             .ToList();

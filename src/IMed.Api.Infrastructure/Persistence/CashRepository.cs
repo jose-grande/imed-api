@@ -33,10 +33,12 @@ public sealed class CashRepository(AppDbContext db, IClinicClock clock) : ICashR
             .Where(x => x.OrganizationId == organizationId && x.Status == CashSessionStatus.Open)
             .ToListAsync(ct);
 
-    public async Task<IReadOnlyList<CashSession>> ListSessionsOpenedBetweenAsync(
+    public async Task<IReadOnlyList<CashSession>> ListSessionsActiveBetweenAsync(
         Guid organizationId, DateTimeOffset from, DateTimeOffset before, CancellationToken ct = default) =>
         await db.CashSessions.AsNoTracking()
-            .Where(x => x.OrganizationId == organizationId && x.OpenedAt >= from && x.OpenedAt < before)
+            .Where(x => x.OrganizationId == organizationId
+                        && x.OpenedAt < before
+                        && (x.ClosedAt == null || x.ClosedAt >= from))
             .OrderBy(x => x.OpenedAt)
             .ToListAsync(ct);
 
@@ -85,10 +87,12 @@ public sealed class CashRepository(AppDbContext db, IClinicClock clock) : ICashR
         }
         if (day is { } d)
         {
-            // Día de la clínica: el turno de la tarde hondureña es del mismo día.
+            // Día de la clínica: el turno de la tarde hondureña es del mismo día. Entran los turnos
+            // que estuvieron abiertos ese día, no solo los que se abrieron: uno abierto ayer que
+            // sigue cobrando hoy es parte del corte de hoy.
             var desde = clock.StartOf(d);
             var hasta = clock.StartOf(d.AddDays(1));
-            q = q.Where(x => x.OpenedAt >= desde && x.OpenedAt < hasta);
+            q = q.Where(x => x.OpenedAt < hasta && (x.ClosedAt == null || x.ClosedAt >= desde));
         }
 
         return await q.OrderByDescending(x => x.OpenedAt).Take(200).ToListAsync(ct);

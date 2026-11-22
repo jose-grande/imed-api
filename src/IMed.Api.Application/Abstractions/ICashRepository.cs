@@ -19,8 +19,12 @@ public interface ICashRepository
     Task<IReadOnlyList<CashSession>> ListOpenSessionsAsync(
         Guid organizationId, CancellationToken ct = default);
 
-    /// <summary>Turnos abiertos dentro de un rango de instantes (para el reporte de cajas).</summary>
-    Task<IReadOnlyList<CashSession>> ListSessionsOpenedBetweenAsync(
+    /// <summary>
+    /// Turnos que estuvieron abiertos en algún momento del rango (para el reporte de cajas): los
+    /// abiertos dentro del rango y también los que venían abiertos de antes. Un turno abierto el
+    /// lunes que sigue cobrando el jueves tiene que aparecer el jueves.
+    /// </summary>
+    Task<IReadOnlyList<CashSession>> ListSessionsActiveBetweenAsync(
         Guid organizationId, DateTimeOffset from, DateTimeOffset before, CancellationToken ct = default);
 
     /// <summary>Pagos de varios turnos en un solo viaje, con sus asignaciones.</summary>

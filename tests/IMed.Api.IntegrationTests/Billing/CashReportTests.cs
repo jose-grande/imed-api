@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using FluentAssertions;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Billing;
@@ -153,5 +154,33 @@ public sealed class CashReportTests(ImedApiFixture fixture) : IAsyncLifetime
 
         r.Shifts.Should().BeEmpty();
         r.TotalCollected.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task UnTurnoAbiertoDiasAtras_queCobraHoy_apareceHoy_conLoDeHoy()
+    {
+        // Caso real (2026-11-22): un turno abierto el 18 seguía cobrando el 22, y el reporte del 22
+        // salía vacío porque filtraba por la fecha de apertura.
+        var e = await ArrangeAsync();
+        using (var scope = fixture.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cash_session SET opened_at = opened_at - interval '3 days' WHERE organization_id = {e.OrgId} AND closed_at IS NULL");
+        }
+
+        var hoy = await ReporteAsync(e);
+        hoy.TotalCollected.Should().Be(500m, "lo cobrado hoy cuenta hoy, aunque el turno se haya abierto antes");
+        hoy.OpenShifts.Should().Be(1);
+
+        using var s2 = fixture.Factory.Services.CreateScope();
+        var sp = s2.ServiceProvider;
+        var dia = sp.GetRequiredService<IClinicClock>().Today();
+        var haceTres = await sp.GetRequiredService<GetCashReportHandler>().HandleAsync(e.OrgId, dia.AddDays(-3), dia.AddDays(-3), null, null);
+        haceTres.Shifts.Should().ContainSingle("ese día el turno ya estaba abierto");
+        haceTres.TotalCollected.Should().Be(0m, "ese día no cobró nada");
+
+        var corte = await sp.GetRequiredService<GetDailyCashCutHandler>().HandleAsync(e.OrgId, null, null);
+        corte.TotalCollected.Should().Be(500m, "el corte de hoy incluye el turno que viene de antes");
     }
 }
