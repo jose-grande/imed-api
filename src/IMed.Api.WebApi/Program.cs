@@ -178,6 +178,7 @@ app.MapDiagnosesEndpoints();
 app.MapLabsEndpoints();
 app.MapSpecialtiesEndpoints();
 app.MapTeamEndpoints();
+app.MapAgendaEndpoints();
 app.MapInvitationsEndpoints();
 app.MapJoinRequestsEndpoints();
 app.MapIdentifiersEndpoints();

@@ -285,6 +285,10 @@ public static class DependencyInjection
         services.AddScoped<IFhirAccessRuleRepository, FhirAccessRuleRepository>();
         services.AddScoped<FhirAccessEvaluator>();
         services.AddScoped<FhirLocationGuard>();
+        services.AddScoped<IMed.Api.Application.Agenda.AgendaScope>();
+        services.AddScoped<IMed.Api.Application.Agenda.ListAgendaHandler>();
+        services.AddScoped<IMed.Api.Application.Agenda.ChangeAppointmentStatusHandler>();
+        services.AddScoped<IMed.Api.Application.Agenda.RescheduleAppointmentHandler>();
         services.AddScoped<BookablePractitioners>();
         services.AddScoped<GetPermissionMatrixHandler>();
         services.AddScoped<SetPermissionGrantHandler>();

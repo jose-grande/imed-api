@@ -151,6 +151,36 @@ public sealed partial class HapiMockServer
             .Given(Request.Create().WithPath("/fhir/Appointment").UsingGet())
             .RespondWith(Response.Create().WithCallback(req => SearchDocuments("Appointment", req)));
 
+        // PATCH de status sobre una cita o un encuentro (agenda): solo `/status`, y versiona.
+        _server
+            .Given(Request.Create()
+                .WithPath(new WireMock.Matchers.RegexMatcher("^/fhir/(Appointment|Encounter)/[a-zA-Z0-9-]+$"))
+                .UsingPatch())
+            .RespondWith(Response.Create().WithCallback(req =>
+            {
+                var parts = req.Path.Split('/');
+                var (type, id) = (parts[^2], parts[^1]);
+                var ops = JsonNode.Parse(req.Body ?? "[]") as JsonArray ?? [];
+                lock (_docsLock)
+                {
+                    if (!Store(type).TryGetValue(id, out var cita))
+                    {
+                        return JsonMessage(HttpStatusCode.NotFound, new { error = "not found" });
+                    }
+                    foreach (var op in ops)
+                    {
+                        if ((string?)op?["path"] != "/status")
+                        {
+                            return JsonMessage(HttpStatusCode.BadRequest, new { error = "El mock solo parchea /status." });
+                        }
+                        cita["status"] = (string?)op?["value"];
+                    }
+                    var version = int.Parse((string?)cita["meta"]?["versionId"] ?? "1") + 1;
+                    cita["meta"] = new JsonObject { ["versionId"] = version.ToString() };
+                    return JsonMessage(HttpStatusCode.OK, cita);
+                }
+            }));
+
         _server
             .Given(Request.Create().WithPath("/fhir/AllergyIntolerance").UsingGet())
             .RespondWith(Response.Create().WithCallback(req => SearchDocuments("AllergyIntolerance", req)));
@@ -220,6 +250,9 @@ public sealed partial class HapiMockServer
                 "patient" => values.Contains((string?)r["patient"]?["reference"])
                     || values.Contains((string?)r["subject"]?["reference"]),
                 "encounter" => values.Contains((string?)r["encounter"]?["reference"]),
+                // Agenda: `date` compara contra `start` con prefijos ge/gt/le/lt (varios = AND).
+                "date" => values.All(v => DateMatches((string?)r["start"], v)),
+                "actor" => (r["participant"] as JsonArray)?.Any(pa => values.Contains((string?)pa?["actor"]?["reference"])) == true,
                 "identifier" => (r["identifier"] as JsonArray)?.Any(i =>
                     values.Contains($"{(string?)i?["system"]}|{(string?)i?["value"]}")) == true,
                 "clinical-status" => values.Contains((string?)r["clinicalStatus"]?["coding"]?[0]?["code"]),
@@ -233,6 +266,28 @@ public sealed partial class HapiMockServer
             }
         }
         return true;
+    }
+
+    private static bool DateMatches(string? start, string criterio)
+    {
+        if (start is null || !DateTimeOffset.TryParse(start, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out var valor))
+        {
+            return false;
+        }
+        var prefijo = criterio.Length > 2 && char.IsLetter(criterio[0]) ? criterio[..2] : "eq";
+        var texto = prefijo == "eq" && !char.IsLetter(criterio[0]) ? criterio : criterio[2..];
+        var limite = DateTimeOffset.Parse(texto, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal);
+        return prefijo switch
+        {
+            "ge" => valor >= limite,
+            "gt" => valor > limite,
+            "le" => valor <= limite,
+            "lt" => valor < limite,
+            "eq" => valor == limite,
+            _ => throw new NotSupportedException($"El mock no entiende el prefijo de fecha '{prefijo}'."),
+        };
     }
 
     private static Dictionary<string, string> ParseQuery(string query) =>
