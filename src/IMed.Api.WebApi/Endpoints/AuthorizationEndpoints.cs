@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Authorization;
 using IMed.Api.Domain.Authorization;
 using IMed.Api.WebApi.Http;
@@ -15,6 +16,16 @@ public static class AuthorizationEndpoints
 {
     public static IEndpointRouteBuilder MapAuthorizationEndpoints(this IEndpointRouteBuilder app)
     {
+        // Fuera del grupo: cualquier usuario autenticado puede saber qué puede hacer él mismo. El
+        // portal lo usa para mostrar u ocultar pantallas y botones según la matriz de su
+        // organización, en vez de repetir roles quemados. No es una defensa: cada endpoint vuelve
+        // a evaluar su permiso.
+        app.MapGet("/api/authorization/me", GetMyPermissionsAsync)
+            .WithTags("Authorization")
+            .WithName("GetMyPermissions")
+            .WithSummary("Permisos efectivos del usuario actual en su organización.")
+            .RequireAuthorization();
+
         var group = app.MapGroup("/api/authorization")
             .WithTags("Authorization")
             .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.OrgPolicyManage));
@@ -36,6 +47,23 @@ public static class AuthorizationEndpoints
             .WithSummary("Devuelve un rol a los valores de IMed en esta organización (ADR-009).");
 
         return app;
+    }
+
+    private static async Task<IResult> GetMyPermissionsAsync(
+        ClaimsPrincipal principal, IPermissionResolver resolver, CancellationToken ct)
+    {
+        var orgId = ParseOrganizationId(principal);
+        var roles = principal.FindAll("roles").Select(c => c.Value).ToList();
+
+        // Sin organización o sin roles no hay matriz que aplicar: lista vacía, no error. Es el
+        // estado normal de quien todavía no eligió organización.
+        if (orgId is null || roles.Count == 0)
+        {
+            return Results.Ok(new MyPermissionsResponse([]));
+        }
+
+        var effective = await resolver.ResolveAsync(orgId.Value, roles, ct);
+        return Results.Ok(new MyPermissionsResponse(effective.Codes.Order(StringComparer.Ordinal).ToList()));
     }
 
     private static async Task<IResult> GetMatrixAsync(
@@ -125,6 +153,8 @@ public static class AuthorizationEndpoints
         return Guid.TryParse(raw, out var sub) ? sub : null;
     }
 }
+
+public sealed record MyPermissionsResponse(IReadOnlyList<string> Permissions);
 
 public sealed record SetGrantRequest(string RoleCode, string PermissionCode, GrantAction Action);
 

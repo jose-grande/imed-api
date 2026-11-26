@@ -268,6 +268,47 @@ public sealed class PermissionMatrixTests(ImedApiFixture fixture) : IAsyncLifeti
                 "quien puede cambiar la política puede darse cualquier otro permiso");
     }
 
+    [Fact]
+    public async Task MisPermisos_reflejanLaMatrizDeLaOrganizacion_sinPedirAdministracion()
+    {
+        // El portal decide qué mostrar con esto; si devolviera los permisos de la plantilla y no
+        // los de la organización, un rol personalizado en la matriz seguiría sin ver la pantalla.
+        var (admin, orgId) = await AdminOrgAsync();
+        var tecnicoId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(tecnicoId, "tec", "tec@imed.test");
+        var tecnico = fixture.CreateClientWithToken(fixture.Keycloak.IssueUserToken(
+            tecnicoId, organizationId: orgId.ToString(), realmRoles: ["lab_tech"]));
+
+        var antes = await (await tecnico.GetAsync("/api/authorization/me"))
+            .Content.ReadFromJsonAsync<MyPermissionsProbe>();
+        antes!.Permissions.Should().Contain(PermissionCatalog.LabRead)
+            .And.NotContain(PermissionCatalog.LabManage)
+            .And.NotContain(PermissionCatalog.OrgPolicyManage);
+
+        await PutRolAsync(admin, "lab_tech", (PermissionCatalog.LabManage, true));
+
+        var despues = await (await tecnico.GetAsync("/api/authorization/me"))
+            .Content.ReadFromJsonAsync<MyPermissionsProbe>();
+        despues!.Permissions.Should().Contain(PermissionCatalog.LabManage);
+    }
+
+    [Fact]
+    public async Task MisPermisos_sinOrganizacion_esListaVacia_ySinTokenEs401()
+    {
+        var userId = Guid.NewGuid();
+        fixture.Keycloak.RegisterUser(userId, "nuevo", "nuevo@imed.test");
+        var sinOrg = fixture.CreateClientWithToken(fixture.Keycloak.IssueUserToken(userId));
+
+        var resp = await sinOrg.GetAsync("/api/authorization/me");
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await resp.Content.ReadFromJsonAsync<MyPermissionsProbe>())!.Permissions.Should().BeEmpty();
+
+        (await fixture.Factory.CreateClient().GetAsync("/api/authorization/me")).StatusCode
+            .Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    private sealed record MyPermissionsProbe(IReadOnlyList<string> Permissions);
+
     // --- ADR-009: roles bloqueados y edición por rol ---------------------------------------
 
     [Fact]
