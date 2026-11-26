@@ -27,6 +27,12 @@ public static class TeamEndpoints
             .WithSummary("Reemplaza las funciones (cajero, laboratorio, farmacia, inventario…) del miembro. Requiere org_admin.")
             .RequireAuthorization();
 
+        app.MapPut("/api/team/{keycloakUserId:guid}/sees-patients", SetMemberSeesPatientsAsync)
+            .WithTags("Team")
+            .WithName("SetMemberSeesPatients")
+            .WithSummary("Marca si un administrador atiende pacientes (aparece en la agenda). Requiere org_admin.")
+            .RequireAuthorization();
+
         app.MapPut("/api/team/{keycloakUserId:guid}/active", SetMemberActiveAsync)
             .WithTags("Team")
             .WithName("SetMemberActive")
@@ -61,6 +67,37 @@ public static class TeamEndpoints
         {
             return Results.Problem(
                 title: "No se puede dar de baja",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status409Conflict,
+                extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
+        }
+    }
+
+    private static async Task<IResult> SetMemberSeesPatientsAsync(
+        Guid keycloakUserId,
+        SetMemberSeesPatientsRequest request,
+        ClaimsPrincipal principal,
+        SetMemberSeesPatientsHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var (actorId, orgId, error) = ExtractAdminIds(principal);
+        if (error is not null)
+        {
+            return error;
+        }
+        try
+        {
+            return Results.Ok(await handler.HandleAsync(new SetMemberSeesPatientsCommand(
+                orgId!.Value, keycloakUserId, actorId!.Value, request.SeesPatients), cancellationToken));
+        }
+        catch (ChangeMemberRoleException ex) when (ex.Code == "not_found")
+        {
+            return Results.Problem(title: "Miembro no encontrado", detail: ex.Message, statusCode: StatusCodes.Status404NotFound);
+        }
+        catch (ChangeMemberRoleException ex)
+        {
+            return Results.Problem(
+                title: "No aplica",
                 detail: ex.Message,
                 statusCode: StatusCodes.Status409Conflict,
                 extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
@@ -234,6 +271,8 @@ public sealed record ChangeMemberRoleRequest(string Role);
 public sealed record SetMemberActiveRequest(bool Active);
 
 public sealed record SetMemberFunctionsRequest(IReadOnlyList<string>? Functions);
+
+public sealed record SetMemberSeesPatientsRequest(bool SeesPatients);
 
 public sealed record ChangeMemberRoleResponse(
     Guid TargetKeycloakUserId,

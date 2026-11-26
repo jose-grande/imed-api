@@ -251,12 +251,58 @@ public sealed class UserLocationsTests(ImedApiFixture fixture) : IAsyncLifetime
     {
         var org = await BootstrapAsync();
         var medicoId = Guid.NewGuid();
+        await ConRolesAsync(medicoId, "practitioner");
         await ProfesionalAsync(org, medicoId, "pract-principal");
         await org.Admin.PostAsJsonAsync($"/api/locations/{org.Principal.Id}/users/{medicoId}", new { makePrimary = true });
 
         var decision = await DecideAsync(org, "POST", "Appointment", Cita(org.Principal.Id, "pract-principal"));
 
         decision.Allowed.Should().BeTrue(decision.Reason);
+    }
+
+    [Fact]
+    public async Task UnaCitaConElAdministradorQueAtiende_pasa()
+    {
+        // Escenario común: el dueño de la clínica es org_admin y atiende con su perfil profesional.
+        var org = await BootstrapAsync();
+        var duenioId = Guid.NewGuid();
+        await ConRolesAsync(duenioId, "org_admin");
+        await ProfesionalAsync(org, duenioId, "pract-duenio");
+        await org.Admin.PostAsJsonAsync($"/api/locations/{org.Principal.Id}/users/{duenioId}", new { makePrimary = true });
+
+        // Sin la marca, con un perfil sin especialidad ni colegiación: no es médico.
+        (await DecideAsync(org, "POST", "Appointment", Cita(org.Principal.Id, "pract-duenio")))
+            .Allowed.Should().BeFalse("un administrador que no atiende no recibe citas");
+
+        await MarcarQueAtiendeAsync(org, "pract-duenio");
+        var decision = await DecideAsync(org, "POST", "Appointment", Cita(org.Principal.Id, "pract-duenio"));
+
+        decision.Allowed.Should().BeTrue(decision.Reason);
+    }
+
+    [Fact]
+    public async Task UnaCitaConQuienNoEsMedico_seRechaza()
+    {
+        // Un técnico de laboratorio tiene Practitioner y está en la sede, pero no se le da cita.
+        var org = await BootstrapAsync();
+        var tecnicoId = Guid.NewGuid();
+        await ConRolesAsync(tecnicoId, "lab_tech");
+        await ProfesionalAsync(org, tecnicoId, "pract-tecnico");
+        await org.Admin.PostAsJsonAsync($"/api/locations/{org.Principal.Id}/users/{tecnicoId}", new { makePrimary = true });
+
+        (await DecideAsync(org, "POST", "Appointment", Cita(org.Principal.Id, "pract-tecnico")))
+            .Allowed.Should().BeFalse("las citas se agendan solo con médicos");
+        (await DecideAsync(org, "PUT", "Appointment/a1", Cita(org.Principal.Id, "pract-tecnico", id: "a1")))
+            .Allowed.Should().BeFalse("cambiar una cita no puede pasarla a alguien que no es médico");
+
+        // Una cita mal dada antes de la regla tiene que poder cancelarse.
+        var cancelar = await DecideAsync(org, "PUT", "Appointment/a1",
+            Cita(org.Principal.Id, "pract-tecnico", id: "a1", status: "cancelled"));
+        cancelar.Allowed.Should().BeTrue(cancelar.Reason);
+
+        // El encuentro no cambia: ahí sí participan el auxiliar o el laboratorio.
+        var encuentro = await DecideAsync(org, "POST", "Encounter", Encuentro(org.Principal.Id, "pract-tecnico"));
+        encuentro.Allowed.Should().BeTrue(encuentro.Reason);
     }
 
     [Fact]
@@ -308,7 +354,70 @@ public sealed class UserLocationsTests(ImedApiFixture fixture) : IAsyncLifetime
         decision.Allowed.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task LaAgenda_ofreceSoloMedicosDeLaSede()
+    {
+        // El laboratorio y el auxiliar tienen Practitioner (firman resultados), pero no se les da
+        // cita. Tampoco aparece un médico de otra sede.
+        var org = await BootstrapAsync();
+        var otra = await CrearSedeAsync(org, "SPS", "San Pedro Sula");
+
+        async Task<string> MiembroAsync(string pracId, Guid sede, params string[] roles)
+        {
+            var userId = Guid.NewGuid();
+            await ConRolesAsync(userId, roles);
+            await ProfesionalAsync(org, userId, pracId);
+            using var scope = fixture.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.UserLocations.Add(UserLocationAssignment.Create(org.OrgId, userId, sede, isPrimary: true, assignedBy: null));
+            await db.SaveChangesAsync();
+            return pracId;
+        }
+
+        var medico = await MiembroAsync("pr-medico", org.Principal.Id, "practitioner");
+        // El dueño que además atiende: rol principal org_admin, perfil clínico y la marca de Mi equipo.
+        var duenioQueAtiende = await MiembroAsync("pr-admin-medico", org.Principal.Id, "org_admin");
+        await MarcarQueAtiendeAsync(org, "pr-admin-medico");
+        // El administrador que no es médico, aunque haya completado "Mi perfil profesional".
+        await MiembroAsync("pr-admin-gerente", org.Principal.Id, "org_admin");
+        await MiembroAsync("pr-tecnico", org.Principal.Id, "lab_tech");
+        await MiembroAsync("pr-auxiliar", org.Principal.Id, "auxiliar");
+        await MiembroAsync("pr-medico-sps", otra.Id, "practitioner");
+
+        var ids = await org.Admin.GetFromJsonAsync<List<string>>($"/api/locations/{org.Principal.Id}/practitioners");
+
+        ids.Should().BeEquivalentTo([medico, duenioQueAtiende]);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /// <summary>Marca en Mi equipo que el dueño de este Practitioner atiende pacientes.</summary>
+    private async Task MarcarQueAtiendeAsync(Org org, string practitionerFhirId)
+    {
+        using var scope = fixture.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var userId = (await db.UserPractitionerAssignments.AsNoTracking()
+            .SingleAsync(a => a.OrganizationId == org.OrgId && a.PractitionerFhirId == practitionerFhirId)).KeycloakUserId;
+        if (!await db.OrganizationMembers.AnyAsync(m => m.OrganizationId == org.OrgId && m.KeycloakUserId == userId))
+        {
+            db.OrganizationMembers.Add(IMed.Api.Domain.Organizations.OrganizationMember.Join(userId, org.OrgId, null, null));
+            await db.SaveChangesAsync();
+        }
+        var resp = await org.Admin.PutAsJsonAsync($"/api/team/{userId}/sees-patients", new { seesPatients = true });
+        resp.IsSuccessStatusCode.Should().BeTrue(await resp.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>Usuario en el Keycloak de prueba con estos realm roles.</summary>
+    private async Task ConRolesAsync(Guid userId, params string[] roles)
+    {
+        fixture.Keycloak.RegisterUser(userId, $"u{userId:N}", $"u{userId:N}@imed.test");
+        using var scope = fixture.Factory.Services.CreateScope();
+        var kc = scope.ServiceProvider.GetRequiredService<IKeycloakAdminClient>();
+        foreach (var r in roles)
+        {
+            await kc.AssignRealmRoleAsync(userId, r);
+        }
+    }
 
     /// <summary>Usuario con Practitioner y PractitionerRole, como queda tras completar su perfil.</summary>
     private async Task<string> ProfesionalAsync(Org org, Guid userId, string practitionerFhirId)
@@ -350,10 +459,11 @@ public sealed class UserLocationsTests(ImedApiFixture fixture) : IAsyncLifetime
         ["location"] = sede is null ? null : new[] { new { location = new { reference = $"Location/{OrganizationLocation.FhirIdFor(sede.Value)}" } } },
     }.Where(kv => kv.Value is not null).ToDictionary());
 
-    private static string Cita(Guid sede, string practitioner) => JsonSerializer.Serialize(new
+    private static string Cita(Guid sede, string practitioner, string? id = null, string status = "booked") => JsonSerializer.Serialize(new
     {
         resourceType = "Appointment",
-        status = "booked",
+        id,
+        status,
         start = "2026-11-02T15:00:00Z",
         end = "2026-11-02T15:30:00Z",
         participant = new object[]

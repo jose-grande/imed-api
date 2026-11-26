@@ -285,6 +285,7 @@ public static class DependencyInjection
         services.AddScoped<IFhirAccessRuleRepository, FhirAccessRuleRepository>();
         services.AddScoped<FhirAccessEvaluator>();
         services.AddScoped<FhirLocationGuard>();
+        services.AddScoped<BookablePractitioners>();
         services.AddScoped<GetPermissionMatrixHandler>();
         services.AddScoped<SetPermissionGrantHandler>();
         services.AddScoped<SetRolePermissionsHandler>();
@@ -400,6 +401,7 @@ public static class DependencyInjection
         services.AddScoped<SetMemberActiveHandler>();
         services.AddScoped<ChangeMemberRoleHandler>();
         services.AddScoped<SetMemberFunctionsHandler>();
+        services.AddScoped<SetMemberSeesPatientsHandler>();
 
         // Invitations (Épica F3)
         services.AddScoped<CreateInvitationHandler>();

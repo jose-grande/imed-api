@@ -2,6 +2,7 @@ using IMed.Api.Application.Abstractions;
 using IMed.Api.Application.Invitations;
 using IMed.Api.Application.Profile;
 using IMed.Api.Domain.Authorization;
+using IMed.Api.Domain.Invitations;
 using IMed.Api.Domain.Organizations;
 using IMed.Api.Domain.Practitioners;
 using Microsoft.Extensions.Logging;
@@ -22,7 +23,14 @@ public sealed record StartSessionCommand(
 /// <param name="ClinicalProfilePending">
 /// Le corresponde un Practitioner pero HAPI no respondió: se reintenta en el próximo ingreso.
 /// </param>
-public sealed record StartSessionResult(bool HasClinicalProfile, bool ClinicalProfilePending);
+/// <param name="NeedsClinicalProfile">
+/// Le falta el perfil profesional y lo necesita: rol clínico o de laboratorio, o administrador
+/// marcado como que atiende pacientes. Es lo que decide el aviso "Tu perfil está incompleto"; antes
+/// se mostraba a todo el que no tenía Practitioner, y empujaba a caja, recepción o a un
+/// administrador que no atiende a crear un perfil clínico que no necesitan.
+/// </param>
+public sealed record StartSessionResult(
+    bool HasClinicalProfile, bool ClinicalProfilePending, bool NeedsClinicalProfile = false);
 
 /// <summary>El miembro fue dado de baja por un administrador.</summary>
 public sealed class MemberInactiveException() : Exception(
@@ -60,6 +68,19 @@ public sealed class StartSessionHandler(
     TimeProvider timeProvider)
 {
     public async Task<StartSessionResult> HandleAsync(StartSessionCommand cmd, CancellationToken ct = default)
+    {
+        var result = await RegisterAsync(cmd, ct);
+        if (result.HasClinicalProfile)
+        {
+            return result;
+        }
+        var necesita = ClinicalRoles.RequirePractitioner(cmd.Roles)
+            || (cmd.Roles.Contains(InvitationRoleNames.OrgAdmin, StringComparer.Ordinal)
+                && (await members.GetAsync(cmd.KeycloakUserId, cmd.OrganizationId, ct))?.SeesPatients == true);
+        return result with { NeedsClinicalProfile = necesita };
+    }
+
+    private async Task<StartSessionResult> RegisterAsync(StartSessionCommand cmd, CancellationToken ct)
     {
         // 1. Membresía.
         var member = await members.GetAsync(cmd.KeycloakUserId, cmd.OrganizationId, ct);

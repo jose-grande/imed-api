@@ -398,17 +398,33 @@ public sealed class UnassignUserFromLocationHandler(ILocationRepository location
 }
 
 /// <summary>
-/// Profesionales que atienden en una sede (FAC-9). Alimenta el selector de médico de la agenda:
-/// una cita solo se puede dar con un médico de la sede donde ocurre. Se lee de la base y no de
-/// <c>PractitionerRole.location</c> porque la proyección a HAPI es asíncrona, y un médico recién
-/// asignado tiene que aparecer en la agenda ya.
+/// Médicos que atienden en una sede (FAC-9). Alimenta el selector de médico de la agenda: una cita
+/// solo se puede dar con un médico de la sede donde ocurre. Las asignaciones se leen de la base y
+/// no de <c>PractitionerRole.location</c> porque la proyección a HAPI es asíncrona, y un médico
+/// recién asignado tiene que aparecer en la agenda ya.
+///
+/// <para><b>Solo médicos</b>: la regla está en <see cref="BookablePractitioners"/>, la misma que
+/// aplica el proxy al guardar la cita.</para>
 /// </summary>
-public sealed class ListLocationPractitionersHandler(ILocationRepository locations)
+public sealed class ListLocationPractitionersHandler(
+    ILocationRepository locations,
+    BookablePractitioners bookable)
 {
     public async Task<IReadOnlyList<string>?> HandleAsync(Guid organizationId, Guid locationId, CancellationToken ct = default)
     {
         var sede = await locations.GetAsync(organizationId, locationId, ct);
-        return sede is null ? null : await locations.ListPractitionerIdsAsync(organizationId, locationId, ct);
+        if (sede is null)
+        {
+            return null;
+        }
+
+        var asignados = await locations.ListPractitionersAsync(organizationId, locationId, ct);
+        var agendables = await bookable.FilterAsync(organizationId, asignados.Select(p => p.KeycloakUserId).ToList(), ct);
+        return asignados
+            .Where(p => agendables.Contains(p.KeycloakUserId))
+            .Select(p => p.PractitionerFhirId)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 }
 

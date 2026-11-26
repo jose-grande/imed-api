@@ -40,6 +40,14 @@ public sealed class OrganizationMember
 
     public DateTimeOffset UpdatedAt { get; private set; }
 
+    /// <summary>
+    /// ¿Atiende pacientes? Solo tiene sentido para un administrador: decide si se le pueden
+    /// agendar citas y si se le pide su perfil profesional. El médico atiende siempre y el resto
+    /// del personal nunca. Null = sin decidir todavía (miembros de antes de la marca): la agenda
+    /// lo infiere de su perfil profesional.
+    /// </summary>
+    public bool? SeesPatients { get; private set; }
+
     public bool IsActive => Status == OrganizationMemberStatus.Active;
 
     private OrganizationMember() { }
@@ -84,6 +92,12 @@ public sealed class OrganizationMember
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         LastSeenAt = now;
         UpdatedAt = now;
+    }
+
+    public void SetSeesPatients(bool seesPatients, TimeProvider? timeProvider = null)
+    {
+        SeesPatients = seesPatients;
+        UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
     }
 
     public void Deactivate(TimeProvider? timeProvider = null)

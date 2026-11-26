@@ -68,10 +68,13 @@ public interface ILocationRepository
     Task<bool?> IsPractitionerAssignedAsync(
         Guid organizationId, string practitionerFhirId, Guid locationId, CancellationToken ct = default);
 
-    /// <summary>Ids FHIR de los profesionales asignados a la sede.</summary>
-    Task<IReadOnlyList<string>> ListPractitionerIdsAsync(
+    /// <summary>Profesionales asignados a la sede: usuario y su Practitioner FHIR.</summary>
+    Task<IReadOnlyList<LocationPractitioner>> ListPractitionersAsync(
         Guid organizationId, Guid locationId, CancellationToken ct = default);
 }
+
+/// <summary>Profesional asignado a una sede: el usuario de Keycloak y su Practitioner FHIR.</summary>
+public sealed record LocationPractitioner(Guid KeycloakUserId, string PractitionerFhirId);
 
 /// <summary>
 /// Aprovisionamiento de la sede por defecto de una organización.

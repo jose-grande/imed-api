@@ -1394,6 +1394,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.JoinedAt).IsRequired();
             e.Property(x => x.LastSeenAt);
             e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.SeesPatients);
             e.Ignore(x => x.IsActive);
             e.HasIndex(x => x.OrganizationId).HasDatabaseName("ix_organization_member_org");
         });

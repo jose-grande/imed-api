@@ -1,5 +1,6 @@
 using IMed.Api.Domain.Authorization;
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Application.Profile;
 using IMed.Api.Domain.Organizations;
 using IMed.Api.Domain.Practitioners;
@@ -110,6 +111,13 @@ public sealed class ListTeamHandler(
         var primaryRole = RolePriority.FirstOrDefault(r => realmRoles.Contains(r, StringComparer.Ordinal))
             ?? "auxiliar";
 
+        // Misma regla que la agenda (BookablePractitioners).
+        var seesPatients = realmRoles.Contains("practitioner", StringComparer.Ordinal)
+            || (primaryRole == "org_admin"
+                && (member.SeesPatients
+                    ?? (assignment is not null
+                        && BookablePractitioners.ProfileSuggestsDoctor(practitioner?.LicenseNumber, practitionerRole?.SpecialtyCode))));
+
         return new TeamMember
         {
             KeycloakUserId = member.KeycloakUserId,
@@ -124,6 +132,7 @@ public sealed class ListTeamHandler(
             SpecialtyCode = practitionerRole?.SpecialtyCode,
             SpecialtyDisplay = practitionerRole?.SpecialtyDisplay,
             IsActive = member.IsActive,
+            SeesPatients = seesPatients,
             LastSeenAt = member.LastSeenAt,
             Locations = locations,
             Functions = FunctionalRoles.All.Where(f => realmRoles.Contains(f, StringComparer.Ordinal)).ToList(),

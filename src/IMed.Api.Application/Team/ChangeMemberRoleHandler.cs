@@ -100,6 +100,13 @@ public sealed class ChangeMemberRoleHandler(
             }
         }
 
+        // El médico que pasa a administrador sigue atendiendo: sin esto saldría de la agenda.
+        if (oldRoleName == InvitationRoleNames.Practitioner && newRoleName == InvitationRoleNames.OrgAdmin)
+        {
+            targetMember.SetSeesPatients(true, timeProvider);
+            await memberRepo.UpdateAsync(targetMember, cancellationToken);
+        }
+
         // 4. Persistir outbox event + audit (transacción local) ANTES de tocar KC.
         //    Si KC falla, el worker reproduce idempotentemente.
         var payload = JsonSerializer.Serialize(new TeamRoleChangedEvent.Payload(

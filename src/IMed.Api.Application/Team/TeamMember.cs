@@ -27,6 +27,13 @@ public sealed record TeamMember
     /// <summary>False si un administrador lo dio de baja.</summary>
     public bool IsActive { get; init; }
 
+    /// <summary>
+    /// ¿Atiende pacientes? Siempre true para el médico y false para el personal que no es
+    /// administrador. En el administrador es la marca de Mi equipo o, si nunca se marcó, lo que
+    /// sugiere su perfil profesional (especialidad o colegiación).
+    /// </summary>
+    public bool SeesPatients { get; init; }
+
     /// <summary>Último inicio de sesión. Null en miembros migrados que todavía no entraron.</summary>
     public DateTimeOffset? LastSeenAt { get; init; }
 

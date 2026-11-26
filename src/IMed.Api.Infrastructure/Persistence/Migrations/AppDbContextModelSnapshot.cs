@@ -5356,6 +5356,10 @@ namespace IMed.Api.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_seen_at");
 
+                    b.Property<bool?>("SeesPatients")
+                        .HasColumnType("boolean")
+                        .HasColumnName("sees_patients");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)

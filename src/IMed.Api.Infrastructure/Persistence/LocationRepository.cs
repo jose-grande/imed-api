@@ -175,12 +175,13 @@ public sealed class LocationRepository(AppDbContext db) : ILocationRepository
             .AnyAsync(x => x.OrganizationId == organizationId && x.UserId == userId && x.LocationId == locationId, ct);
     }
 
-    public async Task<IReadOnlyList<string>> ListPractitionerIdsAsync(
+    public async Task<IReadOnlyList<LocationPractitioner>> ListPractitionersAsync(
         Guid organizationId, Guid locationId, CancellationToken ct = default) =>
         await db.UserLocations.AsNoTracking()
             .Where(x => x.OrganizationId == organizationId && x.LocationId == locationId)
             .Join(db.UserPractitionerAssignments.AsNoTracking().Where(p => p.OrganizationId == organizationId),
-                l => l.UserId, p => p.KeycloakUserId, (l, p) => p.PractitionerFhirId)
+                l => l.UserId, p => p.KeycloakUserId,
+                (l, p) => new LocationPractitioner(p.KeycloakUserId, p.PractitionerFhirId))
             .Distinct()
             .ToListAsync(ct);
 }

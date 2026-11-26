@@ -1,5 +1,6 @@
 using System.Text.Json;
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.Locations;
 using IMed.Api.Domain.Authorization;
 
 namespace IMed.Api.Application.FhirGateway;
@@ -17,9 +18,17 @@ namespace IMed.Api.Application.FhirGateway;
 /// <para><b>Altas sí, actualizaciones solo si declaran sede.</b> Los encuentros y citas creados
 /// antes de FAC-9 no tienen sede; exigirla al actualizarlos dejaría sin poder cerrar una consulta
 /// que ya estaba en curso el día del despliegue. Si la actualización trae sede, se valida igual.</para>
+///
+/// <para><b>Las citas, solo con médicos</b> (<see cref="BookablePractitioners"/>). No se exige al
+/// cancelar, marcar inasistencia o anular: una cita mal dada antes de esta regla tiene que poder
+/// cancelarse.</para>
 /// </summary>
-public sealed class FhirLocationGuard(ILocationRepository locations)
+public sealed class FhirLocationGuard(ILocationRepository locations, BookablePractitioners bookable)
 {
+    /// <summary>Estados de cita que la cierran sin atenderla: no se les exige médico.</summary>
+    private static readonly HashSet<string> CierresSinAtencion =
+        new(StringComparer.Ordinal) { "cancelled", "noshow", "entered-in-error" };
+
     public const string SedePrefix = "Location/sede-";
 
     public static bool Applies(FhirRequestDescriptor request) =>
@@ -79,10 +88,22 @@ public sealed class FhirLocationGuard(ILocationRepository locations)
                     "Asignalo a esa sede desde Equipo, o atendé desde una de sus sedes.",
                     request.ResourceType);
             }
+
+            if (esCita && !CierraSinAtencion(root)
+                && await bookable.IsBookablePractitionerAsync(caller.OrganizationId, practitionerId, ct) == false)
+            {
+                return FhirAccessDecision.Deny(
+                    "Las citas se agendan solo con médicos. Elegí un médico de la sede.",
+                    request.ResourceType);
+            }
         }
 
         return null;
     }
+
+    private static bool CierraSinAtencion(JsonElement root) =>
+        root.TryGetProperty("status", out var s) && s.ValueKind == JsonValueKind.String
+        && CierresSinAtencion.Contains(s.GetString()!);
 
     /// <summary>Id de la sede a partir de la referencia <c>Location/sede-{guid:N}</c>.</summary>
     public static Guid? ParseSedeId(string reference) =>
