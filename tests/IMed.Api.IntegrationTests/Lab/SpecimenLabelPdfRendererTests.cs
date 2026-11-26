@@ -1,6 +1,7 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Infrastructure.Pdf;
 using PdfSharpCore.Pdf.IO;
+using IMed.Api.IntegrationTests.Infrastructure;
 using Xunit;
 
 namespace IMed.Api.IntegrationTests.Lab;
@@ -54,7 +55,7 @@ public sealed class SpecimenLabelPdfRendererTests
     public void Render_AtEveryStandardSize_ProducesPageOfThatExactSize(
         string name, decimal widthMm, decimal heightMm, decimal marginMm)
     {
-        var renderer = new SpecimenLabelPdfRenderer();
+        var renderer = new SpecimenLabelPdfRenderer(TestClinicClocks.Honduras);
         var format = new SpecimenLabelFormat(name, widthMm, heightMm, marginMm, 0m, 0m);
 
         var bytes = renderer.Render(new SpecimenLabelSheet([Page(format)]));
@@ -81,7 +82,7 @@ public sealed class SpecimenLabelPdfRendererTests
     public void Render_WithOverlongContent_StaysOnOneLabel(
         string name, decimal widthMm, decimal heightMm, decimal marginMm)
     {
-        var renderer = new SpecimenLabelPdfRenderer();
+        var renderer = new SpecimenLabelPdfRenderer(TestClinicClocks.Honduras);
         var format = new SpecimenLabelFormat(name, widthMm, heightMm, marginMm, 0m, 0m);
         var page = new SpecimenLabelPage(
             format,
@@ -108,7 +109,7 @@ public sealed class SpecimenLabelPdfRendererTests
     public void Render_WithTypicalContent_StaysOnOneLabel(
         string name, decimal widthMm, decimal heightMm, decimal marginMm)
     {
-        var renderer = new SpecimenLabelPdfRenderer();
+        var renderer = new SpecimenLabelPdfRenderer(TestClinicClocks.Honduras);
         var format = new SpecimenLabelFormat(name, widthMm, heightMm, marginMm, 0.5m, -0.5m);
 
         var bytes = renderer.Render(new SpecimenLabelSheet([Page(format)]));
@@ -121,7 +122,7 @@ public sealed class SpecimenLabelPdfRendererTests
     [Fact]
     public void Render_WithMixedFormats_ProducesOnePageOfEachSize()
     {
-        var renderer = new SpecimenLabelPdfRenderer();
+        var renderer = new SpecimenLabelPdfRenderer(TestClinicClocks.Honduras);
         var tube = new SpecimenLabelFormat("Tubo estándar", 51m, 25m, 1.5m, 0m, 0m);
         var cup = new SpecimenLabelFormat("Frasco orina", 76m, 51m, 2.5m, 0m, 0m);
 
@@ -146,7 +147,7 @@ public sealed class SpecimenLabelPdfRendererTests
     [Fact]
     public void Render_WithCalibrationOffsets_ProducesPdfBytes()
     {
-        var renderer = new SpecimenLabelPdfRenderer();
+        var renderer = new SpecimenLabelPdfRenderer(TestClinicClocks.Honduras);
         var format = new SpecimenLabelFormat("Tubo corrido", 51m, 25m, 1.5m, 1.2m, -0.8m);
 
         var bytes = renderer.Render(new SpecimenLabelSheet([Page(format)]));
@@ -161,7 +162,7 @@ public sealed class SpecimenLabelPdfRendererTests
     [Fact]
     public void Render_WithoutPatientData_StillProducesPdf()
     {
-        var renderer = new SpecimenLabelPdfRenderer();
+        var renderer = new SpecimenLabelPdfRenderer(TestClinicClocks.Honduras);
         var format = new SpecimenLabelFormat("Tubo estándar", 51m, 25m, 1.5m, 0m, 0m);
         var page = new SpecimenLabelPage(
             format, "A1B2-20260728-0009", "A1B2-20260728-0009",
@@ -177,7 +178,7 @@ public sealed class SpecimenLabelPdfRendererTests
     [Fact]
     public void Render_WithNoLabels_Throws()
     {
-        var renderer = new SpecimenLabelPdfRenderer();
+        var renderer = new SpecimenLabelPdfRenderer(TestClinicClocks.Honduras);
 
         Assert.Throws<ArgumentException>(() => renderer.Render(new SpecimenLabelSheet([])));
     }

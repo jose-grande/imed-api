@@ -39,14 +39,26 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         Stop: Colors.Black,
         StopFill: null);
 
-    public InvoicePdfRenderer()
+    // La hora se imprime en la zona de la clínica (IClinicClock), no en la del servidor:
+    // ToLocalTime() usa la del servidor, que en staging y producción es UTC (seis horas de más).
+    private readonly IClinicClock _clock;
+
+    public InvoicePdfRenderer(IClinicClock clock)
     {
+        _clock = clock;
         PdfFontEnvironment.Ensure();
     }
 
     public byte[] Render(InvoicePdfModel model, InvoicePrintFormat format = InvoicePrintFormat.Letter)
     {
         ArgumentNullException.ThrowIfNull(model);
+        model = model with
+        {
+            Fiscal = model.Fiscal with { IssuedAt = _clock.ToClinicTime(model.Fiscal.IssuedAt) },
+            Modifies = model.Modifies is { } o && o.IssuedAt != DateTimeOffset.MinValue
+                ? o with { IssuedAt = _clock.ToClinicTime(o.IssuedAt) }
+                : model.Modifies,
+        };
 
         var document = format == InvoicePrintFormat.Thermal80
             ? BuildThermal(model)
@@ -96,7 +108,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
         numero.Style = "Number";
 
         section.AddParagraph(
-            $"Fecha de emisión: {m.Fiscal.IssuedAt.ToLocalTime():dd/MM/yyyy HH:mm}").Style = "Subtle";
+            $"Fecha de emisión: {m.Fiscal.IssuedAt:dd/MM/yyyy HH:mm}").Style = "Subtle";
         foreach (var linea in ModifiesLines(m))
         {
             section.AddParagraph(linea).Style = "Subtle";
@@ -187,7 +199,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
 
         Centered(section, m.Fiscal.DocumentTypeName.ToUpperInvariant(), bold: true);
         Centered(section, m.Fiscal.FullNumber, bold: true);
-        Centered(section, $"Fecha de emisión: {m.Fiscal.IssuedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm", Hn)}", "Subtle");
+        Centered(section, $"Fecha de emisión: {m.Fiscal.IssuedAt.ToString("dd/MM/yyyy HH:mm", Hn)}", "Subtle");
         foreach (var linea in ModifiesLines(m))
         {
             Centered(section, linea, "Subtle");
@@ -490,7 +502,7 @@ public sealed class InvoicePdfRenderer : IInvoicePdfRenderer
             yield return $"CAI de la factura: {o.Cai}";
             if (o.IssuedAt != DateTimeOffset.MinValue)
             {
-                yield return $"Fecha de emisión de la factura: {o.IssuedAt.ToLocalTime():dd/MM/yyyy}";
+                yield return $"Fecha de emisión de la factura: {o.IssuedAt:dd/MM/yyyy}";
             }
         }
         if (!string.IsNullOrWhiteSpace(m.Reference))

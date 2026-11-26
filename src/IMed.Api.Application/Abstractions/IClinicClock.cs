@@ -28,4 +28,11 @@ public interface IClinicClock
     /// en el día siguiente, y un corte de caja o un ISV corrido de día está mal declarado.
     /// </summary>
     DateTimeOffset StartOf(DateOnly day);
+
+    /// <summary>
+    /// El instante en la hora de la clínica, con su offset (p. ej. <c>-06:00</c>). Es lo que se
+    /// imprime: <c>ToLocalTime()</c> usa la zona del <b>servidor</b>, que en staging y producción es
+    /// UTC, y la receta salía con seis horas de más.
+    /// </summary>
+    DateTimeOffset ToClinicTime(DateTimeOffset instant);
 }

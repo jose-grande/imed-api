@@ -29,14 +29,25 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
     private static readonly Color Rule = new(210, 210, 210);
     private static readonly Color HeaderBg = new(243, 244, 246);
 
-    public LabReportPdfRenderer()
+    // La hora se imprime en la zona de la clínica (IClinicClock), no en la del servidor:
+    // ToLocalTime() usa la del servidor, que en staging y producción es UTC (seis horas de más).
+    private readonly IClinicClock _clock;
+
+    public LabReportPdfRenderer(IClinicClock clock)
     {
+        _clock = clock;
         PdfFontEnvironment.Ensure();
     }
 
     public byte[] Render(LabReportPdfModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
+        model = model with
+        {
+            ReceivedAt = model.ReceivedAt is { } r ? _clock.ToClinicTime(r) : null,
+            ReleasedAt = model.ReleasedAt is { } l ? _clock.ToClinicTime(l) : null,
+            PrintedAt = _clock.ToClinicTime(model.PrintedAt == default ? DateTimeOffset.UtcNow : model.PrintedAt),
+        };
 
         var document = BuildDocument(model);
         var pdfRenderer = new PdfDocumentRenderer(unicode: true) { Document = document };
@@ -376,11 +387,11 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
 
     private static void RenderPageFooter(Section section, LabReportPdfModel model)
     {
-        var printed = model.PrintedAt == default ? DateTimeOffset.Now : model.PrintedAt;
+        var printed = model.PrintedAt;
         var p = section.Footers.Primary.AddParagraph();
         p.Style = "Footer";
         p.Format.Alignment = ParagraphAlignment.Center;
-        p.AddText($"{model.Organization.Name}  ·  Impreso {printed.ToLocalTime():dd/MM/yyyy HH:mm}  ·  Página ");
+        p.AddText($"{model.Organization.Name}  ·  Impreso {printed:dd/MM/yyyy HH:mm}  ·  Página ");
         p.AddPageField();
         p.AddText(" de ");
         p.AddNumPagesField();
@@ -394,7 +405,7 @@ public sealed class LabReportPdfRenderer : ILabReportPdfRenderer
         {
             return;
         }
-        AddStyled(cell, $"{label}: {value.Value.ToLocalTime():dd/MM/yyyy HH:mm}", "Subtle");
+        AddStyled(cell, $"{label}: {value.Value:dd/MM/yyyy HH:mm}", "Subtle");
     }
 
     private static Paragraph AddStyled(Section section, string text, string styleName)

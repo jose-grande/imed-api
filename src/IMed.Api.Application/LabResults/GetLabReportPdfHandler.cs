@@ -39,6 +39,7 @@ public sealed class GetLabReportPdfHandler(
     IOrganizationProfileRepository orgRepo,
     IOrganizationBrandingRepository branding,
     ILabReportPdfRenderer renderer,
+    IClinicClock clock,
     TimeProvider timeProvider)
 {
     /// <summary>Estados FHIR de un informe liberado (validado).</summary>
@@ -156,7 +157,7 @@ public sealed class GetLabReportPdfHandler(
 
         var bytes = renderer.Render(model);
         var safePatient = Sanitize(model.Patient.DisplayName);
-        var stamp = (releasedAt ?? timeProvider.GetUtcNow()).ToLocalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        var stamp = clock.DateOf(releasedAt ?? timeProvider.GetUtcNow()).ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         return new GetLabReportPdfResult(bytes, $"resultados-{safePatient}-{stamp}.pdf");
     }
 

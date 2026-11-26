@@ -39,6 +39,8 @@ public sealed class ClinicClock : IClinicClock
     public DateOnly DateOf(DateTimeOffset instant) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, _zone).DateTime);
 
+    public DateTimeOffset ToClinicTime(DateTimeOffset instant) => TimeZoneInfo.ConvertTime(instant, _zone);
+
     public DateTimeOffset StartOf(DateOnly day)
     {
         var local = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);

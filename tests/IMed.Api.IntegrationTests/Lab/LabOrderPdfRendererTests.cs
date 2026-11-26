@@ -1,5 +1,6 @@
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Infrastructure.Pdf;
+using IMed.Api.IntegrationTests.Infrastructure;
 using Xunit;
 
 namespace IMed.Api.IntegrationTests.Lab;
@@ -14,7 +15,7 @@ public sealed class LabOrderPdfRendererTests
     [Fact]
     public void Render_WithOrderNumberAndBarcode_ProducesPdfBytes()
     {
-        var renderer = new LabOrderPdfRenderer();
+        var renderer = new LabOrderPdfRenderer(TestClinicClocks.Honduras);
         var model = new LabOrderPdfModel(
             Organization: new PdfOrgInfo("Clínica Test", null),
             Practitioner: new PdfPractitionerInfo("Test Médico", "Dr.", "12345", "Medicina general"),

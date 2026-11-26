@@ -132,6 +132,22 @@ public sealed class PrescriptionPdfRenderer : IPrescriptionPdfRenderer
         {
             AddStyledParagraph(left, $"RTN: {model.Organization.TaxId}", "Subtle");
         }
+        if (model.Location is { } sede)
+        {
+            // El nombre de la sede solo si dice algo distinto de la organización.
+            if (!string.Equals(sede.Name.Trim(), model.Organization.Name.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                AddStyledParagraph(left, sede.Name, "Subtle");
+            }
+            if (!string.IsNullOrWhiteSpace(sede.Address))
+            {
+                AddStyledParagraph(left, sede.Address!, "Subtle");
+            }
+            if (!string.IsNullOrWhiteSpace(sede.Phone))
+            {
+                AddStyledParagraph(left, $"Tel.: {sede.Phone}", "Subtle");
+            }
+        }
 
         var right = row.Cells[column + 1];
         right.Format.Alignment = ParagraphAlignment.Right;
@@ -168,9 +184,13 @@ public sealed class PrescriptionPdfRenderer : IPrescriptionPdfRenderer
             var label = string.IsNullOrWhiteSpace(p.IdentifierLabel) ? "ID" : p.IdentifierLabel!;
             meta.Add($"{label}: {p.IdentifierValue}");
         }
+        if (!string.IsNullOrWhiteSpace(p.Age))
+        {
+            meta.Add($"Edad: {p.Age}");
+        }
         if (!string.IsNullOrWhiteSpace(p.BirthDate))
         {
-            meta.Add($"FN: {p.BirthDate}");
+            meta.Add($"FN: {FormatBirthDate(p.BirthDate!)}");
         }
         if (!string.IsNullOrWhiteSpace(p.Gender))
         {
@@ -284,9 +304,20 @@ public sealed class PrescriptionPdfRenderer : IPrescriptionPdfRenderer
         footer.Format.Alignment = ParagraphAlignment.Center;
         footer.Format.Font.Size = 8;
         footer.Format.Font.Color = new Color(120, 120, 120);
-        var issued = model.IssuedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
+        // Ya viene en la hora de la clínica (ver PrescriptionPdfModel.IssuedAt).
+        var issued = FormatIssued(model.IssuedAt);
         footer.AddText($"Emitida {issued}   ·   {model.Organization.Name}");
     }
+
+    /// <summary>"26/11/2026 14:30". Sin conversión: el handler ya la dejó en la hora de la clínica.</summary>
+    public static string FormatIssued(DateTimeOffset issuedAt) =>
+        issuedAt.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
+
+    /// <summary>FHIR guarda <c>yyyy-MM-dd</c>; en papel se lee <c>dd/MM/yyyy</c>.</summary>
+    private static string FormatBirthDate(string birthDate) =>
+        DateOnly.TryParseExact(birthDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+            ? d.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)
+            : birthDate;
 
     private static string FormatPractitionerName(PdfPractitionerInfo p)
     {

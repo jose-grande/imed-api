@@ -216,8 +216,8 @@ public sealed class OrganizationLogoTests
 
     public sealed class Renderizado
     {
-        private readonly LabReportPdfRenderer _informe = new();
-        private readonly InvoicePdfRenderer _factura = new();
+        private readonly LabReportPdfRenderer _informe = new(IMed.Api.IntegrationTests.Infrastructure.TestClinicClocks.Honduras);
+        private readonly InvoicePdfRenderer _factura = new(IMed.Api.IntegrationTests.Infrastructure.TestClinicClocks.Honduras);
 
         [Fact]
         public void El_informe_con_logo_pesa_mas_que_sin_logo()

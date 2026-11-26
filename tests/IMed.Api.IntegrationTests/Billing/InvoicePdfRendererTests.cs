@@ -2,6 +2,7 @@ using System.Text;
 using FluentAssertions;
 using IMed.Api.Application.Abstractions;
 using IMed.Api.Infrastructure.Pdf;
+using IMed.Api.IntegrationTests.Infrastructure;
 using Xunit;
 
 namespace IMed.Api.IntegrationTests.Billing;
@@ -12,7 +13,7 @@ namespace IMed.Api.IntegrationTests.Billing;
 /// </summary>
 public sealed class InvoicePdfRendererTests
 {
-    private readonly InvoicePdfRenderer _renderer = new();
+    private readonly InvoicePdfRenderer _renderer = new(TestClinicClocks.Honduras);
 
     private static InvoicePdfModel Modelo(
         bool anulada = false,

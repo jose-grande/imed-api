@@ -18,6 +18,11 @@ public interface IPrescriptionPdfRenderer
 /// Modelo de presentación para el PDF. Aplana todo lo que la plantilla necesita
 /// — la receta es un documento snapshot, no consulta nada en runtime.
 /// </summary>
+/// <param name="IssuedAt">
+/// Emisión <b>en la hora de la clínica</b> (<see cref="IClinicClock.ToClinicTime"/>). El renderer la
+/// imprime tal cual: convertirla con <c>ToLocalTime()</c> usaría la zona del servidor.
+/// </param>
+/// <param name="Location">Sede donde se atendió: nombre, dirección y teléfono en el encabezado.</param>
 public sealed record PrescriptionPdfModel(
     PdfOrgInfo Organization,
     PdfPractitionerInfo Practitioner,
@@ -25,7 +30,11 @@ public sealed record PrescriptionPdfModel(
     IReadOnlyList<PdfMedicationItem> Items,
     DateTimeOffset IssuedAt,
     // Indicaciones generales de la receta (a nivel de receta, no por medicamento).
-    string? GeneralIndications = null);
+    string? GeneralIndications = null,
+    PdfLocationInfo? Location = null);
+
+/// <summary>Sede de atención tal como va en el encabezado de un documento.</summary>
+public sealed record PdfLocationInfo(string Name, string? Address, string? Phone);
 
 public sealed record PdfOrgInfo(string Name, string? TaxId, PdfLogo? Logo = null);
 
@@ -56,12 +65,14 @@ public sealed record PdfPractitionerInfo(
     string? LicenseNumber,
     string? Specialty);
 
+/// <param name="Age">Edad legible a la fecha del documento ("35 años", "8 meses"). Null si no se sabe.</param>
 public sealed record PdfPatientInfo(
     string DisplayName,
     string? BirthDate,
     string? Gender,
     string? IdentifierLabel,
-    string? IdentifierValue);
+    string? IdentifierValue,
+    string? Age = null);
 
 public sealed record PdfMedicationItem(
     string Medication,

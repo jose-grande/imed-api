@@ -36,6 +36,7 @@ public sealed class GetLabOrderPdfHandler(
     ISpecialtyRepository specialtyRepo,
     ILabCatalogRepository catalog,
     ILabOrderPdfRenderer renderer,
+    IClinicClock clock,
     ILogger<GetLabOrderPdfHandler> logger)
 {
     // Estados que NO se imprimen en una orden agrupada.
@@ -235,18 +236,27 @@ public sealed class GetLabOrderPdfHandler(
         return new PdfContext(orgInfo, patientInfo, practInfo);
     }
 
-    private static PdfLabOrderItem BuildItem(LabOrderSnapshot order, string? availabilityLabel)
+    private PdfLabOrderItem BuildItem(LabOrderSnapshot order, string? availabilityLabel)
     {
         var examLabel = order.CodeText
             ?? order.CodeDisplay
             ?? order.LoincCode
             ?? "(examen sin nombre)";
 
+        // Una fecha sin hora (yyyy-MM-dd) se imprime tal cual: convertirla de zona la podría correr un
+        // día. Con hora, el día es el de la clínica.
         string? occurrenceLabel = null;
-        if (!string.IsNullOrWhiteSpace(order.OccurrenceDateTime)
-            && DateTimeOffset.TryParse(order.OccurrenceDateTime, out var oc))
+        var occurrence = order.OccurrenceDateTime?.Trim();
+        if (!string.IsNullOrEmpty(occurrence))
         {
-            occurrenceLabel = oc.ToLocalTime().ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            if (DateOnly.TryParseExact(occurrence, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var soloFecha))
+            {
+                occurrenceLabel = soloFecha.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            }
+            else if (DateTimeOffset.TryParse(occurrence, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var oc))
+            {
+                occurrenceLabel = clock.DateOf(oc).ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            }
         }
 
         return new PdfLabOrderItem(
@@ -269,10 +279,10 @@ public sealed class GetLabOrderPdfHandler(
         _ => priority,
     };
 
-    private static string BuildFileName(LabOrderPdfModel model)
+    private string BuildFileName(LabOrderPdfModel model)
     {
         var patient = Sanitize(model.Patient.DisplayName);
-        var date = model.IssuedAt.ToLocalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        var date = clock.DateOf(model.IssuedAt).ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         return $"orden_lab_{patient}_{date}.pdf";
     }
 

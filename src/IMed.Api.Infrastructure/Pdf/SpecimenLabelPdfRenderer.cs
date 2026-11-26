@@ -69,8 +69,13 @@ public sealed class SpecimenLabelPdfRenderer : ISpecimenLabelPdfRenderer
     /// <summary>Un renglón de texto a ubicar debajo del barcode, en orden de prioridad.</summary>
     private sealed record TextLine(string Text, double SizePt, bool Bold, int MaxLines = 1, bool Muted = false);
 
-    public SpecimenLabelPdfRenderer()
+    // La hora se imprime en la zona de la clínica (IClinicClock), no en la del servidor:
+    // ToLocalTime() usa la del servidor, que en staging y producción es UTC (seis horas de más).
+    private readonly IClinicClock _clock;
+
+    public SpecimenLabelPdfRenderer(IClinicClock clock)
     {
+        _clock = clock;
         PdfFontEnvironment.Ensure();
     }
 
@@ -81,6 +86,10 @@ public sealed class SpecimenLabelPdfRenderer : ISpecimenLabelPdfRenderer
         {
             throw new ArgumentException("Se requiere al menos una etiqueta.", nameof(sheet));
         }
+        sheet = sheet with
+        {
+            Labels = sheet.Labels.Select(l => l with { PrintedAt = _clock.ToClinicTime(l.PrintedAt) }).ToList(),
+        };
 
         using var document = new PdfDocument();
         document.Info.Title = sheet.Labels.Count == 1
@@ -231,7 +240,7 @@ public sealed class SpecimenLabelPdfRenderer : ISpecimenLabelPdfRenderer
         {
             footer.Add(label.OrderNumber!.Trim());
         }
-        footer.Add(label.PrintedAt.ToLocalTime().ToString("dd/MM/yy HH:mm", CultureInfo.InvariantCulture));
+        footer.Add(label.PrintedAt.ToString("dd/MM/yy HH:mm", CultureInfo.InvariantCulture));
         yield return new TextLine(string.Join(" · ", footer), 5.5, Bold: false, Muted: true);
     }
 

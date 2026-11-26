@@ -14,14 +14,20 @@ namespace IMed.Api.Infrastructure.Pdf;
 /// </summary>
 public sealed class LabOrderPdfRenderer : ILabOrderPdfRenderer
 {
-    public LabOrderPdfRenderer()
+    // La hora se imprime en la zona de la clínica (IClinicClock), no en la del servidor:
+    // ToLocalTime() usa la del servidor, que en staging y producción es UTC (seis horas de más).
+    private readonly IClinicClock _clock;
+
+    public LabOrderPdfRenderer(IClinicClock clock)
     {
+        _clock = clock;
         PdfFontEnvironment.Ensure();
     }
 
     public byte[] Render(LabOrderPdfModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
+        model = model with { IssuedAt = _clock.ToClinicTime(model.IssuedAt) };
 
         var document = BuildDocument(model);
         var pdfRenderer = new PdfDocumentRenderer(unicode: true)
@@ -343,7 +349,7 @@ public sealed class LabOrderPdfRenderer : ILabOrderPdfRenderer
         footer.Format.Alignment = ParagraphAlignment.Center;
         footer.Format.Font.Size = 8;
         footer.Format.Font.Color = new Color(120, 120, 120);
-        var issued = model.IssuedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
+        var issued = model.IssuedAt.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
         footer.AddText($"Emitida {issued}   ·   {model.Organization.Name}");
     }
 

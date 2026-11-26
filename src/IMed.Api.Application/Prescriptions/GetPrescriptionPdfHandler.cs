@@ -1,6 +1,8 @@
 using System.Globalization;
 using IMed.Api.Application.Abstractions;
+using IMed.Api.Application.FhirGateway;
 using IMed.Api.Application.Organizations;
+using IMed.Api.Application.Patients;
 using IMed.Api.Application.Profile;
 using Microsoft.Extensions.Logging;
 
@@ -40,6 +42,8 @@ public sealed class GetPrescriptionPdfHandler(
     IUserPractitionerAssignmentRepository assignmentRepo,
     ISpecialtyRepository specialtyRepo,
     IPrescriptionPdfRenderer renderer,
+    ILocationRepository locations,
+    IClinicClock clock,
     ILogger<GetPrescriptionPdfHandler> logger)
 {
     // Estados que NO se imprimen en una receta agrupada.
@@ -80,7 +84,8 @@ public sealed class GetPrescriptionPdfHandler(
             Practitioner: context.Practitioner,
             Patient: context.Patient,
             Items: new[] { item },
-            IssuedAt: medRequest.AuthoredOn ?? DateTimeOffset.UtcNow);
+            IssuedAt: context.IssuedAt,
+            Location: context.Location);
 
         var bytes = renderer.Render(model);
         return new GetPrescriptionPdfResult(bytes, BuildFileName(model));
@@ -136,8 +141,9 @@ public sealed class GetPrescriptionPdfHandler(
             Practitioner: context.Practitioner,
             Patient: context.Patient,
             Items: items,
-            IssuedAt: representative.AuthoredOn ?? DateTimeOffset.UtcNow,
-            GeneralIndications: generalIndications);
+            IssuedAt: context.IssuedAt,
+            GeneralIndications: generalIndications,
+            Location: context.Location);
 
         var bytes = renderer.Render(model);
         return new GetPrescriptionPdfResult(bytes, BuildFileName(model));
@@ -237,14 +243,50 @@ public sealed class GetPrescriptionPdfHandler(
             LicenseNumber: practitionerSnapshot?.LicenseNumber,
             Specialty: specialtyDisplay);
 
+        // Hora de la clínica, no del servidor; la edad, a la fecha de la receta.
+        var issuedAt = clock.ToClinicTime(med.AuthoredOn ?? DateTimeOffset.UtcNow);
+
         var patientInfo = new PdfPatientInfo(
             DisplayName: patientSnapshot.DisplayName ?? "(sin nombre)",
             BirthDate: patientSnapshot.BirthDate,
             Gender: patientSnapshot.Gender,
             IdentifierLabel: patientSnapshot.IdentifierLabel,
-            IdentifierValue: patientSnapshot.IdentifierValue);
+            IdentifierValue: patientSnapshot.IdentifierValue,
+            Age: PatientAge.Format(patientSnapshot.BirthDate, DateOnly.FromDateTime(issuedAt.DateTime)));
 
-        return new PdfContext(orgInfo, patientInfo, practInfo);
+        var location = await ResolveLocationAsync(med, organizationId, partitionName, cancellationToken);
+
+        return new PdfContext(orgInfo, patientInfo, practInfo, issuedAt, location);
+    }
+
+    /// <summary>
+    /// Sede de la receta: la del encuentro en que se emitió. Si el encuentro no la tiene (anterior a
+    /// FAC-9) o no se puede leer, la sede principal: es la dirección que el paciente espera ver.
+    /// </summary>
+    private async Task<PdfLocationInfo?> ResolveLocationAsync(
+        MedicationRequestSnapshot med, Guid organizationId, string partitionName, CancellationToken ct)
+    {
+        IMed.Api.Domain.Locations.OrganizationLocation? sede = null;
+        if (!string.IsNullOrWhiteSpace(med.EncounterFhirId))
+        {
+            try
+            {
+                var reference = await hapi.GetEncounterLocationAsync(med.EncounterFhirId, partitionName, ct);
+                if (reference is not null && FhirLocationGuard.ParseSedeId(reference) is { } sedeId)
+                {
+                    sede = await locations.GetAsync(organizationId, sedeId, ct);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex,
+                    "PDF receta {Id}: no se pudo leer la sede del encuentro {EncounterId}.",
+                    med.Id, med.EncounterFhirId);
+            }
+        }
+        sede ??= await locations.GetDefaultAsync(organizationId, ct);
+
+        return sede is null ? null : new PdfLocationInfo(sede.Name, sede.Address, sede.Phone);
     }
 
     private static PdfMedicationItem BuildMedicationItem(
@@ -283,7 +325,7 @@ public sealed class GetPrescriptionPdfHandler(
     private static string BuildFileName(PrescriptionPdfModel model)
     {
         var patient = Sanitize(model.Patient.DisplayName);
-        var date = model.IssuedAt.ToLocalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        var date = model.IssuedAt.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         return $"receta_{patient}_{date}.pdf";
     }
 
@@ -303,5 +345,7 @@ public sealed class GetPrescriptionPdfHandler(
     private sealed record PdfContext(
         PdfOrgInfo Org,
         PdfPatientInfo Patient,
-        PdfPractitionerInfo Practitioner);
+        PdfPractitionerInfo Practitioner,
+        DateTimeOffset IssuedAt,
+        PdfLocationInfo? Location);
 }
