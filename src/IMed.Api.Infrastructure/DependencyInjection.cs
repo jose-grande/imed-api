@@ -610,6 +610,7 @@ public static class DependencyInjection
         services.AddScoped<EnterResultsHandler>();
         services.AddScoped<GetResultEntrySheetHandler>();
         services.AddScoped<CorrectResultHandler>();
+        services.AddScoped<AmendResultsHandler>();
         services.AddScoped<GetResultsByPatientHandler>();
         services.AddScoped<GetResultDetailHandler>();
         services.AddScoped<GetPendingValidationHandler>();

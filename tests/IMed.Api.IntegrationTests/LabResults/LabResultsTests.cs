@@ -103,8 +103,9 @@ public sealed class LabResultsTests(ImedApiFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task EnterResults_rolInsuficiente_retorna403()
     {
-        // lab_tech tiene LabTechnician pero NO LabValidator.
-        var client = await AuthedClient("lab_tech");
+        // El médico lee resultados (lab.read) pero no los captura. El técnico sí: capturar pide
+        // lab.operate o lab.validate (observación de staging; ver AmendResultsTests).
+        var client = await AuthedClient("practitioner");
         var resp = await client.PostAsJsonAsync("/api/lab/results", ResultsBody("sr-x", 85m));
         resp.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }

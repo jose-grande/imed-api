@@ -6,18 +6,32 @@ using IMed.Api.Application.LabResults;
 namespace IMed.Api.WebApi.Endpoints;
 
 /// <summary>
-/// Captura de resultados de laboratorio (Épica LIS-4, F2). Política
-/// <c>LabValidator</c> (bioanalista/patólogo/supervisor) — quien ingresa/valida.
+/// Captura de resultados de laboratorio (Épica LIS-4, F2).
+///
+/// <para><b>Quién.</b> Capturar y corregir lo no liberado: el técnico (<c>lab.operate</c>) o el
+/// bioanalista (<c>lab.validate</c>). Liberar y devolver: solo quien valida. Antes la captura
+/// pedía <c>lab.validate</c> y el técnico no podía cargar ni corregir, aunque el catálogo de
+/// permisos describe <c>lab.operate</c> como "capturar resultados" (observación de staging).</para>
 /// </summary>
 public static class LabResultsEndpoints
 {
+    /// <summary>Capturar, corregir y enmendar lo no liberado.</summary>
+    private static readonly string CapturePolicy =
+        PermissionPolicy.ForAny(PermissionCatalog.LabOperate, PermissionCatalog.LabValidate);
+
     public static IEndpointRouteBuilder MapLabResultsEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapPost("/api/lab/results", EnterAsync)
             .WithTags("LabResults")
             .WithName("EnterLabResults")
             .WithSummary("Captura resultados → Observations (con flags) + DiagnosticReport (preliminary).")
-            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabValidate));
+            .RequireAuthorization(CapturePolicy);
+
+        app.MapPut("/api/lab/results/{reportId}", AmendAsync)
+            .WithTags("LabResults")
+            .WithName("AmendLabResults")
+            .WithSummary("Reabre la captura de un informe no liberado: cambia los valores que difieren y agrega los que faltaban, con un motivo.")
+            .RequireAuthorization(CapturePolicy);
 
         app.MapGet("/api/lab/results/entry-sheet/{serviceRequestId}", EntrySheetAsync)
             .WithTags("LabResults")
@@ -29,7 +43,7 @@ public static class LabResultsEndpoints
             .WithTags("LabResults")
             .WithName("CorrectLabResult")
             .WithSummary("Corrige un resultado aún no liberado, con motivo. Recalcula el flag y versiona el recurso (LIS-4b).")
-            .RequireAuthorization(PermissionPolicy.For(PermissionCatalog.LabValidate));
+            .RequireAuthorization(CapturePolicy);
 
         app.MapGet("/api/lab/results/by-patient/{patientId}", ByPatientAsync)
             .WithTags("LabResults")
@@ -226,6 +240,35 @@ public static class LabResultsEndpoints
         return sheet is null ? Results.NotFound() : Results.Ok(sheet);
     }
 
+    private static async Task<IResult> AmendAsync(
+        string reportId, AmendResultsRequest request, ClaimsPrincipal principal,
+        AmendResultsHandler handler, CancellationToken ct)
+    {
+        var orgId = ParseOrg(principal);
+        var userRaw = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub");
+        var userId = Guid.TryParse(userRaw, out var uid) ? uid : (Guid?)null;
+        if (orgId is null || userId is null)
+        {
+            return Results.Problem(title: "Sin organización", statusCode: StatusCodes.Status403Forbidden);
+        }
+        try
+        {
+            var result = await handler.HandleAsync(new AmendResultsCommand(
+                orgId.Value, userId.Value, reportId, request.Reason ?? string.Empty,
+                request.Results ?? [], request.Conclusion), ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }
+        catch (HttpRequestException ex) { return FhirRejected(ex, "corregir"); }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(title: "Conflicto", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Problem(title: "Solicitud inválida", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     private static async Task<IResult> CorrectAsync(
         string observationId, CorrectResultRequest request, ClaimsPrincipal principal,
         CorrectResultHandler handler, CancellationToken ct)
@@ -308,6 +351,12 @@ public sealed record EnterResultsRequest(
     string? Conclusion);
 
 /// <summary>Corrección de un resultado no liberado. El motivo es obligatorio (LIS-4b).</summary>
+/// <summary>La captura completa reabierta, con un motivo para todo el cambio.</summary>
+public sealed record AmendResultsRequest(
+    string? Reason,
+    IReadOnlyList<AmendResultLine>? Results,
+    string? Conclusion);
+
 public sealed record CorrectResultRequest(
     decimal? ValueNumeric,
     string? ValueString,

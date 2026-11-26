@@ -3305,6 +3305,39 @@ public sealed class HapiFhirClient(
         }
     }
 
+    public async Task AppendReferencesAsync(
+        string resourceType, string resourceFhirId, string arrayPath, IReadOnlyList<string> references,
+        string partitionName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(resourceFhirId))
+        {
+            throw new ArgumentException("resourceFhirId es obligatorio.", nameof(resourceFhirId));
+        }
+        if (references.Count == 0)
+        {
+            return;
+        }
+        await EnsureBearerAsync(cancellationToken);
+
+        var ops = references.Select(r => new { op = "add", path = $"/{arrayPath}/-", value = new { reference = r } });
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Patch, $"{resourceType}/{resourceFhirId}")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(ops), System.Text.Encoding.UTF8, "application/json-patch+json")
+        };
+        if (!string.IsNullOrWhiteSpace(partitionName))
+        {
+            httpRequest.Headers.Add(TenantPartitionHeader, partitionName);
+        }
+        using var resp = await httpClient.SendAsync(httpRequest, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError("PATCH /fhir/{Type}/{Id} (append {Path}) falló. Status={Status}, Body={Body}",
+                resourceType, resourceFhirId, arrayPath, (int)resp.StatusCode, body);
+            resp.EnsureSuccessStatusCode();
+        }
+    }
+
     public async Task<IReadOnlyList<DiagnosticReportSnapshot>> SearchPreliminaryReportsAsync(
         string partitionName, CancellationToken cancellationToken = default)
     {

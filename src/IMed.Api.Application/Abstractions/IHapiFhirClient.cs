@@ -368,6 +368,16 @@ public interface IHapiFhirClient
     Task PatchDiagnosticReportConclusionAsync(
         string reportFhirId, string conclusion, string partitionName, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Agrega referencias al final de un arreglo de referencias de un recurso vía JSON Patch
+    /// (<c>add /{arrayPath}/-</c>). Lo usa la captura reabierta para sumar al informe
+    /// (<c>result</c>) y al grouper del panel (<c>hasMember</c>) los analitos que no se habían
+    /// cargado. El arreglo tiene que existir: en JSON Patch, <c>/-</c> sobre un miembro ausente falla.
+    /// </summary>
+    Task AppendReferencesAsync(
+        string resourceType, string resourceFhirId, string arrayPath, IReadOnlyList<string> references,
+        string partitionName, CancellationToken cancellationToken = default);
+
     /// <summary>Actualiza el <c>status</c> de un recurso vía JSON Patch (LIS-6).</summary>
     Task PatchResourceStatusAsync(
         string resourceType, string resourceFhirId, string status, string partitionName, CancellationToken cancellationToken = default);

@@ -16,16 +16,30 @@ namespace IMed.Api.WebApi.Http;
 /// </summary>
 public sealed class PermissionRequirement(string permissionCode) : IAuthorizationRequirement
 {
+    /// <summary>Código tal como vino en la política; con <c>|</c> son varios.</summary>
     public string PermissionCode { get; } = permissionCode;
+
+    /// <summary>Basta con tener cualquiera de estos permisos.</summary>
+    public IReadOnlyList<string> AnyOf { get; } =
+        permissionCode.Split(PermissionPolicy.AnySeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
 
 /// <summary>Prefijo que distingue una política de permiso de las demás.</summary>
 public static class PermissionPolicy
 {
     public const string Prefix = "perm:";
+    public const char AnySeparator = '|';
 
     /// <summary>Nombre de política para un permiso. Uso: <c>.RequireAuthorization(PermissionPolicy.For(...))</c>.</summary>
     public static string For(string permissionCode) => Prefix + permissionCode;
+
+    /// <summary>
+    /// Política que se cumple con <b>cualquiera</b> de los permisos. Para una acción que hacen dos
+    /// funciones distintas —capturar resultados: el técnico (<c>lab.operate</c>) y el bioanalista
+    /// (<c>lab.validate</c>)— sin darle a una el permiso de la otra.
+    /// </summary>
+    public static string ForAny(params string[] permissionCodes) =>
+        Prefix + string.Join(AnySeparator, permissionCodes);
 }
 
 /// <summary>
@@ -85,7 +99,7 @@ public sealed class PermissionAuthorizationHandler(IPermissionResolver resolver)
         }
 
         var permissions = await resolver.ResolveAsync(organizationId, roles);
-        if (permissions.Has(requirement.PermissionCode))
+        if (requirement.AnyOf.Any(permissions.Has))
         {
             context.Succeed(requirement);
         }

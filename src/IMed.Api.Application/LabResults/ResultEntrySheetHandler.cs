@@ -167,7 +167,8 @@ public sealed class GetResultEntrySheetHandler(
                 ValueString: obs.ValueString,
                 Unit: obs.ValueUnit,
                 FlagCode: obs.FlagCode,
-                Status: obs.Status));
+                Status: obs.Status,
+                LoincCode: obs.LoincCode));
         }
 
         return new SavedResultsDto(
@@ -197,7 +198,9 @@ public sealed record SavedObservationDto(
     string? ValueString,
     string? Unit,
     string? FlagCode,
-    string Status);
+    string Status,
+    /// <summary>Para ubicar el resultado en su fila al reabrir la captura completa.</summary>
+    string? LoincCode = null);
 
 /// <summary>Todo lo que la pantalla de captura necesita para una orden (LIS-4b).</summary>
 public sealed record ResultEntrySheetDto(

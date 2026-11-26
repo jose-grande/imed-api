@@ -1046,10 +1046,15 @@ public sealed partial class HapiMockServer : IDisposable
             .RespondWith(Response.Create().WithCallback(req =>
             {
                 var id = req.Path.Split('/').Last();
-                var newStatus = ParsePatchStatus(req.Body) ?? "final";
-                if (_observations.TryGetValue(id, out var o))
+                // Un append (`/hasMember/-`) no toca el status: antes cualquier patch sin `/status`
+                // marcaba la observación como final.
+                if (AppendedReferences(req.Body, "/hasMember/-") is null)
                 {
-                    _observations[id] = o with { Status = newStatus };
+                    var newStatus = ParsePatchStatus(req.Body) ?? "final";
+                    if (_observations.TryGetValue(id, out var o))
+                    {
+                        _observations[id] = o with { Status = newStatus };
+                    }
                 }
                 return JsonMessage(HttpStatusCode.OK, new { resourceType = "Observation", id });
             }));
@@ -1060,6 +1065,14 @@ public sealed partial class HapiMockServer : IDisposable
             .RespondWith(Response.Create().WithCallback(req =>
             {
                 var id = req.Path.Split('/').Last();
+                if (AppendedReferences(req.Body, "/result/-") is { } agregadas)
+                {
+                    if (_diagnosticReports.TryGetValue(id, out var r))
+                    {
+                        _diagnosticReports[id] = r with { ResultIds = [.. r.ResultIds, .. agregadas] };
+                    }
+                    return JsonMessage(HttpStatusCode.OK, new { resourceType = "DiagnosticReport", id });
+                }
                 var (patchPath, patchValue) = ParsePatch(req.Body) ?? ("/status", null);
                 if (_diagnosticReports.TryGetValue(id, out var d))
                 {
@@ -1208,6 +1221,41 @@ public sealed partial class HapiMockServer : IDisposable
         return value?.StartsWith(prefix, StringComparison.Ordinal) == true
             ? value[prefix.Length..]
             : value;
+    }
+
+    /// <summary>
+    /// Ids agregados por un JSON Patch de append (<c>add {path}</c> con <c>{ reference }</c>), o
+    /// null si el patch no es eso.
+    /// </summary>
+    private static List<string>? AppendedReferences(string? body, string path)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+        try
+        {
+            var arr = JsonDocument.Parse(body).RootElement;
+            if (arr.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+            var ids = new List<string>();
+            foreach (var op in arr.EnumerateArray())
+            {
+                if (op.TryGetProperty("path", out var p) && p.GetString() == path
+                    && op.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Object
+                    && v.TryGetProperty("reference", out var r) && r.GetString() is { } reference)
+                {
+                    ids.Add(reference.Split('/').Last());
+                }
+            }
+            return ids.Count > 0 ? ids : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string? ParsePatchStatus(string? body) =>
