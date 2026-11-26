@@ -31,7 +31,11 @@ public sealed record WorklistItem(
     /// <summary>Etapa del trabajo del laboratorio (<see cref="WorklistStages"/>).</summary>
     string Stage = WorklistStages.Other,
     /// <summary>Número de orden (requisición), para buscar por él.</summary>
-    string? Requisition = null);
+    string? Requisition = null,
+    /// <summary>
+    /// El informe ya se liberó: <see cref="ElapsedMinutes"/> es el TAT final y no sigue corriendo.
+    /// </summary>
+    bool TatClosed = false);
 
 /// <param name="Stage">
 /// Filtro por etapa del trabajo (<see cref="WorklistStages"/>); tiene prioridad sobre
@@ -65,10 +69,9 @@ public static class WorklistStages
 }
 
 /// <summary>
-/// Worklist server-side (L3-D9): intakes in-house por estado/prioridad con TAT
-/// transcurrido desde la recepción (LIS-DEC-06). El objetivo de TAT usa un default
-/// por prioridad; el objetivo fino por prueba (`tat_target`) queda como follow-up
-/// (requiere resolver el código de prueba de cada orden — N+1 contra HAPI).
+/// Worklist server-side (L3-D9): intakes in-house por estado/prioridad con TAT desde la
+/// recepción (<see cref="LabTat"/>): en curso para lo que sigue en el laboratorio, final para lo
+/// liberado.
 /// </summary>
 public sealed class GetWorklistHandler(
     ILabOperationsRepository ops, IHapiFhirClient hapi, TimeProvider timeProvider)
@@ -106,8 +109,8 @@ public sealed class GetWorklistHandler(
 
         return rows.Select(x =>
         {
-            int? elapsed = x.ReceivedAt is { } r ? (int)Math.Max(0, (now - r).TotalMinutes) : null;
-            var target = DefaultTargetMinutes(x.Priority);
+            var elapsed = LabTat.Minutes(x, now);
+            var target = LabTat.DefaultTargetMinutes(x.Priority);
             var breached = elapsed is { } e && e > target;
             return new WorklistItem(
                 IntakeId: x.Id,
@@ -126,15 +129,8 @@ public sealed class GetWorklistHandler(
                 ExamLoincCode: x.ExamLoincCode,
                 HasResults: !string.IsNullOrWhiteSpace(x.ReportFhirId),
                 Stage: WorklistStages.Of(x),
-                Requisition: x.Requisition);
+                Requisition: x.Requisition,
+                TatClosed: LabTat.ReleasedAt(x) is not null);
         }).ToList();
     }
-
-    private static int DefaultTargetMinutes(LabRequestPriority priority) => priority switch
-    {
-        LabRequestPriority.Stat => 30,
-        LabRequestPriority.Asap => 45,
-        LabRequestPriority.Urgent => 45,
-        _ => 60,
-    };
 }
